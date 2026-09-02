@@ -97,6 +97,7 @@ function renderStopRow(
   up.type = 'button';
   up.textContent = '↑';
   up.dataset.testid = 'move-up';
+  up.dataset.id = patient.id;
   up.disabled = index === 0;
   up.setAttribute('aria-label', `${patient.name} を上へ`);
   up.addEventListener('click', () => handlers.onMove(patient.id, -1));
@@ -105,6 +106,7 @@ function renderStopRow(
   down.type = 'button';
   down.textContent = '↓';
   down.dataset.testid = 'move-down';
+  down.dataset.id = patient.id;
   down.disabled = index === total - 1;
   down.setAttribute('aria-label', `${patient.name} を下へ`);
   down.addEventListener('click', () => handlers.onMove(patient.id, 1));
@@ -124,6 +126,7 @@ function renderOpenButton(
   button.type = 'button';
   button.className = 'primary open-route';
   button.dataset.testid = 'open-route';
+  button.dataset.id = String(index);
 
   const opened = openedRouteIndexes.has(index) ? '✓ ' : '';
   const names = route.map((patient) => patient.name).join(' → ');

@@ -100,6 +100,7 @@ function renderRow(patient: Patient, state: AppState, handlers: PatientListHandl
 
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
+  checkbox.dataset.testid = 'patient-checkbox';
   checkbox.dataset.id = patient.id;
   checkbox.checked = state.selectedIds.includes(patient.id);
   checkbox.disabled = !checkbox.checked && state.selectedIds.length >= MAX_SELECTION;

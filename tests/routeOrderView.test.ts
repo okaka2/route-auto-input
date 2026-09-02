@@ -57,6 +57,17 @@ describe('renderRouteOrder', () => {
     expect(spies.onMove).toHaveBeenCalledWith(state.selectedIds[1], -1);
   });
 
+  it('↑↓ボタンはその行の患者idをdata-idに持つ(フォーカス復元用)', () => {
+    const state = stateWithSelection(3);
+    const element = renderRouteOrder(state, new Set(), handlers());
+    const ups = element.querySelectorAll<HTMLButtonElement>('[data-testid="move-up"]');
+    const downs = element.querySelectorAll<HTMLButtonElement>('[data-testid="move-down"]');
+    state.selectedIds.forEach((id, i) => {
+      expect(ups[i]?.dataset.id).toBe(id);
+      expect(downs[i]?.dataset.id).toBe(id);
+    });
+  });
+
   it('上限以内ならルートを開くボタンは1つ', () => {
     const element = renderRouteOrder(stateWithSelection(5), new Set(), handlers());
     expect(openButtons(element)).toHaveLength(1);
@@ -86,6 +97,14 @@ describe('renderRouteOrder', () => {
     const element = renderRouteOrder(stateWithSelection(10), new Set([0]), handlers());
     expect(openButtons(element)[0]?.textContent).toContain('✓');
     expect(openButtons(element)[1]?.textContent).not.toContain('✓');
+  });
+
+  it('ルートを開くボタンはインデックスをdata-idに持つ(フォーカス復元用)', () => {
+    const element = renderRouteOrder(stateWithSelection(10), new Set(), handlers());
+    const buttons = openButtons(element);
+    buttons.forEach((button, i) => {
+      expect(button.dataset.id).toBe(String(i));
+    });
   });
 
   it('同じ住所が複数あれば警告を出す', () => {

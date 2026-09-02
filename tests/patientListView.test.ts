@@ -136,6 +136,13 @@ describe('renderPatientList', () => {
     expect(element.querySelector('.message')?.textContent).toBe('保存できませんでした。');
   });
 
+  it('チェックボックスはdata-testidとdata-idの両方を持つ(フォーカス復元用)', () => {
+    const patients = makePatients(1);
+    const element = renderPatientList(createInitialState(patients), noopHandlers());
+    const checkbox = element.querySelector<HTMLInputElement>(`input[data-id="${patients[0]!.id}"]`);
+    expect(checkbox?.dataset.testid).toBe('patient-checkbox');
+  });
+
   it('チェックボックスに患者名のラベルを付ける', () => {
     const patients = makePatients(1);
     const element = renderPatientList(createInitialState(patients), noopHandlers());

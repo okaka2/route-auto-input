@@ -189,6 +189,7 @@ function renderScreen(): HTMLElement {
 function render(): void {
   const active = document.activeElement;
   const testid = active instanceof HTMLElement ? active.dataset.testid : undefined;
+  const rowId = active instanceof HTMLElement ? active.dataset.id : undefined;
   const caret = active instanceof HTMLInputElement ? active.selectionStart : null;
 
   root!.replaceChildren(renderScreen());
@@ -196,7 +197,11 @@ function render(): void {
   if (testid === undefined) {
     return;
   }
-  const restored = root!.querySelector<HTMLElement>(`[data-testid="${testid}"]`);
+  const selector =
+    rowId === undefined
+      ? `[data-testid="${testid}"]`
+      : `[data-testid="${testid}"][data-id="${rowId}"]`;
+  const restored = root!.querySelector<HTMLElement>(selector);
   if (!restored) {
     return;
   }
