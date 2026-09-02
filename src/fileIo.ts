@@ -6,9 +6,14 @@ export function downloadTextFile(filename: string, text: string): void {
   anchor.href = url;
   anchor.download = filename;
   document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    // iOS Safari では click と同じタックで revoke するとダウンロードを
+    // 取りこぼすことがあるため、次のタックまで遅らせる。
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 }
 
 export function readTextFile(file: File): Promise<string> {
