@@ -147,4 +147,10 @@ describe('renderRouteOrder', () => {
     element.querySelector<HTMLButtonElement>('[data-testid="back-button"]')?.click();
     expect(spies.onBack).toHaveBeenCalled();
   });
+
+  it('メッセージ領域はVoiceOverに読み上げられるようrole=statusを持つ', () => {
+    const state = { ...stateWithSelection(2), message: { kind: 'error' as const, text: 'エラー' } };
+    const element = renderRouteOrder(state, new Set(), handlers());
+    expect(element.querySelector('.message')?.getAttribute('role')).toBe('status');
+  });
 });

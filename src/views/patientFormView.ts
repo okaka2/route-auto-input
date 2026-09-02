@@ -27,6 +27,7 @@ export function renderPatientForm(
   if (message) {
     const messageElement = document.createElement('p');
     messageElement.className = `message ${message.kind}`;
+    messageElement.setAttribute('role', 'status');
     messageElement.textContent = message.text;
     container.append(messageElement);
   }

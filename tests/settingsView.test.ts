@@ -66,4 +66,10 @@ describe('renderSettings', () => {
     const element = renderSettings(state, handlers());
     expect(element.querySelector('.message')?.textContent).toBe('2件を取り込みました。');
   });
+
+  it('メッセージ領域はVoiceOverに読み上げられるようrole=statusを持つ', () => {
+    const state = { ...createInitialState([]), message: { kind: 'info' as const, text: '2件を取り込みました。' } };
+    const element = renderSettings(state, handlers());
+    expect(element.querySelector('.message')?.getAttribute('role')).toBe('status');
+  });
 });

@@ -30,6 +30,7 @@ export function renderPatientList(state: AppState, handlers: PatientListHandlers
   if (state.message) {
     const message = document.createElement('p');
     message.className = `message ${state.message.kind}`;
+    message.setAttribute('role', 'status');
     message.textContent = state.message.text;
     container.append(message);
   }
