@@ -25,7 +25,9 @@ npm run icons      # assets/icon.svg から PWA アイコンを生成
 1. github.com で `route-auto-input` という名前のリポジトリを作る。
    **無料アカウントでGitHub Pagesを使うにはPublic(公開)にする必要がある。**
    公開されるのはアプリのコードだけで、患者データは含まれない。
-2. 手元のリポジトリを繋いで push する。
+2. GitHubのリポジトリ → Settings → Pages → Build and deployment → Source を
+   **GitHub Actions** に変更する(空のリポジトリでも設定できる)。
+3. 手元のリポジトリを繋いで push する。
 
    ```bash
    git branch -M main
@@ -33,9 +35,10 @@ npm run icons      # assets/icon.svg から PWA アイコンを生成
    git push -u origin main
    ```
 
-3. GitHubのリポジトリ → Settings → Pages → Build and deployment → Source を
-   **GitHub Actions** に変更する。
 4. Actions タブでデプロイの完了を待つ。
+   **手順2を先に済ませていても、初回の実行が失敗(赤いX)になることがある。**
+   その場合はActionsタブから失敗したワークフローを開き、「Re-run jobs」で
+   再実行すれば通常は成功する。
 5. `https://<GitHubユーザー名>.github.io/route-auto-input/` が公開URL。
 
 以降は `main` に push するたびに自動で公開される。
