@@ -40,7 +40,23 @@ export function renderPatientList(state: AppState, handlers: PatientListHandlers
   search.placeholder = '氏名・住所で検索';
   search.setAttribute('aria-label', '氏名・住所で検索');
   search.dataset.testid = 'search-input';
-  search.addEventListener('input', () => handlers.onSearch(search.value));
+  // IME変換中に画面全体を再描画すると入力欄が作り直され、変換セッションが
+  // 壊れる(Safariは変換中もinputを発火するため)。変換が終わるまでは
+  // onSearchを呼ばず、compositionendで確定した文字列を渡す。
+  let isComposing = false;
+  search.addEventListener('compositionstart', () => {
+    isComposing = true;
+  });
+  search.addEventListener('compositionend', () => {
+    isComposing = false;
+    handlers.onSearch(search.value);
+  });
+  search.addEventListener('input', () => {
+    if (isComposing) {
+      return;
+    }
+    handlers.onSearch(search.value);
+  });
   container.append(search);
 
   const newButton = document.createElement('button');

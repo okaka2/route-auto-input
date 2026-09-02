@@ -136,6 +136,43 @@ describe('renderPatientList', () => {
     expect(element.querySelector('.message')?.textContent).toBe('保存できませんでした。');
   });
 
+  it('メッセージ領域はVoiceOverに読み上げられるようrole=statusを持つ', () => {
+    const state = { ...createInitialState([]), message: { kind: 'error' as const, text: '保存できませんでした。' } };
+    const element = renderPatientList(state, noopHandlers());
+    expect(element.querySelector('.message')?.getAttribute('role')).toBe('status');
+  });
+
+  it('IME変換中はonSearchを呼ばない', () => {
+    const handlers = noopHandlers();
+    const element = renderPatientList(createInitialState([]), handlers);
+    const search = element.querySelector<HTMLInputElement>('[data-testid="search-input"]')!;
+    search.dispatchEvent(new Event('compositionstart'));
+    search.value = 'やま';
+    search.dispatchEvent(new Event('input'));
+    expect(handlers.onSearch).not.toHaveBeenCalled();
+  });
+
+  it('IME変換が確定(compositionend)すると確定した文字列でonSearchが呼ばれる', () => {
+    const handlers = noopHandlers();
+    const element = renderPatientList(createInitialState([]), handlers);
+    const search = element.querySelector<HTMLInputElement>('[data-testid="search-input"]')!;
+    search.dispatchEvent(new Event('compositionstart'));
+    search.value = 'やまだ';
+    search.dispatchEvent(new Event('input'));
+    search.dispatchEvent(new Event('compositionend'));
+    expect(handlers.onSearch).toHaveBeenCalledWith('やまだ');
+    expect(handlers.onSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it('IME変換を伴わない入力ではinputのたびにonSearchが呼ばれる', () => {
+    const handlers = noopHandlers();
+    const element = renderPatientList(createInitialState([]), handlers);
+    const search = element.querySelector<HTMLInputElement>('[data-testid="search-input"]')!;
+    search.value = 'a';
+    search.dispatchEvent(new Event('input'));
+    expect(handlers.onSearch).toHaveBeenCalledWith('a');
+  });
+
   it('チェックボックスはdata-testidとdata-idの両方を持つ(フォーカス復元用)', () => {
     const patients = makePatients(1);
     const element = renderPatientList(createInitialState(patients), noopHandlers());
