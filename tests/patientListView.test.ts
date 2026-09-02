@@ -53,8 +53,14 @@ describe('renderPatientList', () => {
     const patients = makePatients(1);
     const handlers = noopHandlers();
     const element = renderPatientList(createInitialState(patients), handlers);
-    element.querySelector<HTMLInputElement>(`input[data-id="${patients[0]!.id}"]`)?.click();
-    expect(handlers.onToggleSelect).toHaveBeenCalledWith(patients[0]!.id);
+    // change イベントは要素がdocumentに接続されていないと発火しないため、一時的に接続する。
+    document.body.append(element);
+    try {
+      element.querySelector<HTMLInputElement>(`input[data-id="${patients[0]!.id}"]`)?.click();
+      expect(handlers.onToggleSelect).toHaveBeenCalledWith(patients[0]!.id);
+    } finally {
+      element.remove();
+    }
   });
 
   it('上限まで選ぶと、未選択のチェックボックスが押せなくなる', () => {

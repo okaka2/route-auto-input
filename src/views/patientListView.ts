@@ -104,7 +104,7 @@ function renderRow(patient: Patient, state: AppState, handlers: PatientListHandl
   checkbox.checked = state.selectedIds.includes(patient.id);
   checkbox.disabled = !checkbox.checked && state.selectedIds.length >= MAX_SELECTION;
   checkbox.setAttribute('aria-label', `${patient.name} を選択`);
-  checkbox.addEventListener('click', () => handlers.onToggleSelect(patient.id));
+  checkbox.addEventListener('change', () => handlers.onToggleSelect(patient.id));
 
   const body = document.createElement('div');
   body.className = 'patient-body';
