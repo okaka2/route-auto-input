@@ -58,6 +58,12 @@ describe('renderPatientForm', () => {
     expect(url.searchParams.get('query')).toBe('東京都千代田区1-1');
   });
 
+  it('地図確認リンクにタップ領域確保用のクラスがつく', () => {
+    const element = renderPatientForm(null, null, handlers());
+    const link = element.querySelector<HTMLAnchorElement>('[data-testid="map-check-link"]')!;
+    expect(link.classList.contains('map-check')).toBe(true);
+  });
+
   it('メッセージがあれば表示する', () => {
     const element = renderPatientForm(null, { kind: 'error', text: '氏名を入力してください。' }, handlers());
     expect(element.querySelector('.message')?.textContent).toBe('氏名を入力してください。');

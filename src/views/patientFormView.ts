@@ -47,6 +47,7 @@ export function renderPatientForm(
   mapLink.target = '_blank';
   mapLink.rel = 'noreferrer';
   mapLink.dataset.testid = 'map-check-link';
+  mapLink.className = 'map-check';
 
   const updateMapLink = (): void => {
     const address = addressInput.value.trim();

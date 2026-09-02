@@ -157,3 +157,9 @@ a.disabled {
   pointer-events: none;
   text-decoration: none;
 }
+
+.map-check {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+}
