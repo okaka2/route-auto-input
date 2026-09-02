@@ -2,3 +2,7 @@ node_modules/
 dist/
 dev-dist/
 *.local
+
+# エクスポートした患者データのバックアップ(設定画面から書き出したファイル)。
+# リポジトリはPublicにする運用のため、誤って取り込むと患者情報の公開になる。
+route-auto-input-*.json
