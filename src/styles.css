@@ -196,3 +196,17 @@ a.disabled {
   text-align: left;
   padding: 0.5rem 1rem;
 }
+
+.modes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.modes label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap-min);
+}
