@@ -1064,7 +1064,7 @@ git commit -m "feat: バックアップJSONの書き出しと読み込みを追�
   - `deletePatient(id: string): Promise<void>`
   - `replaceAllPatients(patients: readonly Patient[]): Promise<void>`
   - `mergePatients(patients: readonly Patient[]): Promise<void>`
-  - `closeDbForTest(): void`
+  - `closeDbForTest(): Promise<void>`
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -1072,14 +1072,16 @@ git commit -m "feat: バックアップJSONの書き出しと読み込みを追�
 
 ```ts
 import 'fake-indexeddb/auto';
+import { deleteDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { closeDbForTest, deletePatient, listPatients, mergePatients, replaceAllPatients, savePatient } from '../src/db';
 import { createPatient, updatePatientFields } from '../src/patient';
 
+// 接続を閉じてから消す。開いたままだと deleteDB がブロックされ、
+// 前のテストのデータが次のテストへ漏れる。
 beforeEach(async () => {
-  closeDbForTest();
-  indexedDB.deleteDatabase('route-auto-input');
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await closeDbForTest();
+  await deleteDB('route-auto-input');
 });
 
 describe('患者の保存と取得', () => {
@@ -1180,8 +1182,16 @@ function getDb(): Promise<IDBPDatabase<RouteAutoInputDB>> {
   return connection;
 }
 
-/** テストでデータベースを作り直すために接続を捨てる。 */
-export function closeDbForTest(): void {
+/**
+ * テストでデータベースを作り直すために接続を閉じる。
+ * 接続を開いたままにすると deleteDB がブロックされるため、必ず close する。
+ */
+export async function closeDbForTest(): Promise<void> {
+  if (connection === null) {
+    return;
+  }
+  const db = await connection;
+  db.close();
   connection = null;
 }
 
