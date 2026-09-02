@@ -1,13 +1,20 @@
 import { buildGoogleMapsUrl } from '../googleMapsUrl';
 import type { Message, Patient } from '../types';
 
+export type PatientFormDraft = { name: string; address: string };
+
 export type PatientFormHandlers = {
   onSave(name: string, address: string): void;
   onCancel(): void;
 };
 
+/**
+ * `draft` は保存に失敗した直後の入力値。渡された場合は `patient` の値より
+ * 優先して表示し、入力内容を画面に残す(spec §8)。
+ */
 export function renderPatientForm(
   patient: Patient | null,
+  draft: PatientFormDraft | null,
   message: Message | null,
   handlers: PatientFormHandlers,
 ): HTMLElement {
@@ -29,7 +36,7 @@ export function renderPatientForm(
   nameField.textContent = '氏名';
   const nameInput = document.createElement('input');
   nameInput.type = 'text';
-  nameInput.value = patient?.name ?? '';
+  nameInput.value = draft?.name ?? patient?.name ?? '';
   nameInput.dataset.testid = 'name-input';
   nameField.append(nameInput);
 
@@ -38,7 +45,7 @@ export function renderPatientForm(
   addressField.textContent = '住所';
   const addressInput = document.createElement('input');
   addressInput.type = 'text';
-  addressInput.value = patient?.address ?? '';
+  addressInput.value = draft?.address ?? patient?.address ?? '';
   addressInput.dataset.testid = 'address-input';
   addressField.append(addressInput);
 

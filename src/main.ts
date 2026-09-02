@@ -7,6 +7,7 @@ import { buildGoogleMapsUrl } from './googleMapsUrl';
 import { openUrl } from './openRoute';
 import { createPatient, updatePatientFields } from './patient';
 import { splitIntoRoutes } from './routeSplitter';
+import { clearSession, loadSession, saveSession } from './session';
 import {
   createInitialState,
   moveSelected,
@@ -19,7 +20,7 @@ import {
 } from './state';
 import type { AppState, Message, Patient } from './types';
 import { validatePatientInput, validateSelection } from './validation';
-import { renderPatientForm } from './views/patientFormView';
+import { renderPatientForm, type PatientFormDraft } from './views/patientFormView';
 import { renderPatientList } from './views/patientListView';
 import { renderRouteOrder } from './views/routeOrderView';
 import { renderSettings } from './views/settingsView';
@@ -29,12 +30,37 @@ if (!root) {
   throw new Error('#app が見つかりません。');
 }
 
-let state: AppState = createInitialState([]);
-const openedRouteIndexes = new Set<number>();
+// Googleマップへ遷移して戻ってきたときのために、選択・訪問順・開いたルートを
+// localStorageから復元する(Ruling 7)。復元できた場合は訪問順の画面から始める。
+const restoredSession = loadSession();
+let state: AppState = restoredSession
+  ? { ...createInitialState([]), selectedIds: restoredSession.selectedIds, screen: { name: 'order' } }
+  : createInitialState([]);
+const openedRouteIndexes = new Set<number>(restoredSession?.openedRouteIndexes ?? []);
+
+// 保存に失敗した直後の入力値。入力内容を画面に残すため(spec §8)、
+// openedRouteIndexesと同様にAppStateの外で保持する。
+let formDraft: PatientFormDraft | null = null;
+
+// 保存/削除の二重実行防止(ボタンを連打してもDBへ二重に書き込まない)。
+let savingPatient = false;
+const deletingPatientIds = new Set<string>();
 
 function setState(next: AppState): void {
   state = next;
   render();
+}
+
+function syncSession(): void {
+  if (state.selectedIds.length === 0) {
+    clearSession();
+    return;
+  }
+  saveSession({
+    selectedIds: state.selectedIds,
+    openedRouteIndexes: [...openedRouteIndexes],
+    timestamp: new Date().toISOString(),
+  });
 }
 
 async function reloadPatients(message: Message | null = null): Promise<void> {
@@ -56,24 +82,38 @@ function currentEditingPatient(): Patient | null {
 }
 
 async function handleSave(name: string, address: string): Promise<void> {
+  if (savingPatient) {
+    // 保存中の二重タップ。何もしない(2件目のUUIDが発行されるのを防ぐ)。
+    return;
+  }
   const validation = validatePatientInput(name, address);
   if (!validation.ok) {
+    formDraft = { name, address };
     setState(withMessage(state, { kind: 'error', text: validation.message }));
     return;
   }
+  savingPatient = true;
   try {
     const existing = currentEditingPatient();
     const patient =
       existing === null ? createPatient(name, address) : updatePatientFields(existing, name, address);
     await savePatient(patient);
+    formDraft = null;
     setState(withScreen(state, { name: 'list' }));
     await reloadPatients({ kind: 'info', text: '保存しました。' });
   } catch {
+    formDraft = { name, address };
     setState(withMessage(state, { kind: 'error', text: 'データを保存できませんでした。' }));
+  } finally {
+    savingPatient = false;
   }
 }
 
 async function handleDelete(id: string): Promise<void> {
+  if (deletingPatientIds.has(id)) {
+    // 削除中の二重タップ。何もしない。
+    return;
+  }
   const patient = state.patients.find((item) => item.id === id);
   if (!patient) {
     return;
@@ -81,11 +121,14 @@ async function handleDelete(id: string): Promise<void> {
   if (!window.confirm(`${patient.name} を削除します。よろしいですか?`)) {
     return;
   }
+  deletingPatientIds.add(id);
   try {
     await deletePatient(id);
     await reloadPatients({ kind: 'info', text: '削除しました。' });
   } catch {
     setState(withMessage(state, { kind: 'error', text: 'データを削除できませんでした。' }));
+  } finally {
+    deletingPatientIds.delete(id);
   }
 }
 
@@ -101,7 +144,8 @@ function handleOpenRoute(routeIndex: number): void {
     render();
     openUrl(url);
   } catch (error) {
-    setState(withMessage(state, { kind: 'error', text: (error as Error).message }));
+    const message = error instanceof Error ? error.message : '地図を開けませんでした。';
+    setState(withMessage(state, { kind: 'error', text: message }));
   }
 }
 
@@ -132,7 +176,8 @@ async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void
     }
     await reloadPatients({ kind: 'info', text: `${patients.length}件を取り込みました。` });
   } catch (error) {
-    setState(withMessage(state, { kind: 'error', text: (error as Error).message }));
+    const message = error instanceof Error ? error.message : 'データを取り込めませんでした。';
+    setState(withMessage(state, { kind: 'error', text: message }));
   }
 }
 
@@ -142,8 +187,14 @@ function renderScreen(): HTMLElement {
       return renderPatientList(state, {
         onSearch: (query) => setState(setSearchQuery(state, query)),
         onToggleSelect: (id) => setState(toggleSelection(state, id)),
-        onNew: () => setState(withScreen(state, { name: 'form', patientId: null })),
-        onEdit: (id) => setState(withScreen(state, { name: 'form', patientId: id })),
+        onNew: () => {
+          formDraft = null;
+          setState(withScreen(state, { name: 'form', patientId: null }));
+        },
+        onEdit: (id) => {
+          formDraft = null;
+          setState(withScreen(state, { name: 'form', patientId: id }));
+        },
         onDelete: (id) => {
           void handleDelete(id);
         },
@@ -159,11 +210,14 @@ function renderScreen(): HTMLElement {
         onOpenSettings: () => setState(withScreen(state, { name: 'settings' })),
       });
     case 'form':
-      return renderPatientForm(currentEditingPatient(), state.message, {
+      return renderPatientForm(currentEditingPatient(), formDraft, state.message, {
         onSave: (name, address) => {
           void handleSave(name, address);
         },
-        onCancel: () => setState(withScreen(state, { name: 'list' })),
+        onCancel: () => {
+          formDraft = null;
+          setState(withScreen(state, { name: 'list' }));
+        },
       });
     case 'order':
       return renderRouteOrder(state, openedRouteIndexes, {
@@ -193,6 +247,7 @@ function render(): void {
   const caret = active instanceof HTMLInputElement ? active.selectionStart : null;
 
   root!.replaceChildren(renderScreen());
+  syncSession();
 
   if (testid === undefined) {
     return;
