@@ -3,7 +3,7 @@ import { parseBackup, serializeBackup } from './backup';
 import { MAX_STOPS_PER_ROUTE } from './config';
 import { deletePatient, listPatients, mergePatients, replaceAllPatients, savePatient } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
-import { buildGoogleMapsUrl } from './googleMapsUrl';
+import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
 import { createPatient, updatePatientFields } from './patient';
 import { splitIntoRoutes } from './routeSplitter';
@@ -147,7 +147,7 @@ function handleOpenRoute(routeIndex: number): void {
     return;
   }
   try {
-    const url = buildGoogleMapsUrl(route.map((patient) => patient.address));
+    const url = DEFAULT_MAP_PROVIDER.buildUrl(route.map((patient) => patient.address));
     openedRouteIndexes.add(routeIndex);
     render();
     openUrl(url);
