@@ -13,4 +13,13 @@ describe('index.html', () => {
     const robots = doc.querySelector('meta[name="robots"]');
     expect(robots?.getAttribute('content')).toContain('nofollow');
   });
+
+  it('タイトルは APP_NAME に置き換わるプレースホルダーで、名前を直接書かない', () => {
+    expect(doc.querySelector('title')?.textContent).toBe('%APP_NAME%');
+  });
+
+  it('ホーム画面用の名前も、同じプレースホルダーにする', () => {
+    const title = doc.querySelector('meta[name="apple-mobile-web-app-title"]');
+    expect(title?.getAttribute('content')).toBe('%APP_NAME%');
+  });
 });
