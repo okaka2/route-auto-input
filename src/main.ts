@@ -36,7 +36,10 @@ const restoredSession = loadSession();
 let state: AppState = restoredSession
   ? { ...createInitialState([]), selectedIds: restoredSession.selectedIds, screen: { name: 'order' } }
   : createInitialState([]);
-const openedRouteIndexes = new Set<number>(restoredSession?.openedRouteIndexes ?? []);
+// 開いたルートの番号と、開いた日時(ISO 8601。日時が分からない古い記録から復元したものは '')。
+const openedRoutes = new Map<number, string>(
+  (restoredSession?.opened ?? []).map((route) => [route.index, route.at] as const),
+);
 
 // 保存に失敗した直後の入力値。入力内容を画面に残すため(spec §8)、
 // openedRouteIndexesと同様にAppStateの外で保持する。
@@ -58,7 +61,7 @@ function syncSession(): void {
   }
   saveSession({
     selectedIds: state.selectedIds,
-    openedRouteIndexes: [...openedRouteIndexes],
+    opened: [...openedRoutes].map(([index, at]) => ({ index, at })),
     timestamp: new Date().toISOString(),
   });
 }
@@ -148,7 +151,7 @@ function handleOpenRoute(routeIndex: number): void {
   }
   try {
     const url = DEFAULT_MAP_PROVIDER.buildUrl(route.map((patient) => patient.address));
-    openedRouteIndexes.add(routeIndex);
+    openedRoutes.set(routeIndex, new Date().toISOString());
     render();
     openUrl(url);
   } catch (error) {
@@ -212,7 +215,7 @@ function renderScreen(): HTMLElement {
             setState(withMessage(state, { kind: 'error', text: validation.message }));
             return;
           }
-          openedRouteIndexes.clear();
+          openedRoutes.clear();
           setState(withScreen(state, { name: 'order' }));
         },
         onOpenSettings: () => setState(withScreen(state, { name: 'settings' })),
@@ -228,7 +231,7 @@ function renderScreen(): HTMLElement {
         },
       });
     case 'order':
-      return renderRouteOrder(state, openedRouteIndexes, {
+      return renderRouteOrder(state, new Set(openedRoutes.keys()), {
         onMove: (id, direction) => setState(moveSelected(state, id, direction)),
         onOpenRoute: handleOpenRoute,
         onBack: () => setState(withScreen(state, { name: 'list' })),

@@ -143,7 +143,7 @@ describe('セッションの永続化(#1)', () => {
     expect(raw).not.toBeNull();
     const record = JSON.parse(raw!);
     expect(record.selectedIds).toEqual([patientA.id, patientB.id]);
-    expect(record.openedRouteIndexes).toEqual([0]);
+    expect(record.opened).toEqual([{ index: 0, at: expect.any(String) }]);
     // 氏名・住所は書き込まれない
     expect(raw).not.toContain('患者A');
     expect(raw).not.toContain('東京都');
