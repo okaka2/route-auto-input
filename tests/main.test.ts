@@ -312,3 +312,17 @@ describe('インポートの確認(cancel/confirm)', () => {
     expect(rows()).toHaveLength(0);
   });
 });
+
+describe('起動直後の読み込み', () => {
+  it('読み込みが終わっても、操作の結果として表示中のメッセージを消さない', async () => {
+    await import('../src/main');
+    // 起動直後のDB読み込みは、まだ終わっていない。この間に、すぐエラーが出る操作をする。
+    el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+    el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
+    expect(el('.message')?.textContent).toContain('氏名を入力してください');
+
+    // 読み込みが終わるのを待つ(fake-indexeddb は数ミリ秒で終わる)。
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(el('.message')?.textContent).toContain('氏名を入力してください');
+  });
+});

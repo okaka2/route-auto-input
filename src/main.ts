@@ -63,10 +63,18 @@ function syncSession(): void {
   });
 }
 
-async function reloadPatients(message: Message | null = null): Promise<void> {
+/**
+ * DBから患者を読み直す。message を渡したときだけ、表示中のメッセージを差し替える。
+ * 省略したとき(起動直後の読み込みなど)は今のメッセージを保つ。保たないと、読み込みが
+ * 終わった瞬間に、操作の結果として出たばかりのエラーや案内を消してしまう。
+ */
+async function reloadPatients(message?: Message): Promise<void> {
   try {
     const patients = await listPatients();
-    setState({ ...withPatients(state, patients), message });
+    setState({
+      ...withPatients(state, patients),
+      ...(message === undefined ? {} : { message }),
+    });
   } catch {
     setState(withMessage(state, { kind: 'error', text: 'データを読み込めませんでした。' }));
   }
