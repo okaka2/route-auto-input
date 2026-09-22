@@ -79,7 +79,7 @@ const openedRoutes = new Map<number, string>(
 );
 
 // 保存に失敗した直後の入力値。入力内容を画面に残すため(spec §8)、
-// openedRouteIndexesと同様にAppStateの外で保持する。
+// openedRoutesと同様にAppStateの外で保持する。
 let formDraft: PatientFormDraft | null = null;
 
 // 保存/削除の二重実行防止(ボタンを連打してもDBへ二重に書き込まない)。
@@ -114,8 +114,15 @@ function syncSession(): void {
 async function reloadPatients(message?: Message): Promise<void> {
   try {
     const patients = await listPatients();
+    const next = withPatients(state, patients);
+    // withPatients は selectedIds を filter するだけで、要素を足したり並べ替えたりはしない。
+    // よって長さが減っていれば、選択していた訪問先のどれかが読み直しで消えたということ。
+    // そのルートの内容はもう変わっているので、開いた印は古くなる前に消す。
+    if (next.selectedIds.length !== state.selectedIds.length) {
+      openedRoutes.clear();
+    }
     setState({
-      ...withPatients(state, patients),
+      ...next,
       ...(message === undefined ? {} : { message }),
     });
   } catch {
@@ -148,6 +155,11 @@ async function handleSave(name: string, address: string): Promise<void> {
     const existing = currentEditingPatient();
     const patient =
       existing === null ? createPatient(name, address) : updatePatientFields(existing, name, address);
+    if (existing !== null && state.selectedIds.includes(existing.id)) {
+      // 選択中(=ルートに入っている)訪問先の編集。住所が変わったかもしれないので、
+      // そのルートについて開いた印は古くなる前に消す。
+      openedRoutes.clear();
+    }
     await savePatient(patient);
     formDraft = null;
     setState(withScreen(state, { name: 'list' }));

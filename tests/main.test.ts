@@ -331,6 +331,43 @@ describe('開いたルートの印(#6)', () => {
 
     expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
   });
+
+  it('選択中の別の訪問先を削除すると、開いたルートの印が消える', async () => {
+    const { ids } = await openFirstRoute(2);
+
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 地図 → 訪問順
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 訪問順 → 一覧
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${ids[1]}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-delete"]')!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-confirm-delete"]')!.click();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    confirmSpy.mockRestore();
+
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+
+    expect(el('[data-testid="route-status"]')).toBeNull();
+  });
+
+  it('選択中の訪問先の住所を編集すると、開いたルートの印が消える', async () => {
+    const { ids } = await openFirstRoute(2);
+
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 地図 → 訪問順
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 訪問順 → 一覧
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${ids[0]}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-edit"]')!.click();
+    el<HTMLInputElement>('[data-testid="address-input"]')!.value = '東京都千代田区9-9';
+    el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('保存しました'));
+
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+
+    expect(el('[data-testid="route-status"]')).toBeNull();
+  });
 });
 
 describe('インポートの確認(cancel/confirm)', () => {
@@ -489,7 +526,10 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
     const { createPatient } = await import('../src/patient');
     const ids: string[] = [];
     for (let i = 1; i <= count; i += 1) {
-      const patient = createPatient(`場所${i}`, `東京都千代田区${i}-1`);
+      // 作成日時をミリ秒未満の粒度でも必ず増える値にする。createdAt が同じミリ秒になると、
+      // listPatients() の並び順(createdAt降順、同値はUUID順にフォールバック)が不定になり、
+      // 表示順を検証するテストが fake-indexeddb 上でまれに揺れるため。
+      const patient = createPatient(`場所${i}`, `東京都千代田区${i}-1`, new Date(2026, 0, 1, 0, 0, i));
       await savePatient(patient);
       ids.push(patient.id);
     }
