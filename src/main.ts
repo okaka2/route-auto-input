@@ -1,7 +1,7 @@
 import './styles.css';
 import { parseBackup, serializeBackup } from './backup';
 import { MAX_STOPS_PER_ROUTE } from './config';
-import { deletePatient, listPatients, mergePatients, replaceAllPatients, savePatient } from './db';
+import { deletePatient, deletePatients, listPatients, mergePatients, replaceAllPatients, savePatient } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
 import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
@@ -9,20 +9,25 @@ import { createPatient, updatePatientFields } from './patient';
 import { splitIntoRoutes } from './routeSplitter';
 import { clearSession, loadSession, saveSession } from './session';
 import {
+  clearSelection,
   closeDialog,
   createInitialState,
   hasSelection,
   moveSelected,
   openDeleteConfirm,
+  openDeleteSelectedConfirm,
   openRowMenu,
+  selectAllVisible,
   selectedPatients,
   setSearchQuery,
+  setSortOrder,
   toggleSelection,
+  visiblePatients,
   withMessage,
   withPatients,
   withScreen,
 } from './state';
-import type { AppState, Message, Patient } from './types';
+import type { AppState, Message, Patient, SortOrder } from './types';
 import { validatePatientInput, validateSelection } from './validation';
 import { renderDialog } from './views/dialogs';
 import { renderPatientForm, type PatientFormDraft } from './views/patientFormView';
@@ -85,6 +90,7 @@ let formDraft: PatientFormDraft | null = null;
 // 保存/削除の二重実行防止(ボタンを連打してもDBへ二重に書き込まない)。
 let savingPatient = false;
 const deletingPatientIds = new Set<string>();
+let deletingSelected = false;
 
 // 「⋯」から開いたダイアログを、編集・複製・削除以外で閉じたとき、フォーカスを戻す行のid。
 let dialogReturnId: string | null = null;
@@ -192,6 +198,44 @@ async function handleDelete(id: string): Promise<void> {
     setState(withMessage(state, { kind: 'error', text: 'データを削除できませんでした。' }));
   } finally {
     deletingPatientIds.delete(id);
+  }
+}
+
+function handleSortChange(order: SortOrder): void {
+  setState(setSortOrder(state, order));
+}
+
+/** 一覧の「全選択」/「全解除」。今どちらの表示かは選択の内容から決まるので、ここでも同じ判定をする。 */
+function handleToggleSelectAll(): void {
+  const visible = visiblePatients(state);
+  const allSelected = visible.length > 0 && visible.every((patient) => state.selectedIds.includes(patient.id));
+  setState(allSelected ? clearSelection(state) : selectAllVisible(state));
+}
+
+/** 選択バーの「削除」。まだ削除しない(確認のダイアログへ進む)。 */
+function handleRequestDeleteSelected(): void {
+  setState(openDeleteSelectedConfirm(state));
+}
+
+async function handleConfirmDeleteSelected(): Promise<void> {
+  if (deletingSelected) {
+    // 削除中の二重タップ。何もしない。
+    return;
+  }
+  const ids = state.selectedIds;
+  if (ids.length === 0) {
+    closeAnyDialog();
+    return;
+  }
+  deletingSelected = true;
+  setState(closeDialog(state));
+  try {
+    await deletePatients(ids);
+    await reloadPatients({ kind: 'info', text: `${ids.length}件を削除しました。` });
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: 'データを削除できませんでした。' }));
+  } finally {
+    deletingSelected = false;
   }
 }
 
@@ -323,6 +367,8 @@ function renderScreen(): HTMLElement {
           }
           setState(next);
         },
+        onSortChange: handleSortChange,
+        onToggleSelectAll: handleToggleSelectAll,
         onNew: () => {
           formDraft = null;
           setState(withScreen(state, { name: 'form', patientId: null }));
@@ -380,7 +426,12 @@ function renderApp(): HTMLElement {
   const step = currentStep();
   if (step !== null) {
     const selectionBar =
-      step === 'list' ? renderSelectionBar(state.selectedIds.length, { onNext: handleNext }) : null;
+      step === 'list'
+        ? renderSelectionBar(state.selectedIds.length, {
+            onNext: handleNext,
+            onDeleteSelected: handleRequestDeleteSelected,
+          })
+        : null;
     // 固定バーに、内容の最後が隠れないよう、余白を取るクラスを付ける。
     shell.classList.add(selectionBar ? 'with-selection' : 'with-tabbar');
 
@@ -399,6 +450,9 @@ function renderApp(): HTMLElement {
     onRequestDelete: (id) => setState(openDeleteConfirm(state, id)),
     onConfirmDelete: (id) => {
       void handleDelete(id);
+    },
+    onConfirmDeleteSelected: () => {
+      void handleConfirmDeleteSelected();
     },
     onClose: closeAnyDialog,
   });

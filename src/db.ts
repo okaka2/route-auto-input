@@ -55,6 +55,16 @@ export async function deletePatient(id: string): Promise<void> {
   await db.delete(STORE, id);
 }
 
+/** 複数件まとめて削除する。 */
+export async function deletePatients(ids: readonly string[]): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(STORE, 'readwrite');
+  for (const id of ids) {
+    await tx.store.delete(id);
+  }
+  await tx.done;
+}
+
 /** 既存データを全消去してから入れ替える。 */
 export async function replaceAllPatients(patients: readonly Patient[]): Promise<void> {
   const db = await getDb();

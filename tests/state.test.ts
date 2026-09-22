@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { MAX_SELECTION } from '../src/config';
 import { createPatient } from '../src/patient';
 import {
+  clearSelection,
   closeDialog,
   createInitialState,
   hasSelection,
   moveSelected,
   openDeleteConfirm,
+  openDeleteSelectedConfirm,
   openRowMenu,
+  selectAllVisible,
   selectedPatients,
   setSearchQuery,
+  setSortOrder,
   toggleSelection,
   visiblePatients,
   withMessage,
@@ -28,6 +32,10 @@ describe('createInitialState', () => {
     expect(state.selectedIds).toEqual([]);
     expect(state.searchQuery).toBe('');
     expect(state.message).toBeNull();
+  });
+
+  it('並び順は登録順から始まる', () => {
+    expect(createInitialState([]).sortOrder).toBe('registered');
   });
 });
 
@@ -130,6 +138,69 @@ describe('visiblePatients', () => {
     const state = setSearchQuery(createInitialState(makePatients(3)), '  患者3  ');
     expect(visiblePatients(state)).toHaveLength(1);
   });
+
+  it('既定(登録順)は登録した順のまま', () => {
+    const patients = [createPatient('うえだ', 'い'), createPatient('あべ', 'う')];
+    const state = createInitialState(patients);
+    expect(visiblePatients(state).map((p) => p.name)).toEqual(['うえだ', 'あべ']);
+  });
+
+  it('名前順にすると、あいうえお順に並ぶ', () => {
+    const patients = [createPatient('うえだ', 'x'), createPatient('あべ', 'y'), createPatient('いとう', 'z')];
+    const state = setSortOrder(createInitialState(patients), 'name');
+    expect(visiblePatients(state).map((p) => p.name)).toEqual(['あべ', 'いとう', 'うえだ']);
+  });
+
+  it('住所順にすると、あいうえお順に並ぶ', () => {
+    const patients = [createPatient('a', 'うえだ町'), createPatient('b', 'あべ町'), createPatient('c', 'いとう町')];
+    const state = setSortOrder(createInitialState(patients), 'address');
+    expect(visiblePatients(state).map((p) => p.address)).toEqual(['あべ町', 'いとう町', 'うえだ町']);
+  });
+
+  it('並び替えても、検索の絞り込みは効いたまま', () => {
+    const patients = [createPatient('うえだ', '東京都'), createPatient('あべ', '大阪府')];
+    let state = createInitialState(patients);
+    state = setSortOrder(state, 'name');
+    state = setSearchQuery(state, '東京');
+    expect(visiblePatients(state).map((p) => p.name)).toEqual(['うえだ']);
+  });
+});
+
+describe('setSortOrder', () => {
+  it('並び順を変えられる', () => {
+    const state = setSortOrder(createInitialState([]), 'address');
+    expect(state.sortOrder).toBe('address');
+  });
+});
+
+describe('選択の一括操作', () => {
+  it('selectAllVisible: 表示中の訪問先をすべて選択する', () => {
+    const patients = makePatients(3);
+    const state = selectAllVisible(createInitialState(patients));
+    expect(state.selectedIds).toEqual(patients.map((p) => p.id));
+  });
+
+  it('selectAllVisible: 検索で絞り込んでいれば、その表示分だけ選ぶ', () => {
+    const patients = makePatients(3);
+    let state = setSearchQuery(createInitialState(patients), '患者2');
+    state = selectAllVisible(state);
+    expect(state.selectedIds).toEqual([patients[1]!.id]);
+  });
+
+  it('selectAllVisible: 上限(MAX_SELECTION)を超えていても、すべて選べる', () => {
+    const patients = makePatients(MAX_SELECTION + 3);
+    const state = selectAllVisible(createInitialState(patients));
+    expect(state.selectedIds).toHaveLength(MAX_SELECTION + 3);
+  });
+
+  it('clearSelection: 選択をすべて外す', () => {
+    const patients = makePatients(2);
+    let state = createInitialState(patients);
+    state = toggleSelection(state, patients[0]!.id);
+    state = toggleSelection(state, patients[1]!.id);
+    state = clearSelection(state);
+    expect(state.selectedIds).toEqual([]);
+  });
 });
 
 describe('selectedPatients', () => {
@@ -150,6 +221,25 @@ describe('withPatients', () => {
     state = toggleSelection(state, patients[1]!.id);
     const next = withPatients(state, [patients[1]!]);
     expect(next.selectedIds).toEqual([patients[1]!.id]);
+  });
+
+  it('一括削除の確認は、選択が1件でも残っていれば開いたまま', () => {
+    const patients = makePatients(3);
+    let state = createInitialState(patients);
+    state = toggleSelection(state, patients[0]!.id);
+    state = toggleSelection(state, patients[1]!.id);
+    state = openDeleteSelectedConfirm(state);
+    const next = withPatients(state, [patients[0]!, patients[2]!]);
+    expect(next.dialog).toEqual({ kind: 'confirmDeleteSelected' });
+  });
+
+  it('一括削除の確認は、選択が1件もなくなれば閉じる', () => {
+    const patients = makePatients(2);
+    let state = createInitialState(patients);
+    state = toggleSelection(state, patients[0]!.id);
+    state = openDeleteSelectedConfirm(state);
+    const next = withPatients(state, [patients[1]!]);
+    expect(next.dialog).toBeNull();
   });
 });
 
@@ -178,6 +268,11 @@ describe('ダイアログの状態', () => {
   it('削除の確認を開くと、その訪問先の確認になる', () => {
     const state = openDeleteConfirm(createInitialState(makePatients(2)), 'p1');
     expect(state.dialog).toEqual({ kind: 'confirmDelete', id: 'p1' });
+  });
+
+  it('選択した複数件の削除確認を開ける', () => {
+    const state = openDeleteSelectedConfirm(createInitialState(makePatients(2)));
+    expect(state.dialog).toEqual({ kind: 'confirmDeleteSelected' });
   });
 
   it('メニューから削除の確認へ切り替えられる', () => {

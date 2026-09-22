@@ -7,14 +7,18 @@ export type DialogHandlers = {
   onRequestDelete(id: string): void;
   /** 確認のダイアログで「削除」を押した。ここで初めて削除を実行する。 */
   onConfirmDelete(id: string): void;
+  /** 複数選択の一括削除の確認で「削除」を押した。対象はstate.selectedIds。 */
+  onConfirmDeleteSelected(): void;
   onClose(): void;
 };
 
 /**
- * 開いているダイアログを描画する。なければ(または対象の訪問先が見つからなければ)null。
+ * 開いているダイアログを描画する。なければ(または1件向けのダイアログで対象の訪問先が
+ * 見つからなければ)null。
  *
  * - 「⋯」メニュー: 編集 / 複製して登録 / 削除(赤) / キャンセル
  * - 削除の確認: 「この訪問先を削除しますか?」 [キャンセル] [削除(赤)]
+ * - 複数選択の一括削除の確認: 「選択した◯件を削除しますか?」 [キャンセル] [削除(赤)]
  *
  * フォーカスの移動(開いたら最初のボタン、閉じたら「⋯」へ戻す)と、Escキーで閉じる処理は、
  * 画面全体を描き直す main.ts の側で行う。ここではTabキーの巡回だけを面倒みる。
@@ -24,9 +28,16 @@ export function renderDialog(state: AppState, handlers: DialogHandlers): HTMLEle
   if (dialog === null) {
     return null;
   }
-  const patient = state.patients.find((item) => item.id === dialog.id);
-  if (patient === undefined) {
-    return null;
+
+  let content: HTMLElement[];
+  if (dialog.kind === 'confirmDeleteSelected') {
+    content = renderConfirmDeleteSelected(state.selectedIds.length, handlers);
+  } else {
+    const patient = state.patients.find((item) => item.id === dialog.id);
+    if (patient === undefined) {
+      return null;
+    }
+    content = dialog.kind === 'rowMenu' ? renderMenu(patient, handlers) : renderConfirmDelete(patient, handlers);
   }
 
   const overlay = document.createElement('div');
@@ -46,12 +57,7 @@ export function renderDialog(state: AppState, handlers: DialogHandlers): HTMLEle
   sheet.setAttribute('aria-modal', 'true');
   sheet.setAttribute('aria-labelledby', 'dialog-title');
   sheet.addEventListener('keydown', trapFocus);
-
-  if (dialog.kind === 'rowMenu') {
-    sheet.append(...renderMenu(patient, handlers));
-  } else {
-    sheet.append(...renderConfirmDelete(patient, handlers));
-  }
+  sheet.append(...content);
 
   overlay.append(sheet);
   return overlay;
@@ -102,6 +108,26 @@ function renderConfirmDelete(patient: Patient, handlers: DialogHandlers): HTMLEl
     actionButton('削除', 'dialog-confirm-delete', () => handlers.onConfirmDelete(patient.id), 'danger-fill'),
   );
   return [title, target, buttons];
+}
+
+function renderConfirmDeleteSelected(count: number, handlers: DialogHandlers): HTMLElement[] {
+  const title = document.createElement('h2');
+  title.id = 'dialog-title';
+  title.className = 'sheet-title';
+  title.textContent = `選択した${count}件を削除しますか?`;
+
+  const buttons = document.createElement('div');
+  buttons.className = 'sheet-buttons';
+  buttons.append(
+    actionButton('キャンセル', 'dialog-cancel', () => handlers.onClose()),
+    actionButton(
+      '削除',
+      'dialog-confirm-delete-selected',
+      () => handlers.onConfirmDeleteSelected(),
+      'danger-fill',
+    ),
+  );
+  return [title, buttons];
 }
 
 function actionButton(

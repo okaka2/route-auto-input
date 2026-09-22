@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPatient } from '../src/patient';
-import { closeDialog, createInitialState, openDeleteConfirm, openRowMenu } from '../src/state';
+import {
+  closeDialog,
+  createInitialState,
+  openDeleteConfirm,
+  openDeleteSelectedConfirm,
+  openRowMenu,
+  toggleSelection,
+} from '../src/state';
 import { renderDialog, type DialogHandlers } from '../src/views/dialogs';
 
 const handlers = (): DialogHandlers => ({
@@ -8,6 +15,7 @@ const handlers = (): DialogHandlers => ({
   onDuplicate: vi.fn(),
   onRequestDelete: vi.fn(),
   onConfirmDelete: vi.fn(),
+  onConfirmDeleteSelected: vi.fn(),
   onClose: vi.fn(),
 });
 
@@ -108,6 +116,41 @@ describe('renderDialog: 削除の確認', () => {
     button(open(spies), 'dialog-cancel').click();
     expect(spies.onClose).toHaveBeenCalledTimes(1);
     expect(spies.onConfirmDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderDialog: 複数選択の一括削除の確認', () => {
+  const stateWithTwoSelected = () => {
+    const patients = [createPatient('山田 太郎', '東京都'), createPatient('鈴木 花子', '大阪府')];
+    let state = createInitialState(patients);
+    state = toggleSelection(state, patients[0]!.id);
+    state = toggleSelection(state, patients[1]!.id);
+    return openDeleteSelectedConfirm(state);
+  };
+  const open = (spies = handlers()) => renderDialog(stateWithTwoSelected(), spies)!;
+
+  it('「選択した◯件を削除しますか?」と件数を出す', () => {
+    expect(open().querySelector('#dialog-title')?.textContent).toBe('選択した2件を削除しますか?');
+  });
+
+  it('キャンセルと削除の2つだけを出す', () => {
+    const element = open();
+    expect(button(element, 'dialog-cancel').textContent).toBe('キャンセル');
+    expect(button(element, 'dialog-confirm-delete-selected').textContent).toBe('削除');
+    expect([...element.querySelectorAll('button')]).toHaveLength(2);
+  });
+
+  it('削除を押すと onConfirmDeleteSelected が呼ばれる', () => {
+    const spies = handlers();
+    button(open(spies), 'dialog-confirm-delete-selected').click();
+    expect(spies.onConfirmDeleteSelected).toHaveBeenCalledTimes(1);
+  });
+
+  it('キャンセルを押すと、削除せずに onClose が呼ばれる', () => {
+    const spies = handlers();
+    button(open(spies), 'dialog-cancel').click();
+    expect(spies.onClose).toHaveBeenCalledTimes(1);
+    expect(spies.onConfirmDeleteSelected).not.toHaveBeenCalled();
   });
 });
 

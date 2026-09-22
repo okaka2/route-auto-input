@@ -4,6 +4,7 @@ import { createPatient } from '../src/patient';
 import {
   createInitialState,
   openDeleteConfirm,
+  openDeleteSelectedConfirm,
   openRowMenu,
   setSearchQuery,
   toggleSelection,
@@ -34,6 +35,8 @@ const listHandlers = {
   onSearch: noop,
   onClearSearch: noop,
   onToggleSelect: noop,
+  onSortChange: noop,
+  onToggleSelectAll: noop,
   onNew: noop,
   onOpenMenu: noop,
   onOpenSettings: noop,
@@ -43,6 +46,7 @@ const dialogHandlers = {
   onDuplicate: noop,
   onRequestDelete: noop,
   onConfirmDelete: noop,
+  onConfirmDeleteSelected: noop,
   onClose: noop,
 };
 
@@ -75,11 +79,16 @@ describe('画面の文言(禁止語が出ない)', () => {
     });
   });
 
-  it('ダイアログ: 「⋯」メニュー・削除の確認', () => {
-    const patients = places(1);
+  it('ダイアログ: 「⋯」メニュー・削除の確認・一括削除の確認', () => {
+    const patients = places(2);
     const base = createInitialState(patients);
     expectClean('メニュー', renderDialog(openRowMenu(base, patients[0]!.id), dialogHandlers)!.outerHTML);
     expectClean('削除の確認', renderDialog(openDeleteConfirm(base, patients[0]!.id), dialogHandlers)!.outerHTML);
+    const twoSelected = { ...base, selectedIds: patients.map((p) => p.id) };
+    expectClean(
+      '一括削除の確認',
+      renderDialog(openDeleteSelectedConfirm(twoSelected), dialogHandlers)!.outerHTML,
+    );
   });
 
   it('登録・編集フォーム: 新規・編集・下書き・メッセージ', () => {
@@ -126,7 +135,7 @@ describe('画面の文言(禁止語が出ない)', () => {
       renderSettings(createInitialState(places(2)), { onExport: noop, onImport: noop, onBack: noop }).outerHTML,
     );
     expectClean('タブ', renderTabBar('list', true, { onSelect: noop }).outerHTML);
-    expectClean('選択バー', renderSelectionBar(3, { onNext: noop })!.outerHTML);
+    expectClean('選択バー', renderSelectionBar(3, { onNext: noop, onDeleteSelected: noop })!.outerHTML);
   });
 
   it('検証メッセージ', () => {

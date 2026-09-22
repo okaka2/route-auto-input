@@ -1,10 +1,12 @@
 export type SelectionBarHandlers = {
   onNext(): void;
+  /** 選択した件数をまとめて削除する。実際の削除は、確認ダイアログでの確定を経てから。 */
+  onDeleteSelected(): void;
 };
 
 /**
  * 訪問先を1件以上選んでいるときに、下部に固定して出す選択バー。
- * 件数と「訪問順を決める →」。1件も選んでいなければ null(何も出さない)。
+ * 件数と「訪問順を決める →」、まとめて削除する「削除」。1件も選んでいなければ null(何も出さない)。
  */
 export function renderSelectionBar(
   count: number,
@@ -25,6 +27,13 @@ export function renderSelectionBar(
   label.dataset.testid = 'selection-count';
   label.textContent = `${count}件選択中`;
 
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'danger';
+  deleteButton.dataset.testid = 'delete-selected-button';
+  deleteButton.textContent = '削除';
+  deleteButton.addEventListener('click', () => handlers.onDeleteSelected());
+
   const next = document.createElement('button');
   next.type = 'button';
   next.className = 'primary';
@@ -32,6 +41,10 @@ export function renderSelectionBar(
   next.textContent = '訪問順を決める →';
   next.addEventListener('click', () => handlers.onNext());
 
-  bar.append(label, next);
+  const actions = document.createElement('div');
+  actions.className = 'selection-actions';
+  actions.append(deleteButton, next);
+
+  bar.append(label, actions);
   return bar;
 }

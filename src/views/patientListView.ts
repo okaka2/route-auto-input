@@ -1,7 +1,7 @@
 import { APP_NAME } from '../appInfo';
 import { MAX_SELECTION } from '../config';
 import { visiblePatients } from '../state';
-import type { AppState, Patient } from '../types';
+import type { AppState, Patient, SortOrder } from '../types';
 import { renderMessage } from './common';
 
 export type PatientListHandlers = {
@@ -9,6 +9,9 @@ export type PatientListHandlers = {
   /** 検索欄のクリアボタン。検索語を空にし、検索欄へフォーカスを戻すのは呼び出し側。 */
   onClearSearch(): void;
   onToggleSelect(id: string): void;
+  onSortChange(order: SortOrder): void;
+  /** 全選択/全解除ボタン。今どちらの動作をするかは、呼び出し側が状態を見て決める。 */
+  onToggleSelectAll(): void;
   onNew(): void;
   /** 行の「⋯」。編集・複製・削除は、開いたメニューの中にある。 */
   onOpenMenu(id: string): void;
@@ -27,7 +30,7 @@ export function renderPatientList(state: AppState, handlers: PatientListHandlers
   // 見出しと検索欄は、一覧をスクロールしても上部に残す(sticky)。
   const head = document.createElement('div');
   head.className = 'list-head';
-  head.append(renderTitleRow(handlers), renderSearch(state, handlers));
+  head.append(renderTitleRow(handlers), renderSearch(state, handlers), renderListControls(state, handlers));
   container.append(head);
 
   if (state.message) {
@@ -139,6 +142,47 @@ function renderSearch(state: AppState, handlers: PatientListHandlers): HTMLEleme
     wrapper.append(clear);
   }
   return wrapper;
+}
+
+const SORT_OPTIONS: { value: SortOrder; label: string }[] = [
+  { value: 'registered', label: '登録順' },
+  { value: 'name', label: '名前順(あいうえお順)' },
+  { value: 'address', label: '住所順(あいうえお順)' },
+];
+
+/** 並び替えのプルダウンと、全選択/全解除ボタン。 */
+function renderListControls(state: AppState, handlers: PatientListHandlers): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'list-controls';
+
+  const sortLabel = document.createElement('label');
+  sortLabel.className = 'visually-hidden';
+  sortLabel.textContent = '並び替え';
+  const sort = document.createElement('select');
+  sort.dataset.testid = 'sort-select';
+  sort.setAttribute('aria-label', '並び替え');
+  for (const option of SORT_OPTIONS) {
+    const opt = document.createElement('option');
+    opt.value = option.value;
+    opt.textContent = option.label;
+    sort.append(opt);
+  }
+  sort.value = state.sortOrder;
+  sort.addEventListener('change', () => handlers.onSortChange(sort.value as SortOrder));
+  sortLabel.append(sort);
+
+  const visible = visiblePatients(state);
+  const allSelected = visible.length > 0 && visible.every((patient) => state.selectedIds.includes(patient.id));
+
+  const selectAll = document.createElement('button');
+  selectAll.type = 'button';
+  selectAll.className = 'select-all';
+  selectAll.dataset.testid = 'select-all-button';
+  selectAll.textContent = allSelected ? '全解除' : '全選択';
+  selectAll.addEventListener('click', () => handlers.onToggleSelectAll());
+
+  row.append(sortLabel, selectAll);
+  return row;
 }
 
 function renderRow(patient: Patient, state: AppState, handlers: PatientListHandlers): HTMLElement {

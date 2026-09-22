@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderSelectionBar, type SelectionBarHandlers } from '../src/views/selectionBar';
 
-const handlers = (): SelectionBarHandlers => ({ onNext: vi.fn() });
+const handlers = (): SelectionBarHandlers => ({ onNext: vi.fn(), onDeleteSelected: vi.fn() });
 
 describe('renderSelectionBar', () => {
   it('1件も選んでいなければ、何も出さない(null)', () => {
@@ -31,5 +31,14 @@ describe('renderSelectionBar', () => {
   it('件数が変わっても、その件数を表示する', () => {
     const element = renderSelectionBar(10, handlers())!;
     expect(element.textContent).toContain('10件選択中');
+  });
+
+  it('「削除」のボタンを出し、押すと onDeleteSelected が呼ばれる', () => {
+    const spies = handlers();
+    const element = renderSelectionBar(2, spies)!;
+    const button = element.querySelector<HTMLButtonElement>('[data-testid="delete-selected-button"]')!;
+    expect(button.textContent).toBe('削除');
+    button.click();
+    expect(spies.onDeleteSelected).toHaveBeenCalledTimes(1);
   });
 });

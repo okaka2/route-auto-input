@@ -275,6 +275,39 @@ a.disabled {
   font-weight: 600;
 }
 
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.list-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 0 calc(var(--gap) + env(safe-area-inset-right)) 0.5rem
+    calc(var(--gap) + env(safe-area-inset-left));
+}
+
+.list-controls select {
+  min-height: var(--tap-primary);
+  padding: 0 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
+button.select-all {
+  min-height: var(--tap-primary);
+  padding: 0 0.75rem;
+  border: 1px solid var(--primary);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--primary);
+}
+
 .tabbar ul {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

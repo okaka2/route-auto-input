@@ -793,4 +793,117 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
 
     expect(el('.app-shell')?.classList.contains('with-selection')).toBe(true);
   });
+
+  describe('並び替え', () => {
+    it('名前順にすると、あいうえお順の見出しに並び替わる', async () => {
+      const { savePatient } = await import('../src/db');
+      const { createPatient } = await import('../src/patient');
+      await savePatient(createPatient('うえだ', 'x'));
+      await savePatient(createPatient('あべ', 'y'));
+      await import('../src/main');
+      await waitFor(() => expect(rows()).toHaveLength(2));
+
+      const select = el<HTMLSelectElement>('[data-testid="sort-select"]')!;
+      select.value = 'name';
+      select.dispatchEvent(new Event('change'));
+
+      await waitFor(() =>
+        expect([...document.querySelectorAll('.place-name')].map((e) => e.textContent)).toEqual([
+          'あべ',
+          'うえだ',
+        ]),
+      );
+    });
+  });
+
+  describe('全選択・全解除', () => {
+    it('「全選択」を押すと、表示中の全件が選択される', async () => {
+      await startWithPlaces(3);
+
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+
+      expect(el('[data-testid="selection-count"]')?.textContent).toBe('3件選択中');
+    });
+
+    it('全選択した後、もう一度押す(全解除)と選択が外れる', async () => {
+      await startWithPlaces(2);
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+
+      expect(el('[data-testid="selection-bar"]')).toBeNull();
+    });
+
+    it('検索で絞り込んだ状態で全選択すると、絞り込んだ分だけ選ばれる', async () => {
+      await startWithPlaces(3);
+      const search = el<HTMLInputElement>('[data-testid="search-input"]')!;
+      search.value = '場所2';
+      search.dispatchEvent(new Event('input'));
+      await waitFor(() => expect(rows()).toHaveLength(1));
+
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+
+      expect(el('[data-testid="selection-count"]')?.textContent).toBe('1件選択中');
+    });
+  });
+
+  describe('選択した複数件の一括削除', () => {
+    it('選択バーの「削除」を押しても、すぐには削除せず、件数つきの確認ダイアログが出る', async () => {
+      await startWithPlaces(2);
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+
+      el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
+
+      expect(el('#dialog-title')?.textContent).toBe('選択した2件を削除しますか?');
+      expect(rows()).toHaveLength(2);
+    });
+
+    it('確認で「キャンセル」すると、削除されない', async () => {
+      await startWithPlaces(2);
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+      el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
+
+      el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+      expect(el('[data-testid="dialog"]')).toBeNull();
+      expect(rows()).toHaveLength(2);
+    });
+
+    it('確認で「削除」すると、選択した分がまとめて削除され、選択も外れる', async () => {
+      await startWithPlaces(3);
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+
+      el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
+      el<HTMLButtonElement>('[data-testid="dialog-confirm-delete-selected"]')!.click();
+
+      await waitFor(() => expect(el('.message')?.textContent).toContain('3件を削除しました'));
+      expect(rows()).toHaveLength(0);
+      expect(el('[data-testid="selection-bar"]')).toBeNull();
+    });
+
+    it('一部だけ選んで削除すると、選んだ分だけ消え、残りは残る', async () => {
+      const ids = await startWithPlaces(3);
+      checkbox(ids[0]!).click();
+
+      el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
+      el<HTMLButtonElement>('[data-testid="dialog-confirm-delete-selected"]')!.click();
+
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      expect(checkbox(ids[0]!)).toBeNull();
+    });
+
+    it('削除ボタンを連打しても、まとめて削除されるのは1回だけ', async () => {
+      await startWithPlaces(2);
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+      el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
+
+      const confirmButton = el<HTMLButtonElement>('[data-testid="dialog-confirm-delete-selected"]')!;
+      confirmButton.click();
+      confirmButton.click();
+
+      await waitFor(() => expect(rows()).toHaveLength(0));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(rows()).toHaveLength(0);
+    });
+  });
 });

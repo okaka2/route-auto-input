@@ -13,6 +13,8 @@ const noopHandlers = (): PatientListHandlers => ({
   onSearch: vi.fn(),
   onClearSearch: vi.fn(),
   onToggleSelect: vi.fn(),
+  onSortChange: vi.fn(),
+  onToggleSelectAll: vi.fn(),
   onNew: vi.fn(),
   onOpenMenu: vi.fn(),
   onOpenSettings: vi.fn(),
@@ -282,5 +284,64 @@ describe('renderPatientList: 検索', () => {
     expect(clear.getAttribute('aria-label')).toBe('検索をクリア');
     clear.click();
     expect(handlers.onClearSearch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('renderPatientList: 並び替え', () => {
+  it('「並び替え」の名前(aria-label)を持つプルダウンを出し、今の並び順が選ばれている', () => {
+    const state = { ...createInitialState(makePatients(2)), sortOrder: 'name' as const };
+    const select = q<HTMLSelectElement>(renderPatientList(state, noopHandlers()), 'sort-select');
+    expect(select.getAttribute('aria-label')).toBe('並び替え');
+    expect(select.value).toBe('name');
+  });
+
+  it('選ぶと onSortChange が呼ばれる', () => {
+    const handlers = noopHandlers();
+    const element = renderPatientList(createInitialState(makePatients(2)), handlers);
+    const select = q<HTMLSelectElement>(element, 'sort-select');
+    withAttached(element, () => {
+      select.value = 'address';
+      select.dispatchEvent(new Event('change'));
+    });
+    expect(handlers.onSortChange).toHaveBeenCalledWith('address');
+  });
+});
+
+describe('renderPatientList: 全選択', () => {
+  it('1件も選んでいなければ「全選択」と表示する', () => {
+    const element = renderPatientList(createInitialState(makePatients(2)), noopHandlers());
+    expect(q<HTMLButtonElement>(element, 'select-all-button').textContent).toBe('全選択');
+  });
+
+  it('表示中がすべて選択済みなら「全解除」と表示する', () => {
+    const patients = makePatients(2);
+    let state = createInitialState(patients);
+    state = toggleSelection(state, patients[0]!.id);
+    state = toggleSelection(state, patients[1]!.id);
+    const element = renderPatientList(state, noopHandlers());
+    expect(q<HTMLButtonElement>(element, 'select-all-button').textContent).toBe('全解除');
+  });
+
+  it('一部だけ選択済みなら「全選択」のまま', () => {
+    const patients = makePatients(2);
+    const state = toggleSelection(createInitialState(patients), patients[0]!.id);
+    const element = renderPatientList(state, noopHandlers());
+    expect(q<HTMLButtonElement>(element, 'select-all-button').textContent).toBe('全選択');
+  });
+
+  it('検索で絞り込んだ表示分だけが選択済みなら「全解除」になる(全体では未選択が残っていても)', () => {
+    const patients = makePatients(3);
+    let state = createInitialState(patients);
+    state = toggleSelection(state, patients[1]!.id);
+    state = setSearchQuery(state, '場所2');
+    const element = renderPatientList(state, noopHandlers());
+    expect(q<HTMLButtonElement>(element, 'select-all-button').textContent).toBe('全解除');
+  });
+
+  it('押すと onToggleSelectAll が呼ばれる', () => {
+    const handlers = noopHandlers();
+    const element = renderPatientList(createInitialState(makePatients(2)), handlers);
+    q<HTMLButtonElement>(element, 'select-all-button').click();
+    expect(handlers.onToggleSelectAll).toHaveBeenCalledTimes(1);
   });
 });

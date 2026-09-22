@@ -1,7 +1,15 @@
 import 'fake-indexeddb/auto';
 import { deleteDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { closeDbForTest, deletePatient, listPatients, mergePatients, replaceAllPatients, savePatient } from '../src/db';
+import {
+  closeDbForTest,
+  deletePatient,
+  deletePatients,
+  listPatients,
+  mergePatients,
+  replaceAllPatients,
+  savePatient,
+} from '../src/db';
 import { createPatient, updatePatientFields } from '../src/patient';
 
 // 接続を閉じてから消す。開いたままだと deleteDB がブロックされ、
@@ -40,6 +48,17 @@ describe('患者の保存と取得', () => {
     await savePatient(patient);
     await deletePatient(patient.id);
     expect(await listPatients()).toEqual([]);
+  });
+
+  it('複数件まとめて削除できる', async () => {
+    const a = createPatient('山田', '東京都');
+    const b = createPatient('鈴木', '大阪府');
+    const c = createPatient('田中', '京都府');
+    await savePatient(a);
+    await savePatient(b);
+    await savePatient(c);
+    await deletePatients([a.id, c.id]);
+    expect((await listPatients()).map((p) => p.name)).toEqual(['鈴木']);
   });
 });
 
