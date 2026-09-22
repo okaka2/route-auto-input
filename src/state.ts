@@ -46,7 +46,7 @@ export function toggleSelection(state: AppState, id: string): AppState {
   if (state.selectedIds.length >= MAX_SELECTION) {
     return {
       ...state,
-      message: { kind: 'error', text: `一度に選べるのは${MAX_SELECTION}人までです。` },
+      message: { kind: 'error', text: `一度に選べるのは${MAX_SELECTION}件までです。` },
     };
   }
   return { ...state, selectedIds: [...state.selectedIds, id], message: null };

@@ -176,61 +176,6 @@ input[type='password'] {
 }
 
 /* ===== 以下は、既存の画面用の規則。画面ごとの作り直しで、順に置き換えて消す ===== */
-#app {
-  max-width: 48rem;
-  margin: 0 auto;
-  padding: var(--gap);
-}
-
-input[type='checkbox'] {
-  width: var(--tap-min);
-  height: var(--tap-min);
-}
-
-.row-between {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--gap);
-}
-
-.footer {
-  position: sticky;
-  bottom: 0;
-  padding: var(--gap) 0;
-  background: var(--bg);
-  border-top: 1px solid var(--border);
-}
-
-.patient-list {
-  list-style: none;
-  margin: var(--gap) 0;
-  padding: 0;
-}
-
-.patient-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.patient-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.patient-name {
-  font-weight: 600;
-}
-
-.patient-address {
-  font-size: 0.875rem;
-  color: #555;
-  overflow-wrap: anywhere;
-}
-
 .field {
   display: block;
   margin-bottom: var(--gap);
@@ -631,4 +576,165 @@ a.disabled {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+/* ===== 訪問先を選ぶ画面 ===== */
+input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.list-head {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 0.5rem 0;
+  background: var(--bg);
+}
+
+.list-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  min-height: 3rem;
+}
+
+.list-title {
+  margin: 0;
+  font-size: 1.375rem;
+}
+
+.icon-button {
+  min-width: var(--tap-min);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: 1.5rem;
+}
+
+.search {
+  position: relative;
+}
+
+.search input {
+  padding-right: var(--tap-min);
+}
+
+.search-clear {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: var(--tap-min);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.5rem;
+  transform: translateY(-50%);
+}
+
+.place-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: var(--gap) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.place-row {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-left: 4px solid transparent;
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* 選択した行: 薄い青の背景・左の青いライン・チェックマークの3つで示す。 */
+.place-row.selected {
+  border-left-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.place-row.disabled {
+  opacity: 0.6;
+}
+
+.place-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 4rem;
+  padding: 0.75rem;
+  cursor: pointer;
+}
+
+.place-row.disabled .place-main {
+  cursor: default;
+}
+
+.check {
+  display: grid;
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border: 2px solid var(--border-strong);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--on-primary);
+  font-weight: 700;
+}
+
+.place-row.selected .check {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.place-row.selected .check::after {
+  content: '✓';
+}
+
+/* キーボードで選ぶときのフォーカスの枠は、見た目のチェックに出す。 */
+input:focus-visible + .check {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.place-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.place-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.place-address {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.more {
+  flex: none;
+  width: var(--tap-min);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.5rem;
 }

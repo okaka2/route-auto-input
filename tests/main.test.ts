@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { deleteDB } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { APP_NAME } from '../src/appInfo';
 import { serializeBackup } from '../src/backup';
 
 // window.location.href への実遷移を避ける(jsdomは未実装で警告を出すうえ、
@@ -32,6 +33,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // spyOn をテスト間に持ち越さない(持ち越すと、前のテストで記録された呼び出しのせいで、
+  // 待つべき処理を待たずに検証が通ってしまう)。
+  vi.restoreAllMocks();
   // main.tsが内部で使っている(今のモジュールキャッシュ上の)db接続を閉じる。
   // 閉じないと次のbeforeEachのdeleteDBがブロックされる。
   const db = await import('../src/db');
@@ -62,7 +66,8 @@ describe('入力内容の保持(#2)', () => {
     await import('../src/main');
     await waitFor(() => expect(rows()).toHaveLength(1));
 
-    el<HTMLButtonElement>(`[data-testid="edit"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-edit"]')!.click();
     const nameInput = el<HTMLInputElement>('[data-testid="name-input"]')!;
     const addressInput = el<HTMLInputElement>('[data-testid="address-input"]')!;
     expect(nameInput.value).toBe('鈴木 一郎');
@@ -106,7 +111,7 @@ describe('二重タップ防止(#7)', () => {
     expect(rows()).toHaveLength(1);
   });
 
-  it('削除ボタンを連打しても確認ダイアログは一度しか出ない', async () => {
+  it('削除の確認で「削除」を連打しても、削除は1回だけで、標準の確認ダイアログは出ない', async () => {
     const { savePatient } = await import('../src/db');
     const { createPatient } = await import('../src/patient');
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
@@ -116,12 +121,15 @@ describe('二重タップ防止(#7)', () => {
     await waitFor(() => expect(rows()).toHaveLength(1));
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const deleteButton = el<HTMLButtonElement>(`[data-testid="delete"][data-id="${patient.id}"]`)!;
-    deleteButton.click();
-    deleteButton.click();
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-delete"]')!.click();
+    const confirmButton = el<HTMLButtonElement>('[data-testid="dialog-confirm-delete"]')!;
+    confirmButton.click();
+    confirmButton.click();
 
     await waitFor(() => expect(rows()).toHaveLength(0));
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(el('.message')?.textContent).toContain('削除しました');
+    expect(confirmSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -183,9 +191,11 @@ describe('セッションの永続化(#1)', () => {
 
     await import('../src/main');
 
-    expect(el('h1')?.textContent).toBe('ルート自動入力');
+    expect(el('h1')?.textContent).toBe(APP_NAME);
     expect(el('[data-testid="stop-row"]')).toBeNull();
-    await waitFor(() => expect(el('[data-testid="next-button"]')).not.toBeNull());
+    // 「次へ」は選択バーへ移り、未選択のときは出ないため、一覧画面が出ていることを
+    // 「＋ 訪問先を登録」ボタンで確かめる。
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
   });
 
   it('12時間以内のセッションは復元される', async () => {
@@ -470,5 +480,260 @@ describe('地図を開く画面', () => {
     // 一覧の画面へ移った(この時点の一覧は、まだ作り直していない古い画面)。
     await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
     expect(el('h1')?.textContent).not.toBe('地図を開く');
+  });
+});
+
+describe('訪問先を選ぶ画面と下部のバー', () => {
+  async function seedPlaces(count: number): Promise<string[]> {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const ids: string[] = [];
+    for (let i = 1; i <= count; i += 1) {
+      const patient = createPatient(`場所${i}`, `東京都千代田区${i}-1`);
+      await savePatient(patient);
+      ids.push(patient.id);
+    }
+    return ids;
+  }
+
+  async function startWithPlaces(count: number): Promise<string[]> {
+    const ids = await seedPlaces(count);
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(count));
+    return ids;
+  }
+
+  const checkbox = (id: string) => el<HTMLInputElement>(`input[data-id="${id}"]`)!;
+  const openMenuFor = (id: string) =>
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${id}"]`)!.click();
+
+  it('見出しにアプリ名を出す', async () => {
+    // 起動直後のDB読み込みが終わるまで待つ(待たずに終えると、その読み込みが次のテストへ漏れる)。
+    await startWithPlaces(1);
+    expect(el('h1')?.textContent).toBe(APP_NAME);
+  });
+
+  it('行全体をタップして選択でき、選択バーに件数が出て、もう一度タップすると外れる', async () => {
+    const ids = await startWithPlaces(2);
+    // 一覧は新しく登録した訪問先が先頭に来る(tests/db.test.ts)ため、
+    // 一番上の行は最後に登録した訪問先になる。
+    const displayedFirst = ids[ids.length - 1];
+    expect(el('[data-testid="selection-bar"]')).toBeNull();
+
+    el<HTMLElement>('.place-name')!.click(); // 行の名前の部分をタップ
+
+    expect(checkbox(displayedFirst!).checked).toBe(true);
+    expect(rows()[0]!.classList.contains('selected')).toBe(true);
+    expect(el('[data-testid="selection-count"]')?.textContent).toBe('1件選択中');
+
+    el<HTMLElement>('.place-name')!.click();
+
+    expect(el('[data-testid="selection-bar"]')).toBeNull();
+  });
+
+  it('選択バーの「訪問順を決める →」で、訪問順の画面へ進む', async () => {
+    const [first] = await startWithPlaces(2);
+    checkbox(first!).click();
+
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+
+    expect(el('h1')?.textContent).toBe('訪問順を決める');
+  });
+
+  it('「⋯」を押すとメニューが開き、最初のボタンにフォーカスが移り、選択は変わらない', async () => {
+    const [first] = await startWithPlaces(1);
+
+    openMenuFor(first!);
+
+    expect(el('[data-testid="dialog"]')).not.toBeNull();
+    expect(document.activeElement).toBe(el('[data-testid="dialog-edit"]'));
+    expect(checkbox(first!).checked).toBe(false);
+    expect(document.body.classList.contains('dialog-open')).toBe(true);
+  });
+
+  it('メニューを「キャンセル」で閉じると、フォーカスが元の「⋯」へ戻り、背後のスクロール止めも外れる', async () => {
+    const [first] = await startWithPlaces(1);
+    openMenuFor(first!);
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(el(`[data-testid="row-menu"][data-id="${first}"]`));
+    expect(document.body.classList.contains('dialog-open')).toBe(false);
+  });
+
+  it('Escキーでメニューが閉じる', async () => {
+    const [first] = await startWithPlaces(1);
+    openMenuFor(first!);
+
+    el('[data-testid="dialog-edit"]')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+  });
+
+  it('メニューの外側(背景)を押すと閉じる', async () => {
+    const [first] = await startWithPlaces(1);
+    openMenuFor(first!);
+
+    el<HTMLElement>('[data-testid="dialog-overlay"]')!.click();
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+  });
+
+  it('メニューの「編集」で、その訪問先の編集フォームが開き、名前と住所が入っている', async () => {
+    const [first] = await startWithPlaces(1);
+    openMenuFor(first!);
+
+    el<HTMLButtonElement>('[data-testid="dialog-edit"]')!.click();
+
+    expect(el<HTMLInputElement>('[data-testid="name-input"]')!.value).toBe('場所1');
+    expect(el<HTMLInputElement>('[data-testid="address-input"]')!.value).toBe('東京都千代田区1-1');
+    expect(el('[data-testid="dialog"]')).toBeNull();
+  });
+
+  it('メニューの「複製して登録」で、名前と住所を写した新規フォームが開き、保存すると別の訪問先として増える', async () => {
+    const [first] = await startWithPlaces(1);
+    openMenuFor(first!);
+
+    el<HTMLButtonElement>('[data-testid="dialog-duplicate"]')!.click();
+
+    expect(el<HTMLInputElement>('[data-testid="name-input"]')!.value).toBe('場所1');
+    expect(el<HTMLInputElement>('[data-testid="address-input"]')!.value).toBe('東京都千代田区1-1');
+
+    el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    // 元の訪問先はそのまま残っている。
+    expect(checkbox(first!)).not.toBeNull();
+  });
+
+  it('メニューの「削除」を押しても、すぐには削除せず、確認のダイアログが出る', async () => {
+    const [first] = await startWithPlaces(1);
+    openMenuFor(first!);
+
+    el<HTMLButtonElement>('[data-testid="dialog-delete"]')!.click();
+
+    expect(el('#dialog-title')?.textContent).toBe('この訪問先を削除しますか?');
+    expect(rows()).toHaveLength(1);
+  });
+
+  it('削除の確認で「キャンセル」すると、削除されず、フォーカスは「⋯」へ戻る', async () => {
+    const [first] = await startWithPlaces(1);
+    openMenuFor(first!);
+    el<HTMLButtonElement>('[data-testid="dialog-delete"]')!.click();
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(rows()).toHaveLength(1);
+    expect(document.activeElement).toBe(el(`[data-testid="row-menu"][data-id="${first}"]`));
+  });
+
+  it('削除の確認で「削除」を押すと、その訪問先が消えて、お知らせが出る', async () => {
+    const [first, second] = await startWithPlaces(2);
+    openMenuFor(first!);
+    el<HTMLButtonElement>('[data-testid="dialog-delete"]')!.click();
+
+    el<HTMLButtonElement>('[data-testid="dialog-confirm-delete"]')!.click();
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(checkbox(second!)).not.toBeNull();
+    expect(el('.message')?.textContent).toContain('削除しました');
+    expect(el('[data-testid="dialog"]')).toBeNull();
+  });
+
+  it('検索で絞り込め、0件のときは案内が出て、クリアボタンで元に戻り、検索欄にフォーカスが戻る', async () => {
+    await startWithPlaces(3);
+    const search = () => el<HTMLInputElement>('[data-testid="search-input"]')!;
+
+    search().value = '場所2';
+    search().dispatchEvent(new Event('input'));
+    expect(rows()).toHaveLength(1);
+
+    search().value = 'どこにもない';
+    search().dispatchEvent(new Event('input'));
+    expect(rows()).toHaveLength(0);
+    expect(el('[data-testid="empty-text"]')?.textContent).toBe('該当する訪問先がありません');
+
+    el<HTMLButtonElement>('[data-testid="search-clear"]')!.click();
+
+    expect(rows()).toHaveLength(3);
+    expect(search().value).toBe('');
+    expect(document.activeElement).toBe(search());
+  });
+
+  it('下部のタブは3つのステップを示し、訪問先を選ぶまでは、訪問順と地図のタブを押せない', async () => {
+    const [first] = await startWithPlaces(1);
+    expect(el('[data-testid="tab-list"]')?.getAttribute('aria-current')).toBe('step');
+    expect(el<HTMLButtonElement>('[data-testid="tab-order"]')!.disabled).toBe(true);
+    expect(el<HTMLButtonElement>('[data-testid="tab-map"]')!.disabled).toBe(true);
+
+    checkbox(first!).click();
+
+    expect(el<HTMLButtonElement>('[data-testid="tab-order"]')!.disabled).toBe(false);
+    expect(el<HTMLButtonElement>('[data-testid="tab-map"]')!.disabled).toBe(false);
+  });
+
+  it('タブで、訪問順・地図・訪問先を選ぶ、の間を移動できる', async () => {
+    const [first] = await startWithPlaces(1);
+    checkbox(first!).click();
+
+    el<HTMLButtonElement>('[data-testid="tab-order"]')!.click();
+    expect(el('h1')?.textContent).toBe('訪問順を決める');
+    expect(el('[data-testid="tab-order"]')?.getAttribute('aria-current')).toBe('step');
+
+    el<HTMLButtonElement>('[data-testid="tab-map"]')!.click();
+    expect(el('h1')?.textContent).toBe('地図を開く');
+
+    el<HTMLButtonElement>('[data-testid="tab-list"]')!.click();
+    expect(el('h1')?.textContent).toBe(APP_NAME);
+  });
+
+  it('タブで移動しても、開いたルートの印は消えない', async () => {
+    const [first] = await startWithPlaces(1);
+    checkbox(first!).click();
+    el<HTMLButtonElement>('[data-testid="tab-map"]')!.click();
+    el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
+    expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
+
+    el<HTMLButtonElement>('[data-testid="tab-list"]')!.click();
+    el<HTMLButtonElement>('[data-testid="tab-map"]')!.click();
+
+    expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
+  });
+
+  it('設定・登録の画面には、下部のタブを出さない', async () => {
+    await startWithPlaces(1);
+    expect(el('[data-testid="tabbar"]')).not.toBeNull();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    expect(el('[data-testid="tabbar"]')).toBeNull();
+
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click();
+    expect(el('[data-testid="tabbar"]')).not.toBeNull();
+
+    el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+    expect(el('[data-testid="tabbar"]')).toBeNull();
+  });
+
+  it('選択バーは、訪問先を選んだ一覧の画面にだけ出て、訪問順の画面には出ない', async () => {
+    const [first] = await startWithPlaces(1);
+    checkbox(first!).click();
+    expect(el('[data-testid="selection-bar"]')).not.toBeNull();
+
+    el<HTMLButtonElement>('[data-testid="tab-order"]')!.click();
+
+    expect(el('[data-testid="selection-bar"]')).toBeNull();
+    expect(el('[data-testid="tabbar"]')).not.toBeNull();
+  });
+
+  it('選択バーとタブがあるとき、内容の下に十分な余白を取るクラスが付く', async () => {
+    const [first] = await startWithPlaces(1);
+    expect(el('.app-shell')?.classList.contains('with-tabbar')).toBe(true);
+
+    checkbox(first!).click();
+
+    expect(el('.app-shell')?.classList.contains('with-selection')).toBe(true);
   });
 });

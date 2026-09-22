@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_SELECTION } from '../src/config';
 import { createPatient } from '../src/patient';
 import { findDuplicateAddresses, validatePatientInput, validateSelection } from '../src/validation';
 
@@ -66,5 +67,18 @@ describe('findDuplicateAddresses', () => {
       createPatient('佐藤', '東京都1-1'),
     ];
     expect(findDuplicateAddresses(patients)).toEqual(['東京都1-1']);
+  });
+});
+
+describe('選択の文言(訪問先・件)', () => {
+  it('0件のとき「訪問先を1件以上選んでください。」', () => {
+    expect(validateSelection(0)).toEqual({ ok: false, message: '訪問先を1件以上選んでください。' });
+  });
+
+  it('上限を超えたとき「一度に選べるのはN件までです。」', () => {
+    expect(validateSelection(MAX_SELECTION + 1)).toEqual({
+      ok: false,
+      message: `一度に選べるのは${MAX_SELECTION}件までです。`,
+    });
   });
 });

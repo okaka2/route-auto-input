@@ -1,46 +1,113 @@
+import { APP_NAME } from '../appInfo';
 import { MAX_SELECTION } from '../config';
 import { visiblePatients } from '../state';
 import type { AppState, Patient } from '../types';
+import { renderMessage } from './common';
 
 export type PatientListHandlers = {
   onSearch(query: string): void;
+  /** 検索欄のクリアボタン。検索語を空にし、検索欄へフォーカスを戻すのは呼び出し側。 */
+  onClearSearch(): void;
   onToggleSelect(id: string): void;
   onNew(): void;
-  onEdit(id: string): void;
-  onDelete(id: string): void;
-  onNext(): void;
+  /** 行の「⋯」。編集・複製・削除は、開いたメニューの中にある。 */
+  onOpenMenu(id: string): void;
   onOpenSettings(): void;
 };
 
+/**
+ * 「訪問先を選ぶ」画面。名前・住所で検索し、行全体をタップして選ぶ。
+ * 編集・複製・削除は、行の右端の「⋯」から開くメニューに置き、通常の操作では誤って触れないようにする。
+ * 選択件数と「訪問順を決める →」は、下部の選択バー(main.ts が重ねる)が担当する。
+ */
 export function renderPatientList(state: AppState, handlers: PatientListHandlers): HTMLElement {
   const container = document.createElement('div');
+  container.className = 'screen';
 
-  const header = document.createElement('div');
-  header.className = 'row-between';
-  const title = document.createElement('h1');
-  title.textContent = 'ルート自動入力';
-  const settingsButton = document.createElement('button');
-  settingsButton.type = 'button';
-  settingsButton.textContent = '設定';
-  settingsButton.dataset.testid = 'settings-button';
-  settingsButton.addEventListener('click', () => handlers.onOpenSettings());
-  header.append(title, settingsButton);
-  container.append(header);
+  // 見出しと検索欄は、一覧をスクロールしても上部に残す(sticky)。
+  const head = document.createElement('div');
+  head.className = 'list-head';
+  head.append(renderTitleRow(handlers), renderSearch(state, handlers));
+  container.append(head);
 
   if (state.message) {
-    const message = document.createElement('p');
-    message.className = `message ${state.message.kind}`;
-    message.setAttribute('role', 'status');
-    message.textContent = state.message.text;
-    container.append(message);
+    container.append(renderMessage(state.message));
   }
+
+  const newButton = document.createElement('button');
+  newButton.type = 'button';
+  newButton.className = 'primary block';
+  newButton.dataset.testid = 'new-button';
+  newButton.textContent = '＋ 訪問先を登録';
+  newButton.addEventListener('click', () => handlers.onNew());
+  container.append(newButton);
+
+  const patients = visiblePatients(state);
+  if (patients.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'hint empty-text';
+    empty.dataset.testid = 'empty-text';
+    empty.textContent =
+      state.patients.length === 0
+        ? 'まだ訪問先が登録されていません。「＋ 訪問先を登録」から追加してください。'
+        : '該当する訪問先がありません';
+    container.append(empty);
+  } else {
+    const list = document.createElement('ul');
+    list.className = 'place-list';
+    for (const patient of patients) {
+      list.append(renderRow(patient, state, handlers));
+    }
+    container.append(list);
+  }
+
+  if (state.selectedIds.length >= MAX_SELECTION) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.dataset.testid = 'limit-hint';
+    hint.textContent = `一度に選べるのは${MAX_SELECTION}件までです。選び直すには、どれかの選択を外してください。`;
+    container.append(hint);
+  }
+
+  return container;
+}
+
+function renderTitleRow(handlers: PatientListHandlers): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'list-title-row';
+
+  const title = document.createElement('h1');
+  title.className = 'list-title';
+  title.textContent = APP_NAME;
+
+  const settings = document.createElement('button');
+  settings.type = 'button';
+  settings.className = 'icon-button';
+  settings.dataset.testid = 'settings-button';
+  settings.setAttribute('aria-label', '設定');
+  // U+FE0E は、絵文字ではなく文字の見た目で出すための指定。
+  settings.textContent = '⚙︎';
+  settings.addEventListener('click', () => handlers.onOpenSettings());
+
+  row.append(title, settings);
+  return row;
+}
+
+function renderSearch(state: AppState, handlers: PatientListHandlers): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'search';
 
   const search = document.createElement('input');
   search.type = 'text';
   search.value = state.searchQuery;
-  search.placeholder = '氏名・住所で検索';
-  search.setAttribute('aria-label', '氏名・住所で検索');
+  search.placeholder = '名前・住所で検索';
+  search.setAttribute('aria-label', '名前・住所で検索');
   search.dataset.testid = 'search-input';
+  search.autocomplete = 'off';
+  search.spellcheck = false;
+  search.enterKeyHint = 'search';
+  search.setAttribute('autocapitalize', 'none');
+
   // IME変換中に画面全体を再描画すると入力欄が作り直され、変換セッションが
   // 壊れる(Safariは変換中もinputを発火するため)。変換が終わるまでは
   // onSearchを呼ばず、compositionendで確定した文字列を渡す。
@@ -58,99 +125,74 @@ export function renderPatientList(state: AppState, handlers: PatientListHandlers
     }
     handlers.onSearch(search.value);
   });
-  container.append(search);
+  wrapper.append(search);
 
-  const newButton = document.createElement('button');
-  newButton.type = 'button';
-  newButton.className = 'primary';
-  newButton.textContent = '＋ 新規登録';
-  newButton.dataset.testid = 'new-button';
-  newButton.addEventListener('click', () => handlers.onNew());
-  container.append(newButton);
-
-  const patients = visiblePatients(state);
-  if (patients.length === 0) {
-    const empty = document.createElement('p');
-    empty.textContent =
-      state.patients.length === 0
-        ? 'まだ患者が登録されていません。「＋ 新規登録」から追加してください。'
-        : '検索に一致する患者がいません。';
-    container.append(empty);
-  } else {
-    const list = document.createElement('ul');
-    list.className = 'patient-list';
-    for (const patient of patients) {
-      list.append(renderRow(patient, state, handlers));
-    }
-    container.append(list);
+  // 文字があるときだけ、消すためのボタンを出す。
+  if (state.searchQuery !== '') {
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'search-clear';
+    clear.dataset.testid = 'search-clear';
+    clear.setAttribute('aria-label', '検索をクリア');
+    clear.textContent = '×';
+    clear.addEventListener('click', () => handlers.onClearSearch());
+    wrapper.append(clear);
   }
-
-  if (state.selectedIds.length >= MAX_SELECTION) {
-    const hint = document.createElement('p');
-    hint.className = 'hint';
-    hint.dataset.testid = 'limit-hint';
-    hint.textContent = `一度に選べるのは${MAX_SELECTION}人までです。選び直すには、どれかの選択を外してください。`;
-    container.append(hint);
-  }
-
-  const footer = document.createElement('div');
-  footer.className = 'row-between footer';
-  const count = document.createElement('span');
-  count.textContent = `選択中: ${state.selectedIds.length} / ${MAX_SELECTION}`;
-  const nextButton = document.createElement('button');
-  nextButton.type = 'button';
-  nextButton.className = 'primary';
-  nextButton.textContent = '次へ(順番を決める)';
-  nextButton.dataset.testid = 'next-button';
-  nextButton.disabled = state.selectedIds.length === 0;
-  nextButton.addEventListener('click', () => handlers.onNext());
-  footer.append(count, nextButton);
-  container.append(footer);
-
-  return container;
+  return wrapper;
 }
 
 function renderRow(patient: Patient, state: AppState, handlers: PatientListHandlers): HTMLElement {
+  const selected = state.selectedIds.includes(patient.id);
+  // 上限に達しているとき、未選択の行は選べない。
+  const atLimit = !selected && state.selectedIds.length >= MAX_SELECTION;
+
   const row = document.createElement('li');
-  row.className = 'patient-row';
+  row.className = `place-row${selected ? ' selected' : ''}${atLimit ? ' disabled' : ''}`;
   row.dataset.testid = 'patient-row';
+
+  // 行全体をラベルにして、どこをタップしても選択・解除できるようにする。
+  // 本物のチェックボックスを画面の外へ隠して持たせ、キーボードとスクリーンリーダーの操作を保つ。
+  const main = document.createElement('label');
+  main.className = 'place-main';
 
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
+  checkbox.className = 'visually-hidden';
   checkbox.dataset.testid = 'patient-checkbox';
   checkbox.dataset.id = patient.id;
-  checkbox.checked = state.selectedIds.includes(patient.id);
-  checkbox.disabled = !checkbox.checked && state.selectedIds.length >= MAX_SELECTION;
-  checkbox.setAttribute('aria-label', `${patient.name} を選択`);
+  checkbox.checked = selected;
+  checkbox.disabled = atLimit;
+  checkbox.setAttribute('aria-label', `${patient.name}を選択`);
   checkbox.addEventListener('change', () => handlers.onToggleSelect(patient.id));
 
-  const body = document.createElement('div');
-  body.className = 'patient-body';
-  const name = document.createElement('div');
-  name.className = 'patient-name';
+  // 見た目のチェック。色だけに頼らないよう、選択時は ✓ を出す(CSS)。
+  const check = document.createElement('span');
+  check.className = 'check';
+  check.setAttribute('aria-hidden', 'true');
+
+  const text = document.createElement('span');
+  text.className = 'place-text';
+  const name = document.createElement('span');
+  name.className = 'place-name';
   name.textContent = patient.name;
-  const address = document.createElement('div');
-  address.className = 'patient-address';
+  const address = document.createElement('span');
+  address.className = 'place-address';
   address.textContent = patient.address;
-  body.append(name, address);
+  text.append(name, address);
 
-  const editButton = document.createElement('button');
-  editButton.type = 'button';
-  editButton.textContent = '編集';
-  editButton.dataset.testid = 'edit';
-  editButton.dataset.id = patient.id;
-  editButton.setAttribute('aria-label', `${patient.name} を編集`);
-  editButton.addEventListener('click', () => handlers.onEdit(patient.id));
+  main.append(checkbox, check, text);
 
-  const deleteButton = document.createElement('button');
-  deleteButton.type = 'button';
-  deleteButton.className = 'danger';
-  deleteButton.textContent = '削除';
-  deleteButton.dataset.testid = 'delete';
-  deleteButton.dataset.id = patient.id;
-  deleteButton.setAttribute('aria-label', `${patient.name} を削除`);
-  deleteButton.addEventListener('click', () => handlers.onDelete(patient.id));
+  // 「⋯」は、行の選択(ラベル)の外に置く。押しても選択は変わらない。
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'more';
+  more.dataset.testid = 'row-menu';
+  more.dataset.id = patient.id;
+  more.setAttribute('aria-label', `${patient.name}のメニューを開く`);
+  more.setAttribute('aria-haspopup', 'dialog');
+  more.textContent = '⋯';
+  more.addEventListener('click', () => handlers.onOpenMenu(patient.id));
 
-  row.append(checkbox, body, editButton, deleteButton);
+  row.append(main, more);
   return row;
 }

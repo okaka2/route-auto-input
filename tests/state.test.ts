@@ -233,3 +233,15 @@ describe('hasSelection', () => {
     expect(hasSelection(state)).toBe(true);
   });
 });
+
+describe('選択上限の文言', () => {
+  it('上限を超えて選ぼうとしたとき、「N件まで」と案内する', () => {
+    const patients = makePatients(MAX_SELECTION + 1);
+    let state = createInitialState(patients);
+    for (const patient of patients.slice(0, MAX_SELECTION)) {
+      state = toggleSelection(state, patient.id);
+    }
+    const overflowed = toggleSelection(state, patients[MAX_SELECTION]!.id);
+    expect(overflowed.message?.text).toBe(`一度に選べるのは${MAX_SELECTION}件までです。`);
+  });
+});

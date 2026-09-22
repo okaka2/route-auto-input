@@ -15,10 +15,10 @@ export function validatePatientInput(name: string, address: string): ValidationR
 
 export function validateSelection(count: number): ValidationResult {
   if (count === 0) {
-    return { ok: false, message: '患者を1人以上選んでください。' };
+    return { ok: false, message: '訪問先を1件以上選んでください。' };
   }
   if (count > MAX_SELECTION) {
-    return { ok: false, message: `一度に選べるのは${MAX_SELECTION}人までです。` };
+    return { ok: false, message: `一度に選べるのは${MAX_SELECTION}件までです。` };
   }
   return { ok: true };
 }

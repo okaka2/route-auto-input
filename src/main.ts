@@ -9,8 +9,12 @@ import { createPatient, updatePatientFields } from './patient';
 import { splitIntoRoutes } from './routeSplitter';
 import { clearSession, loadSession, saveSession } from './session';
 import {
+  closeDialog,
   createInitialState,
+  hasSelection,
   moveSelected,
+  openDeleteConfirm,
+  openRowMenu,
   selectedPatients,
   setSearchQuery,
   toggleSelection,
@@ -20,19 +24,32 @@ import {
 } from './state';
 import type { AppState, Message, Patient } from './types';
 import { validatePatientInput, validateSelection } from './validation';
+import { renderDialog } from './views/dialogs';
 import { renderPatientForm, type PatientFormDraft } from './views/patientFormView';
 import { renderPatientList } from './views/patientListView';
 import { renderRouteOrder } from './views/routeOrderView';
 import { renderRouteMap } from './views/routeMapView';
+import { renderSelectionBar } from './views/selectionBar';
 import { renderSettings } from './views/settingsView';
+import { renderTabBar, type Step } from './views/tabBar';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) {
   throw new Error('#app が見つかりません。');
 }
 
+// Escキーでダイアログを閉じる。document ではなく root に付けるのは、テストで main.ts を
+// 読み込み直すたびに、document へリスナーが積み重ならないようにするため。
+root.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && state.dialog !== null) {
+    event.preventDefault();
+    closeAnyDialog();
+  }
+});
+
 // Googleマップへ遷移して戻ってきたときのために、選択・訪問順・開いたルートを
-// localStorageから復元する(Ruling 7)。復元できた場合は訪問順の画面から始める。
+// localStorageから復元する(Ruling 7)。復元できた場合、開いたルートがあれば地図の画面、
+// なければ訪問順の画面から始める。
 const restoredSession = loadSession();
 let state: AppState = restoredSession
   ? {
@@ -55,6 +72,9 @@ let formDraft: PatientFormDraft | null = null;
 // 保存/削除の二重実行防止(ボタンを連打してもDBへ二重に書き込まない)。
 let savingPatient = false;
 const deletingPatientIds = new Set<string>();
+
+// 「⋯」から開いたダイアログを、編集・複製・削除以外で閉じたとき、フォーカスを戻す行のid。
+let dialogReturnId: string | null = null;
 
 function setState(next: AppState): void {
   state = next;
@@ -132,14 +152,14 @@ async function handleDelete(id: string): Promise<void> {
     // 削除中の二重タップ。何もしない。
     return;
   }
-  const patient = state.patients.find((item) => item.id === id);
-  if (!patient) {
-    return;
-  }
-  if (!window.confirm(`${patient.name} を削除します。よろしいですか?`)) {
+  if (!state.patients.some((patient) => patient.id === id)) {
+    closeAnyDialog();
     return;
   }
   deletingPatientIds.add(id);
+  // 確認は、ここへ来る前に、確認のダイアログで「削除」を押した時点で済んでいる。
+  dialogReturnId = null;
+  setState(closeDialog(state));
   try {
     await deletePatient(id);
     await reloadPatients({ kind: 'info', text: '削除しました。' });
@@ -148,6 +168,67 @@ async function handleDelete(id: string): Promise<void> {
   } finally {
     deletingPatientIds.delete(id);
   }
+}
+
+/** 「⋯」メニューを開く。閉じたとき、この行の「⋯」へフォーカスを戻すため、idを覚えておく。 */
+function openMenu(id: string): void {
+  dialogReturnId = id;
+  setState(openRowMenu(state, id));
+}
+
+function closeAnyDialog(): void {
+  setState(closeDialog(state));
+}
+
+function handleEdit(id: string): void {
+  dialogReturnId = null;
+  formDraft = null;
+  setState(withScreen(state, { name: 'form', patientId: id }));
+}
+
+/** 名前と住所を写した状態の、新規登録フォームを開く(保存すると別の訪問先になる)。 */
+function handleDuplicate(id: string): void {
+  const source = state.patients.find((patient) => patient.id === id);
+  if (!source) {
+    closeAnyDialog();
+    return;
+  }
+  dialogReturnId = null;
+  formDraft = { name: source.name, address: source.address };
+  setState(withScreen(state, { name: 'form', patientId: null }));
+}
+
+/** 選択バーの「訪問順を決める →」。 */
+function handleNext(): void {
+  const validation = validateSelection(state.selectedIds.length);
+  if (!validation.ok) {
+    setState(withMessage(state, { kind: 'error', text: validation.message }));
+    return;
+  }
+  setState(withScreen(state, { name: 'order' }));
+}
+
+/** 下部のタブに出す3つのステップのうち、今の画面がどれか。設定・登録の画面は null(タブを出さない)。 */
+function currentStep(): Step | null {
+  switch (state.screen.name) {
+    case 'list':
+    case 'order':
+    case 'map':
+      return state.screen.name;
+    default:
+      return null;
+  }
+}
+
+function handleSelectStep(step: Step): void {
+  if (step === currentStep()) {
+    return;
+  }
+  // 訪問先を選ぶまでは、訪問順と地図へは進めない。
+  if (step !== 'list' && !hasSelection(state)) {
+    return;
+  }
+  setState(withScreen(state, { name: step }));
 }
 
 function handleOpenRoute(routeIndex: number): void {
@@ -204,6 +285,11 @@ function renderScreen(): HTMLElement {
     case 'list':
       return renderPatientList(state, {
         onSearch: (query) => setState(setSearchQuery(state, query)),
+        onClearSearch: () => {
+          setState(setSearchQuery(state, ''));
+          // クリアボタンは消えるので、検索欄へフォーカスを戻す。
+          root!.querySelector<HTMLInputElement>('[data-testid="search-input"]')?.focus();
+        },
         onToggleSelect: (id) => {
           const next = toggleSelection(state, id);
           // 選択が実際に変わったときだけ、開いたルートの印を消す(上限で選べなかったときは変えない)。
@@ -216,21 +302,7 @@ function renderScreen(): HTMLElement {
           formDraft = null;
           setState(withScreen(state, { name: 'form', patientId: null }));
         },
-        onEdit: (id) => {
-          formDraft = null;
-          setState(withScreen(state, { name: 'form', patientId: id }));
-        },
-        onDelete: (id) => {
-          void handleDelete(id);
-        },
-        onNext: () => {
-          const validation = validateSelection(state.selectedIds.length);
-          if (!validation.ok) {
-            setState(withMessage(state, { kind: 'error', text: validation.message }));
-            return;
-          }
-          setState(withScreen(state, { name: 'order' }));
-        },
+        onOpenMenu: openMenu,
         onOpenSettings: () => setState(withScreen(state, { name: 'settings' })),
       });
     case 'form':
@@ -274,18 +346,72 @@ function renderScreen(): HTMLElement {
   }
 }
 
+/** 画面本体に、下部の固定バー(選択バーとタブ)とダイアログを重ねて、アプリ全体を作る。 */
+function renderApp(): HTMLElement {
+  const shell = document.createElement('div');
+  shell.className = 'app-shell';
+  shell.append(renderScreen());
+
+  const step = currentStep();
+  if (step !== null) {
+    const selectionBar =
+      step === 'list' ? renderSelectionBar(state.selectedIds.length, { onNext: handleNext }) : null;
+    // 固定バーに、内容の最後が隠れないよう、余白を取るクラスを付ける。
+    shell.classList.add(selectionBar ? 'with-selection' : 'with-tabbar');
+
+    const stack = document.createElement('div');
+    stack.className = 'bottom-stack';
+    if (selectionBar) {
+      stack.append(selectionBar);
+    }
+    stack.append(renderTabBar(step, hasSelection(state), { onSelect: handleSelectStep }));
+    shell.append(stack);
+  }
+
+  const dialog = renderDialog(state, {
+    onEdit: handleEdit,
+    onDuplicate: handleDuplicate,
+    onRequestDelete: (id) => setState(openDeleteConfirm(state, id)),
+    onConfirmDelete: (id) => {
+      void handleDelete(id);
+    },
+    onClose: closeAnyDialog,
+  });
+  if (dialog) {
+    shell.append(dialog);
+  }
+  return shell;
+}
+
 /**
- * 画面全体を作り直すため、そのままでは検索欄に1文字打つたびに
- * フォーカスが外れる。描画の前後でフォーカス位置を引き継ぐ。
+ * 画面全体を作り直すため、そのままでは検索欄に1文字打つたびにフォーカスが外れる。
+ * 描画の前後でフォーカス位置を引き継ぐ。ダイアログは、開いたら最初のボタンへ、
+ * 閉じたら開いた元の「⋯」へ、フォーカスを移す。
  */
 function render(): void {
   const active = document.activeElement;
   const testid = active instanceof HTMLElement ? active.dataset.testid : undefined;
   const rowId = active instanceof HTMLElement ? active.dataset.id : undefined;
   const caret = active instanceof HTMLInputElement ? active.selectionStart : null;
+  const hadDialog = root!.querySelector('[data-testid="dialog"]') !== null;
 
-  root!.replaceChildren(renderScreen());
+  root!.replaceChildren(renderApp());
+  // ダイアログを開いている間は、背後をスクロールさせない。
+  document.body.classList.toggle('dialog-open', state.dialog !== null);
   syncSession();
+
+  const dialog = root!.querySelector<HTMLElement>('[data-testid="dialog"]');
+  if (dialog) {
+    dialog.querySelector<HTMLElement>('button')?.focus();
+    return;
+  }
+  if (hadDialog && dialogReturnId !== null) {
+    root!
+      .querySelector<HTMLElement>(`[data-testid="row-menu"][data-id="${dialogReturnId}"]`)
+      ?.focus();
+    dialogReturnId = null;
+    return;
+  }
 
   if (testid === undefined) {
     return;
