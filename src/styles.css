@@ -28,9 +28,6 @@
   --selbar-h: 4rem;
   --content-max: 44rem;
   --gap: 1rem;
-
-  /* 既存の画面用の規則が使っている別名。使われなくなったら消す。 */
-  --accent: var(--primary);
 }
 
 /* ===== 全体 ===== */
@@ -175,7 +172,7 @@ input[type='password'] {
   font-size: 1.125rem;
 }
 
-/* ===== 以下は、既存の画面用の規則。画面ごとの作り直しで、順に置き換えて消す ===== */
+/* ===== 個別の部品の規則(地図を開くリンク・エクスポート/インポートのモード選択) ===== */
 a.disabled {
   color: var(--muted);
   pointer-events: none;

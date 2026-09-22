@@ -89,3 +89,21 @@ describe('大きさの変数', () => {
     expect(css).toMatch(/--tap-min:\s*2\.75rem/);
   });
 });
+
+describe('文字の大きさ', () => {
+  it('どの文字も、14px(0.875rem)未満にしない', () => {
+    for (const match of css.matchAll(/font-size:\s*([0-9.]+)rem/g)) {
+      expect(Number(match[1]), match[0]).toBeGreaterThanOrEqual(0.875);
+    }
+  });
+
+  it('入力欄は16px以上(iOSのSafariで、入力時に画面が拡大されない)', () => {
+    expect(css).toMatch(/input\[type='text'\][^}]*font-size:\s*1rem/s);
+  });
+});
+
+describe('整理', () => {
+  it('使われなくなった別名 --accent が残っていない', () => {
+    expect(css).not.toContain('--accent');
+  });
+});
