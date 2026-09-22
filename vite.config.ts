@@ -15,6 +15,9 @@ export default defineConfig({
     appNameInHtml,
     VitePWA({
       registerType: 'autoUpdate',
+      // 自前でmain.tsからregisterSW()を呼び、更新が見つかったら自動で1回だけ
+      // 再読み込みするようにするため、既定の(ただ登録するだけの)自動注入は使わない。
+      injectRegister: false,
       includeAssets: ['apple-touch-icon.png'],
       manifest: {
         name: APP_NAME,
@@ -34,6 +37,13 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,png,svg,webmanifest}'],
+        // injectRegister: false にすると、vite-plugin-pwaがregisterType: 'autoUpdate'向けに
+        // 自動で付けてくれるこの2つの設定が付かなくなるため、ここで明示する。
+        // 付けないと、新しいservice workerが「待機中」のまま有効化されず、
+        // main.tsのregisterSW()が待っている'activated'イベントが一生発火しない
+        // (=更新しても、いつまでも古い版のまま)。
+        skipWaiting: true,
+        clientsClaim: true,
       },
     }),
   ],

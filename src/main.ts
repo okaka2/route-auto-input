@@ -9,6 +9,7 @@ import { checkPassword, isUnlocked, renderPasswordGate, unlock } from './passwor
 import { createPatient, updatePatientFields } from './patient';
 import { splitIntoRoutes } from './routeSplitter';
 import { clearSession, loadSession, saveSession } from './session';
+import { registerServiceWorkerUpdates } from './swUpdate';
 import {
   clearSelection,
   closeDialog,
@@ -43,6 +44,9 @@ const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) {
   throw new Error('#app が見つかりません。');
 }
+
+// ロックの状態に関係なく、新しいバージョンが出ていれば自動で反映する。
+registerServiceWorkerUpdates();
 
 // Escキーでダイアログを閉じる。document に付けるのは、ダイアログの背景など
 // フォーカスを持てない場所をクリックすると activeElement が document.body へ移り
