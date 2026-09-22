@@ -307,3 +307,112 @@ a.disabled {
   gap: 0.5rem;
   min-height: var(--tap-min);
 }
+
+/* ===== 画面の骨組み・共通の見出し・下部のタブと選択バー ===== */
+.app-shell {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--gap) calc(var(--gap) + env(safe-area-inset-right)) var(--gap)
+    calc(var(--gap) + env(safe-area-inset-left));
+}
+
+/* 下部に固定するバーに、一覧の最後が隠れないよう、バーの高さぶんの余白を取る。 */
+.app-shell.with-tabbar {
+  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--gap));
+}
+
+.app-shell.with-selection {
+  padding-bottom: calc(var(--tabbar-h) + var(--selbar-h) + env(safe-area-inset-bottom) + var(--gap));
+}
+
+.screen-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 3.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.screen-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.header-back {
+  justify-self: start;
+  padding: 0 0.5rem;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.bottom-stack {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.bottom-stack > * {
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
+
+.selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  min-height: var(--selbar-h);
+  padding: 0.5rem calc(var(--gap) + env(safe-area-inset-right)) 0.5rem
+    calc(var(--gap) + env(safe-area-inset-left));
+  border-bottom: 1px solid var(--border);
+}
+
+.selection-count {
+  font-weight: 600;
+}
+
+.tabbar ul {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.125rem;
+  width: 100%;
+  min-height: var(--tabbar-h);
+  padding: 0.25rem;
+  border: none;
+  border-top: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.tab-number {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.tab.current {
+  border-top-color: var(--primary);
+  color: var(--primary);
+  font-weight: 700;
+}
