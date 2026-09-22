@@ -16,6 +16,9 @@ export type Screen =
 
 export type Message = { kind: 'error' | 'info'; text: string };
 
+/** 開いているダイアログ。対象の訪問先のidを持つ。 */
+export type Dialog = { kind: 'rowMenu'; id: string } | { kind: 'confirmDelete'; id: string };
+
 export type AppState = {
   screen: Screen;
   patients: Patient[];
@@ -23,4 +26,6 @@ export type AppState = {
   selectedIds: string[];
   searchQuery: string;
   message: Message | null;
+  /** 開いているダイアログ。なければ null。 */
+  dialog: Dialog | null;
 };

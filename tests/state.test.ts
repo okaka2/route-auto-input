@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { MAX_SELECTION } from '../src/config';
 import { createPatient } from '../src/patient';
 import {
+  closeDialog,
   createInitialState,
+  hasSelection,
   moveSelected,
+  openDeleteConfirm,
+  openRowMenu,
   selectedPatients,
   setSearchQuery,
   toggleSelection,
@@ -158,5 +162,74 @@ describe('withScreen / withMessage', () => {
   it('メッセージを設定できる', () => {
     const state = withMessage(createInitialState([]), { kind: 'info', text: '保存しました。' });
     expect(state.message).toEqual({ kind: 'info', text: '保存しました。' });
+  });
+});
+
+describe('ダイアログの状態', () => {
+  it('最初はダイアログが開いていない', () => {
+    expect(createInitialState([]).dialog).toBeNull();
+  });
+
+  it('「⋯」メニューを開くと、その訪問先のメニューになる', () => {
+    const state = openRowMenu(createInitialState(makePatients(2)), 'p1');
+    expect(state.dialog).toEqual({ kind: 'rowMenu', id: 'p1' });
+  });
+
+  it('削除の確認を開くと、その訪問先の確認になる', () => {
+    const state = openDeleteConfirm(createInitialState(makePatients(2)), 'p1');
+    expect(state.dialog).toEqual({ kind: 'confirmDelete', id: 'p1' });
+  });
+
+  it('メニューから削除の確認へ切り替えられる', () => {
+    let state = openRowMenu(createInitialState(makePatients(2)), 'p1');
+    state = openDeleteConfirm(state, 'p1');
+    expect(state.dialog?.kind).toBe('confirmDelete');
+  });
+
+  it('閉じると、ダイアログがなくなる', () => {
+    const state = closeDialog(openRowMenu(createInitialState(makePatients(2)), 'p1'));
+    expect(state.dialog).toBeNull();
+  });
+
+  it('開いていないときに閉じても、同じ状態を返す', () => {
+    const state = createInitialState(makePatients(2));
+    expect(closeDialog(state)).toBe(state);
+  });
+
+  it('画面を切り替えると、ダイアログも閉じる', () => {
+    const state = withScreen(openRowMenu(createInitialState(makePatients(2)), 'p1'), { name: 'settings' });
+    expect(state.dialog).toBeNull();
+  });
+
+  it('対象の訪問先がなくなったら、ダイアログを閉じる', () => {
+    const patients = makePatients(2);
+    const opened = openRowMenu(createInitialState(patients), patients[0]!.id);
+    const next = withPatients(opened, [patients[1]!]);
+    expect(next.dialog).toBeNull();
+  });
+
+  it('対象の訪問先が残っていれば、ダイアログは開いたまま', () => {
+    const patients = makePatients(2);
+    const opened = openRowMenu(createInitialState(patients), patients[0]!.id);
+    const next = withPatients(opened, patients);
+    expect(next.dialog).toEqual({ kind: 'rowMenu', id: patients[0]!.id });
+  });
+
+  it('入力の状態を書き換えない', () => {
+    const state = createInitialState(makePatients(2));
+    openRowMenu(state, 'p1');
+    expect(state.dialog).toBeNull();
+  });
+});
+
+describe('hasSelection', () => {
+  it('1件も選んでいなければ false', () => {
+    expect(hasSelection(createInitialState(makePatients(2)))).toBe(false);
+  });
+
+  it('1件以上選んでいれば true', () => {
+    const patients = makePatients(2);
+    const state = toggleSelection(createInitialState(patients), patients[0]!.id);
+    expect(hasSelection(state)).toBe(true);
   });
 });
