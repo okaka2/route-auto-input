@@ -52,17 +52,16 @@ export function renderPasswordGate(handlers: PasswordGateHandlers, showError: bo
     form.append(renderMessage({ kind: 'error', text: '合言葉が違います。' }));
   }
 
-  const label = document.createElement('label');
-  label.className = 'visually-hidden';
-  label.textContent = '合言葉';
+  // 見た目のラベルは付けない(見出しで用途は分かるため)。aria-labelでスクリーンリーダー
+  // 向けの名前だけ付ける。ラベル要素で囲むと、visually-hiddenで隠すときに中の入力欄まで
+  // 一緒に見えなくなってしまうため、visually-hiddenなラベルでは囲まない。
   const input = document.createElement('input');
   input.type = 'password';
   input.dataset.testid = 'password-input';
   input.setAttribute('aria-label', '合言葉');
   input.autocomplete = 'off';
   input.autofocus = true;
-  label.append(input);
-  form.append(label);
+  form.append(input);
 
   const submit = document.createElement('button');
   submit.type = 'submit';

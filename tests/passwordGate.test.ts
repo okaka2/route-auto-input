@@ -47,6 +47,14 @@ describe('renderPasswordGate', () => {
     expect(q<HTMLButtonElement>(element, 'password-submit').textContent).toBe('開く');
   });
 
+  it('入力欄は、visually-hiddenなラベルなどで隠されていない(見えなくなるバグの再発防止)', () => {
+    const element = renderPasswordGate({ onSubmit: vi.fn() }, false);
+    const input = q<HTMLInputElement>(element, 'password-input');
+    for (let ancestor: HTMLElement | null = input; ancestor !== null; ancestor = ancestor.parentElement) {
+      expect(ancestor.classList.contains('visually-hidden')).toBe(false);
+    }
+  });
+
   it('showError=falseのときは、エラーを出さない', () => {
     const element = renderPasswordGate({ onSubmit: vi.fn() }, false);
     expect(element.querySelector('.message')).toBeNull();
