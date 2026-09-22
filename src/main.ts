@@ -5,6 +5,7 @@ import { deletePatient, deletePatients, listPatients, mergePatients, replaceAllP
 import { downloadTextFile, readTextFile } from './fileIo';
 import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
+import { checkPassword, isUnlocked, renderPasswordGate, unlock } from './passwordGate';
 import { createPatient, updatePatientFields } from './patient';
 import { splitIntoRoutes } from './routeSplitter';
 import { clearSession, loadSession, saveSession } from './session';
@@ -509,5 +510,28 @@ function render(): void {
   }
 }
 
-render();
-void reloadPatients();
+/** ロック画面を通過してから、いつもどおりアプリ本体を描画・読み込みする。 */
+function startApp(): void {
+  render();
+  void reloadPatients();
+}
+
+/**
+ * 合言葉の入力。正しければ解錠してアプリ本体へ、違えばエラーつきでロック画面を出し直す。
+ * (本物のログインではない。src/passwordGate.ts を参照。)
+ */
+function handlePasswordSubmit(password: string): void {
+  if (checkPassword(password)) {
+    unlock();
+    startApp();
+    return;
+  }
+  root!.replaceChildren(renderPasswordGate({ onSubmit: handlePasswordSubmit }, true));
+  root!.querySelector<HTMLInputElement>('[data-testid="password-input"]')?.focus();
+}
+
+if (isUnlocked()) {
+  startApp();
+} else {
+  root!.replaceChildren(renderPasswordGate({ onSubmit: handlePasswordSubmit }, false));
+}

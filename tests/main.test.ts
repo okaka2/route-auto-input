@@ -3,6 +3,7 @@ import { deleteDB } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_NAME } from '../src/appInfo';
 import { serializeBackup } from '../src/backup';
+import { unlock } from '../src/passwordGate';
 
 // window.location.href への実遷移を避ける(jsdomは未実装で警告を出すうえ、
 // テスト間でナビゲーションが発生すると副作用が漏れる)。main.tsはopenUrlを
@@ -24,6 +25,9 @@ beforeEach(async () => {
   document.body.innerHTML = '<div id="app"></div>';
   vi.resetModules();
   window.localStorage.clear();
+  // ロック画面自体を検証するテスト以外は、ロックを経由せずアプリの中身を直接検証したいので、
+  // 既定で解錠しておく。
+  unlock();
   await deleteDB('route-auto-input');
   // vi.resetModules() はモジュールの読み込みキャッシュを消すだけで、
   // vi.mock('../src/openRoute', ...) が作ったモック関数の呼び出し履歴は
@@ -428,6 +432,58 @@ describe('起動直後の読み込み', () => {
     // 読み込みが終わるのを待つ(fake-indexeddb は数ミリ秒で終わる)。
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(el('.message')?.textContent).toContain('名前を入力してください');
+  });
+});
+
+describe('合言葉のロック画面', () => {
+  // このdescribe内では、beforeEachのunlock()を打ち消して、未解錠から始める。
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('未解錠なら、ロック画面が出て、中身(一覧)は表示されない', async () => {
+    await import('../src/main');
+    expect(el('[data-testid="password-input"]')).not.toBeNull();
+    expect(el('[data-testid="new-button"]')).toBeNull();
+  });
+
+  it('間違った合言葉では、エラーが出て、中身は表示されない', async () => {
+    await import('../src/main');
+    const input = el<HTMLInputElement>('[data-testid="password-input"]')!;
+    input.value = 'ちがう';
+    el<HTMLButtonElement>('[data-testid="password-submit"]')!.click();
+
+    expect(el('.message')?.textContent).toBe('合言葉が違います。');
+    expect(el('[data-testid="new-button"]')).toBeNull();
+  });
+
+  it('正しい合言葉を入れると、中身(一覧)が表示される', async () => {
+    await import('../src/main');
+    const input = el<HTMLInputElement>('[data-testid="password-input"]')!;
+    input.value = 'houmon2026';
+    el<HTMLButtonElement>('[data-testid="password-submit"]')!.click();
+
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    expect(el('[data-testid="password-input"]')).toBeNull();
+  });
+
+  it('一度解錠すると、次に読み込んだとき(同じブラウザ)はロック画面を経由しない', async () => {
+    await import('../src/main');
+    const input = el<HTMLInputElement>('[data-testid="password-input"]')!;
+    input.value = 'houmon2026';
+    el<HTMLButtonElement>('[data-testid="password-submit"]')!.click();
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+
+    // 再起動を模して、モジュールを読み込み直す(localStorageはそのまま)。
+    // 読み込み直す前に、今の接続を閉じておく(閉じないと次のdeleteDBがブロックされる)。
+    const dbBeforeRestart = await import('../src/db');
+    await dbBeforeRestart.closeDbForTest();
+    document.body.innerHTML = '<div id="app"></div>';
+    vi.resetModules();
+    await import('../src/main');
+
+    expect(el('[data-testid="password-input"]')).toBeNull();
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
   });
 });
 
