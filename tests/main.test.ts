@@ -573,6 +573,23 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
     expect(el('[data-testid="dialog"]')).toBeNull();
   });
 
+  it('ダイアログの背景側(フォーカスを持てない部分)を押してフォーカスが外れても、Escキーで閉じる', async () => {
+    const [first] = await startWithPlaces(1);
+    openMenuFor(first!);
+
+    // フォーカスを持てない見出しなどをクリックすると、activeElement は document.body へ移る
+    // (#app の外)。ここでは、その状況を blur() で再現し、Escキーを押しても閉じられることを
+    // 確かめる。
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+  });
+
   it('メニューの外側(背景)を押すと閉じる', async () => {
     const [first] = await startWithPlaces(1);
     openMenuFor(first!);

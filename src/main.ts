@@ -38,14 +38,27 @@ if (!root) {
   throw new Error('#app が見つかりません。');
 }
 
-// Escキーでダイアログを閉じる。document ではなく root に付けるのは、テストで main.ts を
-// 読み込み直すたびに、document へリスナーが積み重ならないようにするため。
-root.addEventListener('keydown', (event) => {
+// Escキーでダイアログを閉じる。document に付けるのは、ダイアログの背景など
+// フォーカスを持てない場所をクリックすると activeElement が document.body へ移り
+// (#app の外)、root へ付けたリスナーにはEscキーが届かなくなるため(#app はイベントの
+// targetの子孫ではなく祖先になり、バブリングでは到達しない)。
+// テストで main.ts を読み込み直すたびに document へリスナーが積み重ならないよう、
+// window に前回のハンドラーを覚えておき、新しく付ける前に外す。
+type WindowWithEscapeHandler = typeof window & {
+  __routeAutoInputEscapeHandler?: (event: KeyboardEvent) => void;
+};
+const globalWindow = window as WindowWithEscapeHandler;
+if (globalWindow.__routeAutoInputEscapeHandler) {
+  document.removeEventListener('keydown', globalWindow.__routeAutoInputEscapeHandler);
+}
+function handleEscapeKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' && state.dialog !== null) {
     event.preventDefault();
     closeAnyDialog();
   }
-});
+}
+globalWindow.__routeAutoInputEscapeHandler = handleEscapeKeydown;
+document.addEventListener('keydown', handleEscapeKeydown);
 
 // Googleマップへ遷移して戻ってきたときのために、選択・訪問順・開いたルートを
 // localStorageから復元する(Ruling 7)。復元できた場合、開いたルートがあれば地図の画面、
