@@ -194,6 +194,8 @@ a.disabled {
   flex-direction: column;
   gap: 0.5rem;
   margin: 0.75rem 0;
+  padding: 0;
+  border: 0;
 }
 
 .modes label {
