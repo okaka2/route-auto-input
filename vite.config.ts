@@ -40,5 +40,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // Vitest は標準では CSS を処理せず、?raw で読んでも空文字になる。
+    // 色のコントラスト検査(tests/styles.test.ts)で styles.css を読めるようにする。
+    css: { include: [/styles.css/] },
   },
 });
