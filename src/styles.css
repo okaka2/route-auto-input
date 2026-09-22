@@ -176,26 +176,8 @@ input[type='password'] {
 }
 
 /* ===== 以下は、既存の画面用の規則。画面ごとの作り直しで、順に置き換えて消す ===== */
-.field {
-  display: block;
-  margin-bottom: var(--gap);
-  font-weight: 600;
-}
-
-.field input {
-  display: block;
-  margin-top: 0.25rem;
-  font-weight: 400;
-}
-
-.actions {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: var(--gap);
-}
-
 a.disabled {
-  color: #999;
+  color: var(--muted);
   pointer-events: none;
   text-decoration: none;
 }
@@ -204,6 +186,7 @@ a.disabled {
   display: inline-flex;
   align-items: center;
   min-height: var(--tap-min);
+  color: var(--primary);
 }
 
 .modes {
@@ -737,4 +720,53 @@ input:focus-visible + .check {
   background: transparent;
   color: var(--muted);
   font-size: 1.5rem;
+}
+
+/* ===== 訪問先の登録・編集フォーム ===== */
+.form-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 3.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.header-link {
+  padding: 0 0.5rem;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.header-link.cancel {
+  justify-self: start;
+}
+
+.header-link.save {
+  justify-self: end;
+  font-weight: 700;
+}
+
+.field {
+  display: block;
+  margin-bottom: var(--gap);
+}
+
+.field-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+.required {
+  padding: 0 0.5rem;
+  border-radius: 0.375rem;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 0.875rem;
+  font-weight: 600;
 }

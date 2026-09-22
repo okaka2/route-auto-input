@@ -5,7 +5,7 @@ export type ValidationResult = { ok: true } | { ok: false; message: string };
 
 export function validatePatientInput(name: string, address: string): ValidationResult {
   if (name.trim().length === 0) {
-    return { ok: false, message: '氏名を入力してください。' };
+    return { ok: false, message: '名前を入力してください。' };
   }
   if (address.trim().length === 0) {
     return { ok: false, message: '住所を入力してください。' };

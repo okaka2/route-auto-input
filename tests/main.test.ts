@@ -386,11 +386,11 @@ describe('起動直後の読み込み', () => {
     // 起動直後のDB読み込みは、まだ終わっていない。この間に、すぐエラーが出る操作をする。
     el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
     el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
-    expect(el('.message')?.textContent).toContain('氏名を入力してください');
+    expect(el('.message')?.textContent).toContain('名前を入力してください');
 
     // 読み込みが終わるのを待つ(fake-indexeddb は数ミリ秒で終わる)。
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(el('.message')?.textContent).toContain('氏名を入力してください');
+    expect(el('.message')?.textContent).toContain('名前を入力してください');
   });
 });
 

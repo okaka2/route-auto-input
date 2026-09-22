@@ -70,6 +70,16 @@ describe('findDuplicateAddresses', () => {
   });
 });
 
+describe('入力の文言(名前・住所)', () => {
+  it('名前が空のとき「名前を入力してください。」', () => {
+    expect(validatePatientInput('  ', '東京都')).toEqual({ ok: false, message: '名前を入力してください。' });
+  });
+
+  it('住所が空のとき「住所を入力してください。」', () => {
+    expect(validatePatientInput('山田', '')).toEqual({ ok: false, message: '住所を入力してください。' });
+  });
+});
+
 describe('選択の文言(訪問先・件)', () => {
   it('0件のとき「訪問先を1件以上選んでください。」', () => {
     expect(validateSelection(0)).toEqual({ ok: false, message: '訪問先を1件以上選んでください。' });
