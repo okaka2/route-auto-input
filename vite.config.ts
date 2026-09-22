@@ -1,7 +1,7 @@
 import type { Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vitest/config';
-import { APP_DESCRIPTION, APP_NAME } from './src/appInfo';
+import { APP_DESCRIPTION, APP_NAME } from './src/appInfo.ts';
 
 /** index.html の %APP_NAME% を、ビルド時・開発サーバー起動時に APP_NAME へ置き換える。 */
 const appNameInHtml: Plugin = {
