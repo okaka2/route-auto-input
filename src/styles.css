@@ -261,39 +261,6 @@ a.disabled {
   min-height: var(--tap-min);
 }
 
-.stop-list {
-  list-style: none;
-  margin: var(--gap) 0;
-  padding: 0;
-}
-
-.stop-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.stop-role {
-  flex: 0 0 4.5rem;
-  font-size: 0.75rem;
-  color: #555;
-}
-
-.route-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin-bottom: var(--gap);
-}
-
-.open-route {
-  min-height: 3.5rem;
-  text-align: left;
-  padding: 0.5rem 1rem;
-}
-
 .modes {
   display: flex;
   flex-direction: column;
@@ -565,4 +532,103 @@ a.disabled {
   margin-left: 0.5rem;
   color: var(--muted);
   font-weight: 400;
+}
+
+/* ===== 訪問順の画面 ===== */
+.stop-timeline {
+  margin: var(--gap) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stop-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.5rem 1fr auto;
+  align-items: start;
+  gap: 0.75rem;
+  padding-bottom: 1.25rem;
+}
+
+/* 番号の丸から次の行の丸へ伸びる、縦のつなぎ線。 */
+.stop-row:not(:last-child)::before {
+  position: absolute;
+  top: 2.5rem;
+  bottom: 0;
+  left: 1.25rem;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--border-strong);
+  content: '';
+}
+
+.stop-number {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.stop-body {
+  min-width: 0;
+}
+
+.stop-badge {
+  display: inline-block;
+  margin-bottom: 0.125rem;
+  padding: 0 0.5rem;
+  border-radius: 0.375rem;
+  color: var(--on-primary);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.stop-badge.start {
+  background: var(--primary);
+}
+
+.stop-badge.goal {
+  background: var(--success);
+}
+
+.stop-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.stop-address {
+  color: var(--muted);
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+
+.stop-move {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.stop-move button {
+  min-width: var(--tap-min);
+  padding: 0;
+}
+
+.order-hint {
+  margin: 0 0 var(--gap);
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+.order-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }

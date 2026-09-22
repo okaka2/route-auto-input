@@ -1,73 +1,112 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MAX_STOPS_PER_ROUTE } from '../src/config';
 import { createPatient } from '../src/patient';
-import { splitIntoRoutes } from '../src/routeSplitter';
 import { createInitialState } from '../src/state';
 import { renderRouteOrder, type RouteOrderHandlers } from '../src/views/routeOrderView';
 import type { AppState, Patient } from '../src/types';
 
 const handlers = (): RouteOrderHandlers => ({
   onMove: vi.fn(),
-  onOpenRoute: vi.fn(),
+  onAddStops: vi.fn(),
+  onOpenMap: vi.fn(),
   onBack: vi.fn(),
 });
 
 function makeStops(count: number, addresses?: string[]): Patient[] {
   return Array.from({ length: count }, (_, i) =>
-    createPatient(`患者${i + 1}`, addresses?.[i] ?? `東京都${i + 1}-1`),
+    createPatient(`場所${i + 1}`, addresses?.[i] ?? `東京都${i + 1}-1`),
   );
 }
 
-/**
- * ルート分割の挙動を見るテスト専用のヘルパー。実際のアプリでは選択件数は
- * MAX_SELECTIONで頭打ちになるが、このビューはselectedIdsをそのまま描画する
- * だけなので、MAX_STOPS_PER_ROUTEの値に関わらず分割が起きるだけの件数を
- * 自由に用意できるよう、toggleSelectionを経由せず直接組み立てる。
- */
 function stateWithSelection(count: number, addresses?: string[]): AppState {
   const patients = makeStops(count, addresses);
   return { ...createInitialState(patients), selectedIds: patients.map((p) => p.id) };
 }
 
-const openButtons = (element: HTMLElement) =>
-  element.querySelectorAll<HTMLButtonElement>('[data-testid="open-route"]');
+const rows = (element: HTMLElement) =>
+  [...element.querySelectorAll<HTMLElement>('[data-testid="stop-row"]')];
+const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: string): T =>
+  element.querySelector<T>(`[data-testid="${testid}"]`)!;
 
-describe('renderRouteOrder', () => {
-  it('選択した患者を訪問順に描画する', () => {
-    const element = renderRouteOrder(stateWithSelection(3), new Set(), handlers());
-    const rows = element.querySelectorAll('[data-testid="stop-row"]');
-    expect(rows).toHaveLength(3);
-    expect(rows[0]?.textContent).toContain('患者1');
+describe('renderRouteOrder: 訪問順の並び', () => {
+  it('見出しは「訪問順を決める」', () => {
+    expect(renderRouteOrder(stateWithSelection(3), handlers()).querySelector('h1')?.textContent).toBe(
+      '訪問順を決める',
+    );
   });
 
-  it('出発地・経由地・到着地のラベルを表示する', () => {
-    const element = renderRouteOrder(stateWithSelection(3), new Set(), handlers());
-    const rows = element.querySelectorAll('[data-testid="stop-row"]');
-    expect(rows[0]?.textContent).toContain('出発地');
-    expect(rows[1]?.textContent).toContain('経由地');
-    expect(rows[2]?.textContent).toContain('到着地');
+  it('選択した訪問先を訪問順に描画する', () => {
+    const element = renderRouteOrder(stateWithSelection(3), handlers());
+    expect(rows(element)).toHaveLength(3);
+    expect(rows(element)[0]?.textContent).toContain('場所1');
+    expect(rows(element)[2]?.textContent).toContain('場所3');
   });
 
+  it('名前と住所を表示する', () => {
+    const element = renderRouteOrder(stateWithSelection(1), handlers());
+    expect(rows(element)[0]?.querySelector('.stop-name')?.textContent).toBe('場所1');
+    expect(rows(element)[0]?.querySelector('.stop-address')?.textContent).toBe('東京都1-1');
+  });
+
+  it('各行に、訪問順の番号(1, 2, 3…)を大きく表示する', () => {
+    const element = renderRouteOrder(stateWithSelection(3), handlers());
+    const numbers = rows(element).map((row) => row.querySelector('.stop-number')?.textContent);
+    expect(numbers).toEqual(['1', '2', '3']);
+  });
+
+  it('先頭に START、末尾に GOAL のバッジを付け、途中にはバッジを付けない', () => {
+    const element = renderRouteOrder(stateWithSelection(3), handlers());
+    const badges = rows(element).map((row) => row.querySelector('[data-testid="stop-badge"]')?.textContent);
+    expect(badges).toEqual(['START', undefined, 'GOAL']);
+  });
+
+  it('2件のときは、1件目が START、2件目が GOAL', () => {
+    const element = renderRouteOrder(stateWithSelection(2), handlers());
+    const badges = rows(element).map((row) => row.querySelector('[data-testid="stop-badge"]')?.textContent);
+    expect(badges).toEqual(['START', 'GOAL']);
+  });
+
+  it('1件だけのときは START / GOAL を出さず、その場所を開くことを案内する', () => {
+    const element = renderRouteOrder(stateWithSelection(1), handlers());
+    expect(element.querySelector('[data-testid="stop-badge"]')).toBeNull();
+    expect(element.textContent).toContain('1件だけのときは、その場所を地図で開きます。');
+  });
+
+  it('2件以上のときは、1件だけの案内を出さない', () => {
+    const element = renderRouteOrder(stateWithSelection(2), handlers());
+    expect(element.textContent).not.toContain('1件だけのとき');
+  });
+});
+
+describe('renderRouteOrder: 並べ替え(▲▼)', () => {
   it('先頭の「上へ」と末尾の「下へ」は押せない', () => {
-    const element = renderRouteOrder(stateWithSelection(3), new Set(), handlers());
+    const element = renderRouteOrder(stateWithSelection(3), handlers());
     const ups = element.querySelectorAll<HTMLButtonElement>('[data-testid="move-up"]');
     const downs = element.querySelectorAll<HTMLButtonElement>('[data-testid="move-down"]');
     expect(ups[0]?.disabled).toBe(true);
     expect(downs[downs.length - 1]?.disabled).toBe(true);
     expect(ups[1]?.disabled).toBe(false);
+    expect(downs[0]?.disabled).toBe(false);
   });
 
-  it('「上へ」でonMoveが-1つきで呼ばれる', () => {
+  it('「上へ」で onMove が -1 つきで呼ばれる', () => {
     const state = stateWithSelection(2);
     const spies = handlers();
-    const element = renderRouteOrder(state, new Set(), spies);
+    const element = renderRouteOrder(state, spies);
     element.querySelectorAll<HTMLButtonElement>('[data-testid="move-up"]')[1]?.click();
     expect(spies.onMove).toHaveBeenCalledWith(state.selectedIds[1], -1);
   });
 
-  it('↑↓ボタンはその行の患者idをdata-idに持つ(フォーカス復元用)', () => {
+  it('「下へ」で onMove が +1 つきで呼ばれる', () => {
+    const state = stateWithSelection(2);
+    const spies = handlers();
+    const element = renderRouteOrder(state, spies);
+    element.querySelectorAll<HTMLButtonElement>('[data-testid="move-down"]')[0]?.click();
+    expect(spies.onMove).toHaveBeenCalledWith(state.selectedIds[0], 1);
+  });
+
+  it('↑↓ボタンは、その行の訪問先のid を data-id に持つ(フォーカス復元用)', () => {
     const state = stateWithSelection(3);
-    const element = renderRouteOrder(state, new Set(), handlers());
+    const element = renderRouteOrder(state, handlers());
     const ups = element.querySelectorAll<HTMLButtonElement>('[data-testid="move-up"]');
     const downs = element.querySelectorAll<HTMLButtonElement>('[data-testid="move-down"]');
     state.selectedIds.forEach((id, i) => {
@@ -76,81 +115,78 @@ describe('renderRouteOrder', () => {
     });
   });
 
-  it('上限ちょうどならルートを開くボタンは1つ', () => {
-    const element = renderRouteOrder(stateWithSelection(MAX_STOPS_PER_ROUTE), new Set(), handlers());
-    expect(openButtons(element)).toHaveLength(1);
-    expect(openButtons(element)[0]?.textContent).toContain('Googleマップで開く');
+  it('↑↓ボタンには、どの訪問先の操作かが分かる名前(aria-label)を付ける', () => {
+    const element = renderRouteOrder(stateWithSelection(2), handlers());
+    expect(q(element, 'move-up').getAttribute('aria-label')).toBe('場所1を上へ');
+    expect(q(element, 'move-down').getAttribute('aria-label')).toBe('場所1を下へ');
   });
 
-  it('上限を超えるとルートごとにボタンが並ぶ', () => {
-    const stopCount = MAX_STOPS_PER_ROUTE * 2;
-    const expectedRouteCount = splitIntoRoutes(makeStops(stopCount), MAX_STOPS_PER_ROUTE).length;
-    expect(expectedRouteCount).toBeGreaterThan(1);
-    const element = renderRouteOrder(stateWithSelection(stopCount), new Set(), handlers());
-    expect(openButtons(element)).toHaveLength(expectedRouteCount);
-    expect(openButtons(element)[0]?.textContent).toContain('ルート1');
+  it('並べ替えの案内文を出す', () => {
+    const element = renderRouteOrder(stateWithSelection(2), handlers());
+    expect(element.querySelector('[data-testid="order-hint"]')?.textContent).toContain('▲▼');
   });
+});
 
-  it('分割されたボタンに含まれる患者名を表示する', () => {
-    const stopCount = MAX_STOPS_PER_ROUTE + 1;
-    const patients = makeStops(stopCount);
-    const state: AppState = { ...createInitialState(patients), selectedIds: patients.map((p) => p.id) };
-    const expectedRoutes = splitIntoRoutes(patients, MAX_STOPS_PER_ROUTE);
-    expect(expectedRoutes).toHaveLength(2);
-    const element = renderRouteOrder(state, new Set(), handlers());
-    for (const patient of expectedRoutes[1]!) {
-      expect(openButtons(element)[1]?.textContent).toContain(patient.name);
-    }
-  });
-
-  it('ボタンを押すとルート番号つきでonOpenRouteが呼ばれる', () => {
-    const stopCount = MAX_STOPS_PER_ROUTE * 2;
-    const spies = handlers();
-    const element = renderRouteOrder(stateWithSelection(stopCount), new Set(), spies);
-    openButtons(element)[1]?.click();
-    expect(spies.onOpenRoute).toHaveBeenCalledWith(1);
-  });
-
-  it('開いたルートには印がつく', () => {
-    const stopCount = MAX_STOPS_PER_ROUTE * 2;
-    const element = renderRouteOrder(stateWithSelection(stopCount), new Set([0]), handlers());
-    expect(openButtons(element)[0]?.textContent).toContain('✓');
-    expect(openButtons(element)[1]?.textContent).not.toContain('✓');
-  });
-
-  it('ルートを開くボタンはインデックスをdata-idに持つ(フォーカス復元用)', () => {
-    const stopCount = MAX_STOPS_PER_ROUTE * 2;
-    const element = renderRouteOrder(stateWithSelection(stopCount), new Set(), handlers());
-    const buttons = openButtons(element);
-    buttons.forEach((button, i) => {
-      expect(button.dataset.id).toBe(String(i));
-    });
-  });
-
+describe('renderRouteOrder: 警告とメッセージ', () => {
   it('同じ住所が複数あれば警告を出す', () => {
     const element = renderRouteOrder(
       stateWithSelection(3, ['東京都1-1', '大阪府2-2', '東京都1-1']),
-      new Set(),
       handlers(),
     );
-    expect(element.querySelector('[data-testid="duplicate-warning"]')?.textContent).toContain('同じ住所');
+    expect(q(element, 'duplicate-warning').textContent).toContain('同じ住所の訪問先');
   });
 
   it('住所に重複がなければ警告を出さない', () => {
-    const element = renderRouteOrder(stateWithSelection(3), new Set(), handlers());
+    const element = renderRouteOrder(stateWithSelection(3), handlers());
     expect(element.querySelector('[data-testid="duplicate-warning"]')).toBeNull();
   });
 
-  it('戻るボタンでonBackが呼ばれる', () => {
-    const spies = handlers();
-    const element = renderRouteOrder(stateWithSelection(2), new Set(), spies);
-    element.querySelector<HTMLButtonElement>('[data-testid="back-button"]')?.click();
-    expect(spies.onBack).toHaveBeenCalled();
+  it('重複の警告があっても、地図を開くボタンは押せる(ブロックしない)', () => {
+    const element = renderRouteOrder(
+      stateWithSelection(2, ['東京都1-1', '東京都1-1']),
+      handlers(),
+    );
+    expect(q<HTMLButtonElement>(element, 'open-map-button').disabled).toBe(false);
   });
 
-  it('メッセージ領域はVoiceOverに読み上げられるようrole=statusを持つ', () => {
+  it('メッセージ領域は VoiceOver に読み上げられるよう role=status を持つ', () => {
     const state = { ...stateWithSelection(2), message: { kind: 'error' as const, text: 'エラー' } };
-    const element = renderRouteOrder(state, new Set(), handlers());
+    const element = renderRouteOrder(state, handlers());
     expect(element.querySelector('.message')?.getAttribute('role')).toBe('status');
+  });
+});
+
+describe('renderRouteOrder: 操作', () => {
+  it('戻るボタンで onBack が呼ばれる', () => {
+    const spies = handlers();
+    q<HTMLButtonElement>(renderRouteOrder(stateWithSelection(2), spies), 'back-button').click();
+    expect(spies.onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('「＋ 訪問先を追加」で onAddStops が呼ばれる', () => {
+    const spies = handlers();
+    const button = q<HTMLButtonElement>(renderRouteOrder(stateWithSelection(2), spies), 'add-stops-button');
+    expect(button.textContent).toBe('＋ 訪問先を追加');
+    button.click();
+    expect(spies.onAddStops).toHaveBeenCalledTimes(1);
+  });
+
+  it('主要ボタン「この順番で地図を開く →」で onOpenMap が呼ばれる', () => {
+    const spies = handlers();
+    const button = q<HTMLButtonElement>(renderRouteOrder(stateWithSelection(2), spies), 'open-map-button');
+    expect(button.textContent).toBe('この順番で地図を開く →');
+    expect(button.classList.contains('primary')).toBe(true);
+    button.click();
+    expect(spies.onOpenMap).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('renderRouteOrder: 訪問先が選ばれていないとき', () => {
+  it('案内を出し、地図を開くボタンは出さない。追加のボタンは出す', () => {
+    const element = renderRouteOrder(createInitialState([]), handlers());
+    expect(element.textContent).toContain('訪問先が選ばれていません');
+    expect(rows(element)).toHaveLength(0);
+    expect(element.querySelector('[data-testid="open-map-button"]')).toBeNull();
+    expect(element.querySelector('[data-testid="add-stops-button"]')).not.toBeNull();
   });
 });

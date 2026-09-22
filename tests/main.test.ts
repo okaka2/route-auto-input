@@ -141,6 +141,8 @@ describe('セッションの永続化(#1)', () => {
     el<HTMLInputElement>(`input[data-id="${patientB.id}"]`)!.click();
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
 
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="open-route"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
 
@@ -248,26 +250,76 @@ describe('セッションの永続化(#1)', () => {
   });
 });
 
-describe('訪問順画面の再入場(#6)', () => {
-  it('一覧へ戻ってから次へをもう一度押すと開いたルートの印が消える', async () => {
+describe('開いたルートの印(#6)', () => {
+  /** 訪問先を count 件登録し、すべて選んで、地図の画面からルートを1つ開いた状態にする。 */
+  async function openFirstRoute(count: number): Promise<{ ids: string[] }> {
     const { savePatient } = await import('../src/db');
     const { createPatient } = await import('../src/patient');
-    const patient = createPatient('患者A', '東京都千代田区1-1');
-    await savePatient(patient);
+    const patients = Array.from({ length: count }, (_, i) =>
+      createPatient(`場所${i + 1}`, `東京都千代田区${i + 1}-1`),
+    );
+    for (const patient of patients) {
+      await savePatient(patient);
+    }
 
     await import('../src/main');
-    await waitFor(() => expect(rows()).toHaveLength(1));
-
-    el<HTMLInputElement>(`input[data-id="${patient.id}"]`)!.click();
+    await waitFor(() => expect(rows()).toHaveLength(count));
+    for (const patient of patients) {
+      el<HTMLInputElement>(`input[data-id="${patient.id}"]`)!.click();
+    }
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="open-route"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
-    expect(el('[data-testid="open-route"]')?.textContent).toContain('✓');
+
+    expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
+    return { ids: patients.map((patient) => patient.id) };
+  }
+
+  it('訪問順へ戻って、もう一度地図を開いても、開いたルートの印は残る', async () => {
+    await openFirstRoute(1);
 
     el<HTMLButtonElement>('[data-testid="back-button"]')!.click();
-    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    expect(el('h1')?.textContent).toBe('訪問順を決める');
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
 
-    expect(el('[data-testid="open-route"]')?.textContent).not.toContain('✓');
+    expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
+  });
+
+  it('訪問先の選択を変えると、開いたルートの印が消える', async () => {
+    const { ids } = await openFirstRoute(1);
+
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 地図 → 訪問順
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 訪問順 → 一覧
+    el<HTMLInputElement>(`input[data-id="${ids[0]}"]`)!.click(); // 選択を外す
+    el<HTMLInputElement>(`input[data-id="${ids[0]}"]`)!.click(); // 選び直す
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+
+    expect(el('[data-testid="route-status"]')).toBeNull();
+    expect(el('[data-testid="route-card"]')?.getAttribute('data-state')).toBe('next');
+  });
+
+  it('訪問順を並べ替えると、開いたルートの印が消える', async () => {
+    await openFirstRoute(2);
+
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 地図 → 訪問順
+    el<HTMLButtonElement>('[data-testid="move-down"]')!.click(); // 1件目を下へ
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+
+    expect(el('[data-testid="route-status"]')).toBeNull();
+  });
+
+  it('先頭の▲は押せず、何も変わらないので、開いたルートの印は残る', async () => {
+    await openFirstRoute(2);
+
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 地図 → 訪問順
+    // 先頭の▲は押せない(disabled)ので、押しても何も起きない。
+    el<HTMLButtonElement>('[data-testid="move-up"]')!.click();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+
+    expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
   });
 });
 

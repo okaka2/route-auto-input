@@ -1,73 +1,92 @@
-import { MAX_STOPS_PER_ROUTE } from '../config';
-import { splitIntoRoutes } from '../routeSplitter';
 import { selectedPatients } from '../state';
-import { findDuplicateAddresses } from '../validation';
 import type { AppState, Patient } from '../types';
+import { findDuplicateAddresses } from '../validation';
+import { renderMessage, renderScreenHeader } from './common';
 
 export type RouteOrderHandlers = {
   onMove(id: string, direction: -1 | 1): void;
-  onOpenRoute(routeIndex: number): void;
+  /** 「＋ 訪問先を追加」。訪問先を選ぶ画面へ戻る。 */
+  onAddStops(): void;
+  /** 「この順番で地図を開く →」。地図を開く画面へ進む。 */
+  onOpenMap(): void;
   onBack(): void;
 };
 
-export function renderRouteOrder(
-  state: AppState,
-  openedRouteIndexes: ReadonlySet<number>,
-  handlers: RouteOrderHandlers,
-): HTMLElement {
+/**
+ * 訪問順の画面。START から GOAL までを、番号つきの縦の並びで示し、▲▼で並べ替える。
+ * 訪問順の自動最適化はしない。ユーザーが決めた順番のまま、地図の画面へ渡す。
+ */
+export function renderRouteOrder(state: AppState, handlers: RouteOrderHandlers): HTMLElement {
   const container = document.createElement('div');
-  const stops = selectedPatients(state);
-
-  const title = document.createElement('h1');
-  title.textContent = '訪問順を決める';
-  container.append(title);
+  container.className = 'screen';
+  container.append(renderScreenHeader('訪問順を決める', { onBack: handlers.onBack }));
 
   if (state.message) {
-    const message = document.createElement('p');
-    message.className = `message ${state.message.kind}`;
-    message.setAttribute('role', 'status');
-    message.textContent = state.message.text;
-    container.append(message);
+    container.append(renderMessage(state.message));
   }
 
-  const duplicates = findDuplicateAddresses(stops);
-  if (duplicates.length > 0) {
-    const warning = document.createElement('p');
-    warning.className = 'message error';
+  const stops = selectedPatients(state);
+
+  if (findDuplicateAddresses(stops).length > 0) {
+    // ブロックはしない。注意だけを出して、そのまま開けるようにする。
+    const warning = renderMessage({
+      kind: 'error',
+      text: '⚠ 同じ住所の訪問先が複数含まれています。このまま開くこともできます。',
+    });
     warning.dataset.testid = 'duplicate-warning';
-    warning.textContent = '同じ住所の患者が複数含まれています。このまま開くこともできます。';
     container.append(warning);
   }
 
+  if (stops.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'hint';
+    empty.textContent = '訪問先が選ばれていません。「＋ 訪問先を追加」から選んでください。';
+    container.append(empty, renderAddButton(handlers));
+    return container;
+  }
+
+  if (stops.length === 1) {
+    const single = document.createElement('p');
+    single.className = 'hint';
+    single.textContent = '1件だけのときは、その場所を地図で開きます。';
+    container.append(single);
+  }
+
   const list = document.createElement('ol');
-  list.className = 'stop-list';
+  list.className = 'stop-timeline';
   stops.forEach((patient, index) => {
     list.append(renderStopRow(patient, index, stops.length, handlers));
   });
   container.append(list);
 
-  const routes = splitIntoRoutes(stops, MAX_STOPS_PER_ROUTE);
-  if (routes.length > 1) {
-    const note = document.createElement('p');
-    note.textContent = `1本のルートに入れられるのは${MAX_STOPS_PER_ROUTE}地点までのため、${routes.length}本に分けます。上から順に開いてください。`;
-    container.append(note);
-  }
+  const hint = document.createElement('p');
+  hint.className = 'order-hint';
+  hint.dataset.testid = 'order-hint';
+  hint.textContent = '▲▼ボタンで、順番を入れ替えられます。';
+  container.append(hint);
 
-  const routeActions = document.createElement('div');
-  routeActions.className = 'route-actions';
-  routes.forEach((route, index) => {
-    routeActions.append(renderOpenButton(route, index, routes.length, openedRouteIndexes, handlers));
-  });
-  container.append(routeActions);
-
-  const backButton = document.createElement('button');
-  backButton.type = 'button';
-  backButton.textContent = '一覧へ戻る';
-  backButton.dataset.testid = 'back-button';
-  backButton.addEventListener('click', () => handlers.onBack());
-  container.append(backButton);
+  const actions = document.createElement('div');
+  actions.className = 'order-actions';
+  const openMap = document.createElement('button');
+  openMap.type = 'button';
+  openMap.className = 'primary block';
+  openMap.dataset.testid = 'open-map-button';
+  openMap.textContent = 'この順番で地図を開く →';
+  openMap.addEventListener('click', () => handlers.onOpenMap());
+  actions.append(renderAddButton(handlers), openMap);
+  container.append(actions);
 
   return container;
+}
+
+function renderAddButton(handlers: RouteOrderHandlers): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'block';
+  button.dataset.testid = 'add-stops-button';
+  button.textContent = '＋ 訪問先を追加';
+  button.addEventListener('click', () => handlers.onAddStops());
+  return button;
 }
 
 function renderStopRow(
@@ -80,60 +99,52 @@ function renderStopRow(
   row.className = 'stop-row';
   row.dataset.testid = 'stop-row';
 
-  const role = document.createElement('span');
-  role.className = 'stop-role';
-  role.textContent = index === 0 ? '出発地' : index === total - 1 ? '到着地' : '経由地';
+  const rail = document.createElement('div');
+  rail.className = 'stop-rail';
+  const number = document.createElement('span');
+  number.className = 'stop-number';
+  number.setAttribute('aria-hidden', 'true');
+  number.textContent = String(index + 1);
+  rail.append(number);
 
   const body = document.createElement('div');
-  body.className = 'patient-body';
+  body.className = 'stop-body';
+  // 1件だけのときは、始点も終点もないので、バッジを出さない。
+  if (total > 1 && (index === 0 || index === total - 1)) {
+    const badge = document.createElement('span');
+    badge.className = index === 0 ? 'stop-badge start' : 'stop-badge goal';
+    badge.dataset.testid = 'stop-badge';
+    badge.textContent = index === 0 ? 'START' : 'GOAL';
+    body.append(badge);
+  }
   const name = document.createElement('div');
-  name.className = 'patient-name';
+  name.className = 'stop-name';
   name.textContent = patient.name;
   const address = document.createElement('div');
-  address.className = 'patient-address';
+  address.className = 'stop-address';
   address.textContent = patient.address;
   body.append(name, address);
 
+  const move = document.createElement('div');
+  move.className = 'stop-move';
   const up = document.createElement('button');
   up.type = 'button';
-  up.textContent = '↑';
+  up.textContent = '▲';
   up.dataset.testid = 'move-up';
   up.dataset.id = patient.id;
   up.disabled = index === 0;
-  up.setAttribute('aria-label', `${patient.name} を上へ`);
+  up.setAttribute('aria-label', `${patient.name}を上へ`);
   up.addEventListener('click', () => handlers.onMove(patient.id, -1));
-
   const down = document.createElement('button');
   down.type = 'button';
-  down.textContent = '↓';
+  down.textContent = '▼';
   down.dataset.testid = 'move-down';
   down.dataset.id = patient.id;
   down.disabled = index === total - 1;
-  down.setAttribute('aria-label', `${patient.name} を下へ`);
+  down.setAttribute('aria-label', `${patient.name}を下へ`);
   down.addEventListener('click', () => handlers.onMove(patient.id, 1));
+  move.append(up, down);
 
-  row.append(role, body, up, down);
+  row.append(rail, body, move);
   return row;
-}
-
-function renderOpenButton(
-  route: readonly Patient[],
-  index: number,
-  routeCount: number,
-  openedRouteIndexes: ReadonlySet<number>,
-  handlers: RouteOrderHandlers,
-): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'primary open-route';
-  button.dataset.testid = 'open-route';
-  button.dataset.id = String(index);
-
-  const opened = openedRouteIndexes.has(index) ? '✓ ' : '';
-  const names = route.map((patient) => patient.name).join(' → ');
-  button.textContent =
-    routeCount === 1 ? `${opened}Googleマップで開く` : `${opened}ルート${index + 1}を開く(${names})`;
-
-  button.addEventListener('click', () => handlers.onOpenRoute(index));
-  return button;
 }

@@ -204,7 +204,14 @@ function renderScreen(): HTMLElement {
     case 'list':
       return renderPatientList(state, {
         onSearch: (query) => setState(setSearchQuery(state, query)),
-        onToggleSelect: (id) => setState(toggleSelection(state, id)),
+        onToggleSelect: (id) => {
+          const next = toggleSelection(state, id);
+          // 選択が実際に変わったときだけ、開いたルートの印を消す(上限で選べなかったときは変えない)。
+          if (next.selectedIds !== state.selectedIds) {
+            openedRoutes.clear();
+          }
+          setState(next);
+        },
         onNew: () => {
           formDraft = null;
           setState(withScreen(state, { name: 'form', patientId: null }));
@@ -222,7 +229,6 @@ function renderScreen(): HTMLElement {
             setState(withMessage(state, { kind: 'error', text: validation.message }));
             return;
           }
-          openedRoutes.clear();
           setState(withScreen(state, { name: 'order' }));
         },
         onOpenSettings: () => setState(withScreen(state, { name: 'settings' })),
@@ -238,9 +244,17 @@ function renderScreen(): HTMLElement {
         },
       });
     case 'order':
-      return renderRouteOrder(state, new Set(openedRoutes.keys()), {
-        onMove: (id, direction) => setState(moveSelected(state, id, direction)),
-        onOpenRoute: handleOpenRoute,
+      return renderRouteOrder(state, {
+        onMove: (id, direction) => {
+          const next = moveSelected(state, id, direction);
+          // 順番が実際に変わったときだけ、開いたルートの印を消す(端の▲▼は何も変えない)。
+          if (next.selectedIds !== state.selectedIds) {
+            openedRoutes.clear();
+          }
+          setState(next);
+        },
+        onAddStops: () => setState(withScreen(state, { name: 'list' })),
+        onOpenMap: () => setState(withScreen(state, { name: 'map' })),
         onBack: () => setState(withScreen(state, { name: 'list' })),
       });
     case 'map':
