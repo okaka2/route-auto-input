@@ -480,3 +480,89 @@ a.disabled {
   flex: 1;
   min-height: var(--tap-primary);
 }
+
+/* ===== 地図を開く画面(ルートのカード) ===== */
+.summary-card p {
+  margin: 0;
+}
+
+.summary-card .summary-count {
+  font-weight: 600;
+}
+
+.summary-card .summary-split {
+  margin-top: 0.25rem;
+  color: var(--muted);
+}
+
+.empty-card p {
+  margin: 0 0 var(--gap);
+}
+
+.route-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.route-card {
+  padding: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* 次に開くルート: 青い枠と薄い青の背景で、最も目立たせる。 */
+.route-card.next {
+  border: 2px solid var(--primary);
+  background: var(--primary-soft);
+}
+
+/* 開いたルート: 緑。 */
+.route-card.done {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+
+.route-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+
+.route-title {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.route-count {
+  color: var(--muted);
+}
+
+.route-next-label {
+  margin-left: auto;
+  padding: 0.125rem 0.75rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.route-names {
+  margin: 0.5rem 0 var(--gap);
+  overflow-wrap: anywhere;
+}
+
+.route-status {
+  margin: 0.5rem 0 0.75rem;
+  color: var(--success);
+  font-weight: 600;
+}
+
+.route-time {
+  margin-left: 0.5rem;
+  color: var(--muted);
+  font-weight: 400;
+}

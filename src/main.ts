@@ -23,6 +23,7 @@ import { validatePatientInput, validateSelection } from './validation';
 import { renderPatientForm, type PatientFormDraft } from './views/patientFormView';
 import { renderPatientList } from './views/patientListView';
 import { renderRouteOrder } from './views/routeOrderView';
+import { renderRouteMap } from './views/routeMapView';
 import { renderSettings } from './views/settingsView';
 
 const root = document.querySelector<HTMLDivElement>('#app');
@@ -34,7 +35,13 @@ if (!root) {
 // localStorageから復元する(Ruling 7)。復元できた場合は訪問順の画面から始める。
 const restoredSession = loadSession();
 let state: AppState = restoredSession
-  ? { ...createInitialState([]), selectedIds: restoredSession.selectedIds, screen: { name: 'order' } }
+  ? {
+      ...createInitialState([]),
+      selectedIds: restoredSession.selectedIds,
+      // 開いたルートがあれば、地図アプリから戻ってきた状況。次に開くルートがすぐ分かるよう、
+      // 地図の画面から始める。なければ、これまでどおり訪問順の画面から始める。
+      screen: { name: restoredSession.opened.length > 0 ? 'map' : 'order' },
+    }
   : createInitialState([]);
 // 開いたルートの番号と、開いた日時(ISO 8601。日時が分からない古い記録から復元したものは '')。
 const openedRoutes = new Map<number, string>(
@@ -235,6 +242,12 @@ function renderScreen(): HTMLElement {
         onMove: (id, direction) => setState(moveSelected(state, id, direction)),
         onOpenRoute: handleOpenRoute,
         onBack: () => setState(withScreen(state, { name: 'list' })),
+      });
+    case 'map':
+      return renderRouteMap(state, new Map(openedRoutes), DEFAULT_MAP_PROVIDER, {
+        onOpenRoute: handleOpenRoute,
+        onBack: () => setState(withScreen(state, { name: 'order' })),
+        onChooseStops: () => setState(withScreen(state, { name: 'list' })),
       });
     case 'settings':
       return renderSettings(state, {

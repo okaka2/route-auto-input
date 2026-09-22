@@ -24,6 +24,11 @@ beforeEach(async () => {
   vi.resetModules();
   window.localStorage.clear();
   await deleteDB('route-auto-input');
+  // vi.resetModules() はモジュールの読み込みキャッシュを消すだけで、
+  // vi.mock('../src/openRoute', ...) が作ったモック関数の呼び出し履歴は
+  // テストをまたいで残る。呼び出し回数を検証するテストのために、ここでクリアする。
+  const { openUrl } = await import('../src/openRoute');
+  vi.mocked(openUrl).mockClear();
 });
 
 afterEach(async () => {
@@ -121,7 +126,7 @@ describe('二重タップ防止(#7)', () => {
 });
 
 describe('セッションの永続化(#1)', () => {
-  it('選択・訪問順・開いたルートがlocalStorageに残り、再起動後に訪問順の画面から復元される', async () => {
+  it('選択・訪問順・開いたルートがlocalStorageに残り、再起動後に地図の画面から復元される', async () => {
     const { savePatient } = await import('../src/db');
     const { createPatient } = await import('../src/patient');
     const patientA = createPatient('患者A', '東京都千代田区1-1');
@@ -158,10 +163,10 @@ describe('セッションの永続化(#1)', () => {
     vi.resetModules();
     await import('../src/main');
 
-    // 復元直後は一覧画面ではなく訪問順の画面から始まる
-    expect(el('h1')?.textContent).toBe('訪問順を決める');
-    await waitFor(() => expect(document.querySelectorAll('[data-testid="stop-row"]')).toHaveLength(2));
-    expect(el('[data-testid="open-route"]')?.textContent).toContain('✓');
+    // 開いたルートがあるので、次に開くルートがすぐ分かるよう、地図の画面から始まる
+    expect(el('h1')?.textContent).toBe('地図を開く');
+    await waitFor(() => expect(document.querySelectorAll('[data-testid="route-card"]')).toHaveLength(1));
+    expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
   });
 
   it('12時間より古いセッションは復元せず一覧画面から始まる', async () => {
@@ -324,5 +329,94 @@ describe('起動直後の読み込み', () => {
     // 読み込みが終わるのを待つ(fake-indexeddb は数ミリ秒で終わる)。
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(el('.message')?.textContent).toContain('氏名を入力してください');
+  });
+});
+
+describe('地図を開く画面', () => {
+  async function seedOnePatient(): Promise<{ id: string }> {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('場所A', '東京都千代田区1-1');
+    await savePatient(patient);
+    return { id: patient.id };
+  }
+
+  function writeSession(record: object): void {
+    window.localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ timestamp: new Date().toISOString(), ...record }),
+    );
+  }
+
+  it('開いたルートが記録されていれば、地図の画面から始まり、開いた日時を表示する', async () => {
+    const { id } = await seedOnePatient();
+    writeSession({
+      selectedIds: [id],
+      opened: [{ index: 0, at: new Date(2026, 8, 21, 14, 32).toISOString() }],
+    });
+
+    await import('../src/main');
+
+    expect(el('h1')?.textContent).toBe('地図を開く');
+    await waitFor(() => expect(document.querySelectorAll('[data-testid="route-card"]')).toHaveLength(1));
+    expect(el('[data-testid="route-status"]')?.textContent).toContain('9/21 14:32');
+  });
+
+  it('古い形式(番号だけ)の記録でも、開いたルートがあれば地図の画面から始まる', async () => {
+    const { id } = await seedOnePatient();
+    writeSession({ selectedIds: [id], openedRouteIndexes: [0] });
+
+    await import('../src/main');
+
+    expect(el('h1')?.textContent).toBe('地図を開く');
+    await waitFor(() => expect(el('[data-testid="route-status"]')).not.toBeNull());
+    expect(el('.route-time')).toBeNull();
+  });
+
+  it('開いたルートが無ければ、これまでどおり訪問順の画面から始まる', async () => {
+    const { id } = await seedOnePatient();
+    writeSession({ selectedIds: [id], opened: [] });
+
+    await import('../src/main');
+
+    expect(el('h1')?.textContent).toBe('訪問順を決める');
+    await waitFor(() => expect(document.querySelectorAll('[data-testid="stop-row"]')).toHaveLength(1));
+  });
+
+  it('「もう一度開く」で、地図を開く遷移が呼ばれる', async () => {
+    const { id } = await seedOnePatient();
+    writeSession({ selectedIds: [id], opened: [{ index: 0, at: new Date().toISOString() }] });
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="open-route"]')).not.toBeNull());
+    const { openUrl } = await import('../src/openRoute');
+
+    el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
+
+    expect(openUrl).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(openUrl).mock.calls[0]?.[0])).toContain('google.com/maps');
+  });
+
+  it('戻るを押すと、訪問順の画面へ戻る', async () => {
+    const { id } = await seedOnePatient();
+    writeSession({ selectedIds: [id], opened: [{ index: 0, at: '' }] });
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="back-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click();
+
+    expect(el('h1')?.textContent).toBe('訪問順を決める');
+  });
+
+  it('選択がなくなっていても地図の画面が開け、「訪問先を選ぶ」から一覧へ進める', async () => {
+    writeSession({ selectedIds: ['gone-id'], opened: [{ index: 0, at: '' }] });
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="choose-stops-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="choose-stops-button"]')!.click();
+
+    // 一覧の画面へ移った(この時点の一覧は、まだ作り直していない古い画面)。
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    expect(el('h1')?.textContent).not.toBe('地図を開く');
   });
 });
