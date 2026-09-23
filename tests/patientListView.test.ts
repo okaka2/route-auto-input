@@ -305,6 +305,14 @@ describe('renderPatientList: 並び替え', () => {
     });
     expect(handlers.onSortChange).toHaveBeenCalledWith('address');
   });
+
+  it('プルダウンは、visually-hiddenなラベルなどで隠されていない(見えなくなるバグの再発防止)', () => {
+    const element = renderPatientList(createInitialState(makePatients(2)), noopHandlers());
+    const select = q<HTMLSelectElement>(element, 'sort-select');
+    for (let ancestor: HTMLElement | null = select; ancestor !== null; ancestor = ancestor.parentElement) {
+      expect(ancestor.classList.contains('visually-hidden')).toBe(false);
+    }
+  });
 });
 
 describe('renderPatientList: 全選択', () => {

@@ -155,9 +155,10 @@ function renderListControls(state: AppState, handlers: PatientListHandlers): HTM
   const row = document.createElement('div');
   row.className = 'list-controls';
 
-  const sortLabel = document.createElement('label');
-  sortLabel.className = 'visually-hidden';
-  sortLabel.textContent = '並び替え';
+  // 見た目のラベルは付けない(隣の全選択ボタンなどで並び替え欄だと分かるため)。
+  // aria-labelだけでスクリーンリーダー向けの名前を付ける。ラベル要素で囲むと、
+  // visually-hiddenで隠すときに中の<select>まで一緒に見えなくなってしまうため、
+  // visually-hiddenなラベルでは囲まない(合言葉の入力欄で起きたのと同じ不具合)。
   const sort = document.createElement('select');
   sort.dataset.testid = 'sort-select';
   sort.setAttribute('aria-label', '並び替え');
@@ -169,7 +170,6 @@ function renderListControls(state: AppState, handlers: PatientListHandlers): HTM
   }
   sort.value = state.sortOrder;
   sort.addEventListener('change', () => handlers.onSortChange(sort.value as SortOrder));
-  sortLabel.append(sort);
 
   const visible = visiblePatients(state);
   const allSelected = visible.length > 0 && visible.every((patient) => state.selectedIds.includes(patient.id));
@@ -181,7 +181,7 @@ function renderListControls(state: AppState, handlers: PatientListHandlers): HTM
   selectAll.textContent = allSelected ? '全解除' : '全選択';
   selectAll.addEventListener('click', () => handlers.onToggleSelectAll());
 
-  row.append(sortLabel, selectAll);
+  row.append(sort, selectAll);
   return row;
 }
 
