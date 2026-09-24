@@ -42,9 +42,9 @@ export function renderPatientList(
   head.className = 'list-head';
   head.append(
     renderTitleRow(handlers),
-    renderSearch(state, handlers),
+    renderNewRow(handlers),
+    renderSearchRow(state, handlers),
     renderListControls(state, handlers),
-    renderFilterToggle(state, handlers),
   );
   container.append(head);
 
@@ -55,14 +55,6 @@ export function renderPatientList(
   if (state.message) {
     container.append(renderMessage(state.message));
   }
-
-  const newButton = document.createElement('button');
-  newButton.type = 'button';
-  newButton.className = 'primary block';
-  newButton.dataset.testid = 'new-button';
-  newButton.textContent = '＋ 訪問先を登録';
-  newButton.addEventListener('click', () => handlers.onNew());
-  container.append(newButton);
 
   if (state.listFilter === 'selected') {
     container.append(renderFilterBand(state, handlers));
@@ -134,6 +126,39 @@ function renderTitleRow(handlers: PatientListHandlers): HTMLElement {
   return row;
 }
 
+function renderNewRow(handlers: PatientListHandlers): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'list-new-row';
+
+  const newButton = document.createElement('button');
+  newButton.type = 'button';
+  newButton.className = 'primary block';
+  newButton.dataset.testid = 'new-button';
+  newButton.textContent = '＋ 訪問先を登録';
+  newButton.addEventListener('click', () => handlers.onNew());
+
+  row.append(newButton);
+  return row;
+}
+
+function renderSearchRow(state: AppState, handlers: PatientListHandlers): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'list-search-row';
+
+  const visible = visiblePatients(state);
+  const allSelected = visible.length > 0 && visible.every((patient) => state.selectedIds.includes(patient.id));
+
+  const selectAll = document.createElement('button');
+  selectAll.type = 'button';
+  selectAll.className = 'select-all small';
+  selectAll.dataset.testid = 'select-all-button';
+  selectAll.textContent = allSelected ? '全解除' : '全選択';
+  selectAll.addEventListener('click', () => handlers.onToggleSelectAll());
+
+  row.append(renderSearch(state, handlers), selectAll);
+  return row;
+}
+
 function renderSearch(state: AppState, handlers: PatientListHandlers): HTMLElement {
   const wrapper = document.createElement('div');
   wrapper.className = 'search';
@@ -188,7 +213,7 @@ const SORT_OPTIONS: { value: SortOrder; label: string }[] = [
   { value: 'address', label: '住所順(あいうえお順)' },
 ];
 
-/** 並び替えのプルダウンと、全選択/全解除ボタン。 */
+/** 並び替えのプルダウンと、「すべて/選択中」の切り替え。 */
 function renderListControls(state: AppState, handlers: PatientListHandlers): HTMLElement {
   const row = document.createElement('div');
   row.className = 'list-controls';
@@ -209,17 +234,7 @@ function renderListControls(state: AppState, handlers: PatientListHandlers): HTM
   sort.value = state.sortOrder;
   sort.addEventListener('change', () => handlers.onSortChange(sort.value as SortOrder));
 
-  const visible = visiblePatients(state);
-  const allSelected = visible.length > 0 && visible.every((patient) => state.selectedIds.includes(patient.id));
-
-  const selectAll = document.createElement('button');
-  selectAll.type = 'button';
-  selectAll.className = 'select-all';
-  selectAll.dataset.testid = 'select-all-button';
-  selectAll.textContent = allSelected ? '全解除' : '全選択';
-  selectAll.addEventListener('click', () => handlers.onToggleSelectAll());
-
-  row.append(sort, selectAll);
+  row.append(sort, renderFilterToggle(state, handlers));
   return row;
 }
 

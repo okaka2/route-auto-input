@@ -123,3 +123,10 @@ describe('整理', () => {
     expect(css).not.toContain('--accent');
   });
 });
+
+describe('一覧の上部の文字の大きさ', () => {
+  it('訪問先の名前は 18px(1.125rem)以上、本文は 16px', () => {
+    expect(css).toMatch(/\.place-name\s*\{[^}]*font-size:\s*1\.125rem/s);
+    expect(css).toMatch(/body\s*\{[^}]*font-size:\s*1rem/s);
+  });
+});

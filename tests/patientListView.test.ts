@@ -403,6 +403,18 @@ describe('すべて/選択中の切り替え', () => {
   });
 });
 
+describe('一覧の上部の並び', () => {
+  it('上部は 見出し → 登録ボタン → 検索+全選択 → 並び替え+すべて/選択中 の順', () => {
+    const element = renderPatientList(createInitialState(makePatients(1)), noopHandlers());
+    const head = element.querySelector('.list-head')!;
+    const rows = [...head.children].map((c) => c.className);
+    expect(rows).toEqual(['list-title-row', 'list-new-row', 'list-search-row', 'list-controls']);
+    expect(head.querySelector('[data-testid="new-button"]')).not.toBeNull();
+    expect(head.querySelector('.list-search-row [data-testid="select-all-button"]')).not.toBeNull();
+    expect(head.querySelector('.list-controls [data-testid="filter-all"]')).not.toBeNull();
+  });
+});
+
 describe('renderPatientList: 電話番号', () => {
   it('電話番号がある行には、tel: リンクがある', () => {
     const patient = createPatient('山田 太郎', '東京都千代田区1-1', new Date(), '03-1234-5678');

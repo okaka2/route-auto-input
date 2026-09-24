@@ -361,7 +361,7 @@ a.disabled {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0;
-  margin-top: 0.5rem;
+  margin-top: 0;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   overflow: hidden;
@@ -401,13 +401,35 @@ a.disabled {
   background: var(--surface);
 }
 
-.list-controls {
+.list-new-row {
   display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.list-search-row {
+  display: flex;
+  gap: 0.5rem;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--gap);
-  padding: 0 calc(var(--gap) + env(safe-area-inset-right)) 0.5rem
-    calc(var(--gap) + env(safe-area-inset-left));
+  margin-top: 0.5rem;
+}
+
+.list-search-row .search {
+  flex: 1;
+}
+
+button.select-all.small {
+  min-height: var(--tap-min);
+  padding: 0 0.75rem;
+  white-space: nowrap;
+}
+
+.list-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0;
 }
 
 .list-controls select {
@@ -890,6 +912,7 @@ input:focus-visible + .check {
 }
 
 .place-name {
+  font-size: 1.125rem;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -898,7 +921,7 @@ input:focus-visible + .check {
   display: -webkit-box;
   overflow: hidden;
   color: var(--muted);
-  font-size: 0.9375rem;
+  font-size: 1rem;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
