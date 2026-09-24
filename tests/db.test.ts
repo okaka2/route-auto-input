@@ -17,6 +17,7 @@ import {
   replaceAllPatients,
   savePatient,
   setMeta,
+  updateHistory,
   type HistoryEntry,
 } from '../src/db';
 import { createPatient, updatePatientFields } from '../src/patient';
@@ -140,5 +141,14 @@ describe('history', () => {
     expect((await listHistory()).map((e) => e.date)).toEqual(['2026-09-22', '2026-08-15']);
     await clearHistory();
     expect(await listHistory()).toEqual([]);
+  });
+  it('updateHistoryは読み取りと書き込みの間に他の書き込みを割り込ませない(同時実行しても両方残る)', async () => {
+    await putHistory(h('2026-09-22'));
+    await Promise.all([
+      updateHistory('2026-09-22', (current) => ({ ...current!, visited: { ...current!.visited, x: '10:00' } })),
+      updateHistory('2026-09-22', (current) => ({ ...current!, visited: { ...current!.visited, y: '10:01' } })),
+    ]);
+    const stored = await getHistory('2026-09-22');
+    expect(stored?.visited).toEqual({ x: '10:00', y: '10:01' });
   });
 });

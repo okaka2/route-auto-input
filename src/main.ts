@@ -7,15 +7,14 @@ import {
   deleteMeta,
   deletePatient,
   deletePatients,
-  getHistory,
   getMeta,
   listHistory,
   listPatients,
   mergePatients,
-  putHistory,
   replaceAllPatients,
   savePatient,
   setMeta,
+  updateHistory,
   type HistoryEntry,
 } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
@@ -321,9 +320,10 @@ async function recordTodayRoute(): Promise<void> {
   const ends = routeContext.ends;
   const date = dateKey(new Date());
   try {
-    const existing = await getHistory(date);
-    const visited = Object.fromEntries(Object.entries(existing?.visited ?? {}).filter(([id]) => ids.includes(id)));
-    await putHistory({ date, ids: [...ids], routeEnds: ends, visited });
+    await updateHistory(date, (existing) => {
+      const visited = Object.fromEntries(Object.entries(existing?.visited ?? {}).filter(([id]) => ids.includes(id)));
+      return { date, ids: [...ids], routeEnds: ends, visited };
+    });
     await loadHistory();
   } catch {
     // 記録できなくても地図は開ける。
@@ -340,13 +340,15 @@ function todayVisited(): Map<string, string> {
 async function toggleVisited(id: string): Promise<void> {
   const date = dateKey(new Date());
   try {
-    const existing = (await getHistory(date)) ?? { date, ids: [...state.selectedIds], routeEnds: routeContext.ends, visited: {} };
-    // 今日の記録に無い(=今日のルートに含まれない)訪問先は、済にできない。
-    if (existing.ids.length > 0 && !existing.ids.includes(id)) return;
-    const visited = { ...existing.visited };
-    if (visited[id]) delete visited[id];
-    else visited[id] = new Date().toISOString();
-    await putHistory({ ...existing, visited });
+    await updateHistory(date, (existing) => {
+      const base = existing ?? { date, ids: [...state.selectedIds], routeEnds: routeContext.ends, visited: {} };
+      // 今日の記録に無い(=今日のルートに含まれない)訪問先は、済にできない。
+      if (base.ids.length > 0 && !base.ids.includes(id)) return base;
+      const visited = { ...base.visited };
+      if (visited[id]) delete visited[id];
+      else visited[id] = new Date().toISOString();
+      return { ...base, visited };
+    });
     await loadHistory();
   } catch {
     setState(withMessage(state, { kind: 'error', text: '訪問済みを記録できませんでした。' }));
@@ -397,6 +399,7 @@ function pickHistory(date: string): void {
     return;
   }
   routeContext = { ...routeContext, ends: entry.routeEnds };
+  void setMeta('routeEnds', entry.routeEnds).catch(() => undefined);
   openedRoutes.clear();
   const next = withScreen({ ...state, selectedIds: ids }, { name: 'order' });
   setState(

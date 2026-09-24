@@ -139,6 +139,19 @@ export async function putHistory(entry: HistoryEntry): Promise<void> {
   await db.put(HISTORY_STORE, entry);
 }
 
+/** その日の記録を、1つの読み書きトランザクションの中で読んで書き換える(読み取りと書き込みの間に他の書き込みが割り込まない)。 */
+export async function updateHistory(
+  date: string,
+  update: (current: HistoryEntry | undefined) => HistoryEntry,
+): Promise<HistoryEntry> {
+  const db = await getDb();
+  const tx = db.transaction(HISTORY_STORE, 'readwrite');
+  const next = update(await tx.store.get(date));
+  await tx.store.put(next);
+  await tx.done;
+  return next;
+}
+
 /** 新しい日付が先に来る。 */
 export async function listHistory(): Promise<HistoryEntry[]> {
   const db = await getDb();

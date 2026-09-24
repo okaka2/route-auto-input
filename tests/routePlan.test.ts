@@ -57,4 +57,9 @@ describe('buildRoutePlans', () => {
   it('0件なら空', () => {
     expect(buildRoutePlans([], ends('office', 'office'), office, 10)).toEqual([]);
   });
+  it('現在地から出発し事業所へ戻る1本のルートなら、fromCurrentLocationと事業所の住所の両方が付く', () => {
+    const [plan] = buildRoutePlans(stops(2), ends('current', 'office'), office, 10);
+    expect(plan!.fromCurrentLocation).toBe(true);
+    expect(plan!.addresses).toEqual(['住所1', '住所2', office.address]);
+  });
 });

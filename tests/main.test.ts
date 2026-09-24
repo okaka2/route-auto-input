@@ -17,13 +17,13 @@ async function waitFor(assertion: () => void): Promise<void> {
 }
 
 /**
- * 「地図を開く」を押すと、裏で今日の記録(IndexedDB: db.putHistory → db.listHistory)が始まる。
+ * 「地図を開く」を押すと、裏で今日の記録(IndexedDB: db.updateHistory → db.listHistory)が始まる。
  * それを待たずにテストが終わると、次のテストの beforeEach(接続を作り直す)と競合して
  * テスト全体が止まってしまうことがあるため、記録が実際に終わるまで待てるようにする。
  *
  * 書き込む内容が前回と同じ(同じ人を選び直しただけ、など)ケースでは、書き込み後の中身を
  * 比較するだけでは「今回の」書き込みが終わったのか判別できない。そこで、ボタンを押す前に
- * db.putHistory/db.listHistory の呼び出しそのものを横取りする形でしかけておき(この関数)、
+ * db.updateHistory/db.listHistory の呼び出しそのものを横取りする形でしかけておき(この関数)、
  * ボタンを押した後にその完了を待つ(戻り値の関数を呼んで、その結果をawaitする)。
  * 戻り値をそのままPromiseにしてしまうと、async関数からPromiseを返した時点で自動的に
  * その中身が解決されるまで待たれてしまい(仕掛けた直後、ボタンを押す前に固まってしまう)、
@@ -35,17 +35,18 @@ async function armHistoryRecordWait(): Promise<() => Promise<void>> {
   const done = new Promise<void>((resolve) => {
     resolveDone = resolve;
   });
-  const originalPut = db.putHistory;
-  const putSpy = vi.spyOn(db, 'putHistory').mockImplementation(async (entry) => {
-    putSpy.mockRestore();
-    await originalPut(entry);
+  const originalUpdate = db.updateHistory;
+  const updateSpy = vi.spyOn(db, 'updateHistory').mockImplementation(async (date, update) => {
+    updateSpy.mockRestore();
+    const result = await originalUpdate(date, update);
     const originalList = db.listHistory;
     const listSpy = vi.spyOn(db, 'listHistory').mockImplementation(async () => {
       listSpy.mockRestore();
-      const result = await originalList();
+      const listResult = await originalList();
       resolveDone();
-      return result;
+      return listResult;
     });
+    return result;
   });
   return () => done;
 }
@@ -1341,6 +1342,8 @@ describe('履歴から選ぶ', () => {
     el<HTMLButtonElement>('[data-testid="history-pick"]')!.click();
     await waitFor(() => expect(el('[data-testid="stop-row"]')).not.toBeNull());
     expect(document.querySelectorAll('[data-testid="stop-row"]')).toHaveLength(2);
+    const [entry] = await db.listHistory();
+    await waitFor(async () => expect(await db.getMeta('routeEnds')).toEqual(entry!.routeEnds));
   });
 
   it('記録の訪問先が全員名簿から消えていたら、選ばずに履歴の画面に留まりエラーを出す', async () => {
