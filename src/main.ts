@@ -20,7 +20,7 @@ import { findSimilar } from './normalize';
 import { createPatient, updatePatientFields } from './patient';
 import { isStandaloneDisplay } from './platform';
 import { isStoragePersisted, requestPersistentStorage } from './protection';
-import { shouldRemindBackup } from './backupReminder';
+import { daysBetween, shouldRemindBackup } from './backupReminder';
 import { splitIntoRoutes } from './routeSplitter';
 import { clearSession, loadSession, saveSession } from './session';
 import { buildShareText, copyText, shareText } from './share';
@@ -169,10 +169,6 @@ function writeLocal(key: string, value: string): void {
   }
 }
 
-function daysSince(iso: string): number {
-  return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-}
-
 /** 一覧の上に出すお知らせ。Task 4 でホーム画面の案内を先頭に足す。 */
 function currentNotice(): Notice | null {
   if (
@@ -225,7 +221,7 @@ function currentNotice(): Notice | null {
     const text =
       settingsInfo.lastBackupAt === null
         ? 'まだバックアップがありません。スマホの故障や機種変更に備えて、保存しておきましょう。'
-        : `最後のバックアップから${daysSince(settingsInfo.lastBackupAt)}日たちました。スマホの故障や機種変更に備えて、保存しておきましょう。`;
+        : `最後のバックアップから${daysBetween(settingsInfo.lastBackupAt, new Date())}日たちました。スマホの故障や機種変更に備えて、保存しておきましょう。`;
     return {
       testid: 'backup-notice',
       text,

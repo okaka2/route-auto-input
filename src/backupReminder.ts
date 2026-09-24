@@ -23,9 +23,14 @@ export function shouldRemindBackup(input: {
 /** 「9月20日(4日前)」のような、最後のバックアップの表示文。 */
 export function formatLastBackup(lastBackupAt: string, now: Date): string {
   const at = new Date(lastBackupAt);
-  const days = Math.max(0, Math.floor((startOfDay(now) - startOfDay(at)) / 86_400_000));
+  const days = daysBetween(lastBackupAt, now);
   const ago = days === 0 ? '今日' : `${days}日前`;
   return `${at.getMonth() + 1}月${at.getDate()}日(${ago})`;
+}
+
+/** fromIso から now までの、日付の境界で揃えた経過日数。 */
+export function daysBetween(fromIso: string, now: Date): number {
+  return Math.max(0, Math.floor((startOfDay(now) - startOfDay(new Date(fromIso))) / 86_400_000));
 }
 
 function startOfDay(date: Date): number {
