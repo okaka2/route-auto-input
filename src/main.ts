@@ -11,6 +11,7 @@ import { splitIntoRoutes } from './routeSplitter';
 import { clearSession, loadSession, saveSession } from './session';
 import { buildShareText, copyText, shareText } from './share';
 import { registerServiceWorkerUpdates } from './swUpdate';
+import { initTheme } from './theme';
 import {
   clearSelection,
   closeDialog,
@@ -45,6 +46,9 @@ const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) {
   throw new Error('#app が見つかりません。');
 }
+
+// ロックの状態に関係なく、表示の設定(明るい/暗い)を先に反映する。
+initTheme();
 
 // ロックの状態に関係なく、新しいバージョンが出ていれば自動で反映する。
 registerServiceWorkerUpdates();

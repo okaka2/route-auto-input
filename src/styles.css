@@ -2,22 +2,22 @@
 :root {
   color-scheme: light;
 
-  --bg: #f5f7fa;
+  --bg: #f4f5f2;
   --surface: #ffffff;
-  --text: #1f2328;
-  --muted: #5f6368;
-  --border: #d8dce1;
-  --border-strong: #80868b;
+  --text: #1a1d21;
+  --muted: #4a5058;
+  --border: #cfd4d2;
+  --border-strong: #6b7278;
 
-  --primary: #0b57d0;
-  --primary-soft: #e8f0fe;
+  --primary: #1e6b58;
+  --primary-soft: #e3efea;
   --on-primary: #ffffff;
 
-  --success: #187a34;
-  --success-soft: #e6f4ea;
+  --success: #1f6f3a;
+  --success-soft: #e4f2e8;
 
-  --danger: #c5221f;
-  --danger-soft: #fce8e6;
+  --danger: #b3261e;
+  --danger-soft: #fbe9e7;
 
   --radius: 0.625rem;
   --radius-sheet: 0.75rem;
@@ -28,6 +28,43 @@
   --selbar-h: 4rem;
   --content-max: 44rem;
   --gap: 1rem;
+}
+
+/* 暗い画面。OSの設定に従う(自動)場合と、設定で「暗い」を選んだ場合の両方で効く。 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #121416;
+    --surface: #1c2024;
+    --text: #e6e8ea;
+    --muted: #b3b9bf;
+    --border: #3a4046;
+    --border-strong: #8a9299;
+    --primary: #4fb08f;
+    --primary-soft: #1f3a32;
+    --on-primary: #0e1a16;
+    --success: #6cc48f;
+    --success-soft: #1d3527;
+    --danger: #ff8a80;
+    --danger-soft: #4a1f1c;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #121416;
+  --surface: #1c2024;
+  --text: #e6e8ea;
+  --muted: #b3b9bf;
+  --border: #3a4046;
+  --border-strong: #8a9299;
+  --primary: #4fb08f;
+  --primary-soft: #1f3a32;
+  --on-primary: #0e1a16;
+  --success: #6cc48f;
+  --success-soft: #1d3527;
+  --danger: #ff8a80;
+  --danger-soft: #4a1f1c;
 }
 
 /* ===== 全体 ===== */

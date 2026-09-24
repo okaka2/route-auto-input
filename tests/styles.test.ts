@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import css from '../src/styles.css?raw';
 
-/** :root などに書かれた「--名前: #rrggbb;」を集める。 */
-function readTokens(): Record<string, string> {
+/** 指定したブロック(例: ':root {' から次の '}' まで)にある「--名前: #rrggbb;」を集める。 */
+function readTokensIn(blockStart: RegExp): Record<string, string> {
+  const start = css.search(blockStart);
+  expect(start, `${blockStart} が styles.css にない`).toBeGreaterThanOrEqual(0);
+  const body = css.slice(start, css.indexOf('}', start));
   const tokens: Record<string, string> = {};
-  for (const match of css.matchAll(/--([a-z-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)) {
+  for (const match of body.matchAll(/--([a-z-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)) {
     tokens[match[1]!] = match[2]!;
   }
   return tokens;
@@ -23,7 +26,10 @@ function contrast(foreground: string, background: string): number {
   return (lighter! + 0.05) / (darker! + 0.05);
 }
 
-const tokens = readTokens();
+const themes = {
+  light: readTokensIn(/:root\s*\{/),
+  dark: readTokensIn(/:root\[data-theme='dark'\]\s*\{/),
+};
 
 // 通常の文字として使う組み合わせ(4.5:1以上)。
 const TEXT_PAIRS: [string, string][] = [
@@ -53,7 +59,7 @@ const COMPONENT_PAIRS: [string, string][] = [
   ['primary', 'surface'],
 ];
 
-describe('色の変数', () => {
+describe.each(Object.entries(themes))('色の変数(%s)', (_themeName, tokens) => {
   it('必要な色がすべて、6桁の16進数で定義されている', () => {
     const required = [
       'bg', 'surface', 'text', 'muted', 'border', 'border-strong',
@@ -65,12 +71,22 @@ describe('色の変数', () => {
     }
   });
 
-  it.each(TEXT_PAIRS)('文字 --%s と背景 --%s のコントラスト比は4.5以上', (foreground, background) => {
-    expect(contrast(tokens[foreground]!, tokens[background]!)).toBeGreaterThanOrEqual(4.5);
+  it.each(TEXT_PAIRS)('文字の色 %s は背景 %s に対して 4.5:1 以上', (fg, bg) => {
+    expect(contrast(tokens[fg]!, tokens[bg]!)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it.each(COMPONENT_PAIRS)('部品の色 --%s と背景 --%s のコントラスト比は3以上', (foreground, background) => {
-    expect(contrast(tokens[foreground]!, tokens[background]!)).toBeGreaterThanOrEqual(3);
+  it.each(COMPONENT_PAIRS)('部品の色 %s は背景 %s に対して 3:1 以上', (fg, bg) => {
+    expect(contrast(tokens[fg]!, tokens[bg]!)).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('暗い画面', () => {
+  it('OSの設定(prefers-color-scheme)でも、明示の設定(data-theme)でも暗くなる', () => {
+    expect(css).toMatch(/@media \(prefers-color-scheme: dark\)\s*\{\s*:root:not\(\[data-theme='light'\]\)/);
+    expect(css).toMatch(/:root\[data-theme='dark'\]\s*\{/);
+  });
+  it('color-scheme も切り替える', () => {
+    expect(css).toMatch(/:root\[data-theme='dark'\][^}]*color-scheme:\s*dark/s);
   });
 });
 
