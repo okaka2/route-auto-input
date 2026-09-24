@@ -314,11 +314,14 @@ async function loadHistory(): Promise<void> {
 async function recordTodayRoute(): Promise<void> {
   const ids = state.selectedIds;
   if (ids.length === 0) return;
+  // 呼び出し後にawaitを挟むため、書き込む内容は最初のawaitより前(今の状態)で確定させておく。
+  // 途中で routeContext が変わっても、この記録には影響させない。
+  const ends = routeContext.ends;
   const date = dateKey(new Date());
   try {
     const existing = await getHistory(date);
     const visited = Object.fromEntries(Object.entries(existing?.visited ?? {}).filter(([id]) => ids.includes(id)));
-    await putHistory({ date, ids: [...ids], routeEnds: routeContext.ends, visited });
+    await putHistory({ date, ids: [...ids], routeEnds: ends, visited });
     await loadHistory();
   } catch {
     // 記録できなくても地図は開ける。
@@ -334,6 +337,11 @@ function pickHistory(date: string): void {
   const entry = historyEntries.find((e) => e.date === date);
   if (!entry) return;
   const { ids, missing } = restoreSelection(entry, state.patients);
+  if (ids.length === 0) {
+    // 記録の訪問先が全員名簿から消えていた。選べる相手がいないので、訪問順へは進めない。
+    setState(withMessage(state, { kind: 'error', text: '記録の訪問先は、すべて名簿にないため選べませんでした。' }));
+    return;
+  }
   routeContext = { ...routeContext, ends: entry.routeEnds };
   openedRoutes.clear();
   const next = withScreen({ ...state, selectedIds: ids }, { name: 'order' });

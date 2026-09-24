@@ -17,12 +17,37 @@ async function waitFor(assertion: () => void): Promise<void> {
 }
 
 /**
- * 「地図を開く」を押すと、裏で今日の記録(IndexedDB)が始まる。それを待たずにテストが終わると、
- * 次のテストの beforeEach(接続を作り直す)と競合してテスト全体が止まってしまうことがあるため、
- * 記録が終わるまで少し待つ。
+ * 「地図を開く」を押すと、裏で今日の記録(IndexedDB: db.putHistory → db.listHistory)が始まる。
+ * それを待たずにテストが終わると、次のテストの beforeEach(接続を作り直す)と競合して
+ * テスト全体が止まってしまうことがあるため、記録が実際に終わるまで待てるようにする。
+ *
+ * 書き込む内容が前回と同じ(同じ人を選び直しただけ、など)ケースでは、書き込み後の中身を
+ * 比較するだけでは「今回の」書き込みが終わったのか判別できない。そこで、ボタンを押す前に
+ * db.putHistory/db.listHistory の呼び出しそのものを横取りする形でしかけておき(この関数)、
+ * ボタンを押した後にその完了を待つ(戻り値の関数を呼んで、その結果をawaitする)。
+ * 戻り値をそのままPromiseにしてしまうと、async関数からPromiseを返した時点で自動的に
+ * その中身が解決されるまで待たれてしまい(仕掛けた直後、ボタンを押す前に固まってしまう)、
+ * そのため、待つための関数(サンク)として返す。
  */
-async function waitForHistoryRecorded(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 20));
+async function armHistoryRecordWait(): Promise<() => Promise<void>> {
+  const db = await import('../src/db');
+  let resolveDone: () => void = () => {};
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
+  const originalPut = db.putHistory;
+  const putSpy = vi.spyOn(db, 'putHistory').mockImplementation(async (entry) => {
+    putSpy.mockRestore();
+    await originalPut(entry);
+    const originalList = db.listHistory;
+    const listSpy = vi.spyOn(db, 'listHistory').mockImplementation(async () => {
+      listSpy.mockRestore();
+      const result = await originalList();
+      resolveDone();
+      return result;
+    });
+  });
+  return () => done;
 }
 
 const el = <T extends HTMLElement = HTMLElement>(selector: string): T | null =>
@@ -169,8 +194,9 @@ describe('セッションの永続化(#1)', () => {
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
 
     await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    const historyRecorded = await armHistoryRecordWait();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
-    await waitForHistoryRecorded();
+    await historyRecorded();
     await waitFor(() => expect(el('[data-testid="open-route"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
 
@@ -299,8 +325,9 @@ describe('開いたルートの印(#6)', () => {
     }
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    const historyRecorded = await armHistoryRecordWait();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
-    await waitForHistoryRecorded();
+    await historyRecorded();
     await waitFor(() => expect(el('[data-testid="open-route"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
 
@@ -313,8 +340,9 @@ describe('開いたルートの印(#6)', () => {
 
     el<HTMLButtonElement>('[data-testid="back-button"]')!.click();
     expect(el('h1')?.textContent).toBe('訪問順を決める');
+    const historyRecorded = await armHistoryRecordWait();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
-    await waitForHistoryRecorded();
+    await historyRecorded();
 
     expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
   });
@@ -327,8 +355,9 @@ describe('開いたルートの印(#6)', () => {
     el<HTMLInputElement>(`input[data-id="${ids[0]}"]`)!.click(); // 選択を外す
     el<HTMLInputElement>(`input[data-id="${ids[0]}"]`)!.click(); // 選び直す
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    const historyRecorded = await armHistoryRecordWait();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
-    await waitForHistoryRecorded();
+    await historyRecorded();
 
     expect(el('[data-testid="route-status"]')).toBeNull();
     expect(el('[data-testid="route-card"]')?.getAttribute('data-state')).toBe('next');
@@ -339,8 +368,9 @@ describe('開いたルートの印(#6)', () => {
 
     el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 地図 → 訪問順
     el<HTMLButtonElement>('[data-testid="move-down"]')!.click(); // 1件目を下へ
+    const historyRecorded = await armHistoryRecordWait();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
-    await waitForHistoryRecorded();
+    await historyRecorded();
 
     expect(el('[data-testid="route-status"]')).toBeNull();
   });
@@ -351,8 +381,9 @@ describe('開いたルートの印(#6)', () => {
     el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 地図 → 訪問順
     // 先頭の▲は押せない(disabled)ので、押しても何も起きない。
     el<HTMLButtonElement>('[data-testid="move-up"]')!.click();
+    const historyRecorded = await armHistoryRecordWait();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
-    await waitForHistoryRecorded();
+    await historyRecorded();
 
     expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
   });
@@ -371,8 +402,9 @@ describe('開いたルートの印(#6)', () => {
     confirmSpy.mockRestore();
 
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    const historyRecorded = await armHistoryRecordWait();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
-    await waitForHistoryRecorded();
+    await historyRecorded();
 
     expect(el('[data-testid="route-status"]')).toBeNull();
   });
@@ -390,8 +422,9 @@ describe('開いたルートの印(#6)', () => {
     await waitFor(() => expect(el('.message')?.textContent).toContain('保存しました'));
 
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    const historyRecorded = await armHistoryRecordWait();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
-    await waitForHistoryRecorded();
+    await historyRecorded();
 
     expect(el('[data-testid="route-status"]')).toBeNull();
   });
@@ -1234,8 +1267,9 @@ describe('出発・帰着の選択', () => {
     el<HTMLInputElement>(`input[data-id="${patientB.id}"]`)!.click();
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    const historyRecorded = await armHistoryRecordWait();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
-    await waitForHistoryRecorded();
+    await historyRecorded();
     await waitFor(() => expect(el('[data-testid="open-route"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
 
@@ -1297,5 +1331,30 @@ describe('履歴から選ぶ', () => {
     el<HTMLButtonElement>('[data-testid="history-pick"]')!.click();
     await waitFor(() => expect(el('[data-testid="stop-row"]')).not.toBeNull());
     expect(document.querySelectorAll('[data-testid="stop-row"]')).toHaveLength(2);
+  });
+
+  it('記録の訪問先が全員名簿から消えていたら、選ばずに履歴の画面に留まりエラーを出す', async () => {
+    const db = await import('../src/db');
+    await db.putHistory({
+      date: '2026-09-18',
+      ids: ['gone-1', 'gone-2'],
+      routeEnds: { start: 'first', end: 'last' },
+      visited: {},
+    });
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="history-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="history-row"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="history-row"]')!.click();
+    el<HTMLButtonElement>('[data-testid="history-pick"]')!.click();
+
+    await waitFor(() =>
+      expect(el('.message')?.textContent).toContain('記録の訪問先は、すべて名簿にないため選べませんでした'),
+    );
+    expect(el('[data-testid="history-row"]')).not.toBeNull();
+    expect(el('[data-testid="stop-row"]')).toBeNull();
   });
 });
