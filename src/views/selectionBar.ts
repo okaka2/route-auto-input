@@ -2,6 +2,8 @@ export type SelectionBarHandlers = {
   onNext(): void;
   /** 選択した件数をまとめて削除する。実際の削除は、確認ダイアログでの確定を経てから。 */
   onDeleteSelected(): void;
+  /** 「N件選択中」を押したとき。一覧を「選択中」の表示に切り替える。 */
+  onShowSelected(): void;
 };
 
 /**
@@ -22,10 +24,12 @@ export function renderSelectionBar(
   bar.setAttribute('role', 'region');
   bar.setAttribute('aria-label', '選択中の訪問先');
 
-  const label = document.createElement('span');
+  const label = document.createElement('button');
+  label.type = 'button';
   label.className = 'selection-count';
   label.dataset.testid = 'selection-count';
   label.textContent = `${count}件選択中`;
+  label.addEventListener('click', () => handlers.onShowSelected());
 
   const deleteButton = document.createElement('button');
   deleteButton.type = 'button';

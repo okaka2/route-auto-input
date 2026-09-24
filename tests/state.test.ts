@@ -12,6 +12,7 @@ import {
   openRowMenu,
   selectAllVisible,
   selectedPatients,
+  setListFilter,
   setSearchQuery,
   setSortOrder,
   toggleSelection,
@@ -338,5 +339,56 @@ describe('選択上限の文言', () => {
     }
     const overflowed = toggleSelection(state, patients[MAX_SELECTION]!.id);
     expect(overflowed.message?.text).toBe(`一度に選べるのは${MAX_SELECTION}件までです。`);
+  });
+});
+
+describe('表示範囲(すべて/選択中)', () => {
+  it('最初は すべて', () => {
+    expect(createInitialState([]).listFilter).toBe('all');
+    expect(createInitialState([]).dimmedIds).toEqual([]);
+  });
+  it('選択中に切り替えると、選んだ人だけが見える', () => {
+    const patients = makePatients(3);
+    let state = toggleSelection(createInitialState(patients), patients[1]!.id);
+    state = setListFilter(state, 'selected');
+    expect(visiblePatients(state).map((p) => p.id)).toEqual([patients[1]!.id]);
+  });
+  it('誰も選んでいなければ、選択中には切り替わらない', () => {
+    const state = setListFilter(createInitialState(makePatients(2)), 'selected');
+    expect(state.listFilter).toBe('all');
+  });
+  it('選択中の表示でチェックを外しても、その行は薄く残り(見える)、選び直せば戻る', () => {
+    const patients = makePatients(2);
+    let state = toggleSelection(createInitialState(patients), patients[0]!.id);
+    state = setListFilter(state, 'selected');
+    state = toggleSelection(state, patients[0]!.id);
+    expect(state.selectedIds).toEqual([]);
+    expect(state.dimmedIds).toEqual([patients[0]!.id]);
+    expect(visiblePatients(state).map((p) => p.id)).toEqual([patients[0]!.id]);
+    state = toggleSelection(state, patients[0]!.id);
+    expect(state.dimmedIds).toEqual([]);
+  });
+  it('すべてに戻すと、薄い行は消える', () => {
+    const patients = makePatients(2);
+    let state = toggleSelection(createInitialState(patients), patients[0]!.id);
+    state = setListFilter(state, 'selected');
+    state = toggleSelection(state, patients[0]!.id);
+    state = setListFilter(state, 'all');
+    expect(state.dimmedIds).toEqual([]);
+    expect(visiblePatients(state)).toHaveLength(2);
+  });
+  it('選択中の表示で検索すると、選んだ人の中から探す', () => {
+    const patients = makePatients(3);
+    let state = toggleSelection(createInitialState(patients), patients[0]!.id);
+    state = setListFilter(state, 'selected');
+    state = setSearchQuery(state, '患者3');
+    expect(visiblePatients(state)).toEqual([]);
+  });
+  it('画面を移ると すべて に戻る', () => {
+    const patients = makePatients(1);
+    let state = toggleSelection(createInitialState(patients), patients[0]!.id);
+    state = setListFilter(state, 'selected');
+    state = withScreen(state, { name: 'order' });
+    expect(state.listFilter).toBe('all');
   });
 });

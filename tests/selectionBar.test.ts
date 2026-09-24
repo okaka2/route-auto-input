@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderSelectionBar, type SelectionBarHandlers } from '../src/views/selectionBar';
 
-const handlers = (): SelectionBarHandlers => ({ onNext: vi.fn(), onDeleteSelected: vi.fn() });
+const handlers = (): SelectionBarHandlers => ({
+  onNext: vi.fn(),
+  onDeleteSelected: vi.fn(),
+  onShowSelected: vi.fn(),
+});
 
 describe('renderSelectionBar', () => {
   it('1件も選んでいなければ、何も出さない(null)', () => {
@@ -40,5 +44,12 @@ describe('renderSelectionBar', () => {
     expect(button.textContent).toBe('削除');
     button.click();
     expect(spies.onDeleteSelected).toHaveBeenCalledTimes(1);
+  });
+
+  it('「N件選択中」を押すと onShowSelected が呼ばれる', () => {
+    const onShowSelected = vi.fn();
+    const bar = renderSelectionBar(2, { onNext: vi.fn(), onDeleteSelected: vi.fn(), onShowSelected })!;
+    bar.querySelector<HTMLButtonElement>('[data-testid="selection-count"]')!.click();
+    expect(onShowSelected).toHaveBeenCalled();
   });
 });

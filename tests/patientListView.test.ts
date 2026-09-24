@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { APP_NAME } from '../src/appInfo';
 import { MAX_SELECTION } from '../src/config';
 import { createPatient } from '../src/patient';
-import { createInitialState, setSearchQuery, toggleSelection } from '../src/state';
+import { createInitialState, setListFilter, setSearchQuery, toggleSelection } from '../src/state';
 import { renderPatientList, type PatientListHandlers } from '../src/views/patientListView';
 import type { Patient } from '../src/types';
 
@@ -18,6 +18,8 @@ const noopHandlers = (): PatientListHandlers => ({
   onNew: vi.fn(),
   onOpenMenu: vi.fn(),
   onOpenSettings: vi.fn(),
+  onFilterChange: vi.fn(),
+  onSearchAll: vi.fn(),
 });
 
 const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: string): T =>
@@ -104,7 +106,7 @@ describe('renderPatientList: 一覧の内容', () => {
     const state = toggleSelection(createInitialState(patients), patients[0]!.id);
     const element = renderPatientList(state, noopHandlers());
     expect(element.querySelector('[data-testid="next-button"]')).toBeNull();
-    expect(element.textContent).not.toContain('選択中');
+    expect(element.textContent).not.toContain('1件選択中');
   });
 });
 
@@ -351,5 +353,52 @@ describe('renderPatientList: 全選択', () => {
     const element = renderPatientList(createInitialState(makePatients(2)), handlers);
     q<HTMLButtonElement>(element, 'select-all-button').click();
     expect(handlers.onToggleSelectAll).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('すべて/選択中の切り替え', () => {
+  it('件数つきの2つの切り替えを出し、押すと onFilterChange が呼ばれる', () => {
+    const patients = makePatients(3);
+    const state = toggleSelection(createInitialState(patients), patients[0]!.id);
+    const spies = noopHandlers();
+    const element = renderPatientList(state, spies);
+    expect(q(element, 'filter-all').textContent).toBe('すべて 3');
+    expect(q(element, 'filter-selected').textContent).toBe('選択中 1');
+    expect(q(element, 'filter-all').getAttribute('aria-pressed')).toBe('true');
+    q<HTMLButtonElement>(element, 'filter-selected').click();
+    expect(spies.onFilterChange).toHaveBeenCalledWith('selected');
+  });
+  it('誰も選んでいなければ「選択中」は押せない', () => {
+    const element = renderPatientList(createInitialState(makePatients(2)), noopHandlers());
+    expect(q<HTMLButtonElement>(element, 'filter-selected').disabled).toBe(true);
+  });
+  it('選択中の表示では帯を出し、「すべてに戻る」で onFilterChange("all")', () => {
+    const patients = makePatients(2);
+    let state = toggleSelection(createInitialState(patients), patients[0]!.id);
+    state = setListFilter(state, 'selected');
+    const spies = noopHandlers();
+    const element = renderPatientList(state, spies);
+    expect(q(element, 'filter-band').textContent).toContain('選択中の1人を表示しています');
+    q<HTMLButtonElement>(element, 'filter-band-all').click();
+    expect(spies.onFilterChange).toHaveBeenCalledWith('all');
+  });
+  it('薄く残す行には dimmed クラスが付く', () => {
+    const patients = makePatients(1);
+    let state = toggleSelection(createInitialState(patients), patients[0]!.id);
+    state = setListFilter(state, 'selected');
+    state = toggleSelection(state, patients[0]!.id);
+    const row = renderPatientList(state, noopHandlers()).querySelector('[data-testid="patient-row"]')!;
+    expect(row.className).toContain('dimmed');
+  });
+  it('選択中の表示で検索に当たらなければ「すべてから探す」を出す', () => {
+    const patients = makePatients(2);
+    let state = toggleSelection(createInitialState(patients), patients[0]!.id);
+    state = setListFilter(state, 'selected');
+    state = setSearchQuery(state, '場所2');
+    const spies = noopHandlers();
+    const element = renderPatientList(state, spies);
+    expect(element.textContent).toContain('選択中には見つかりません');
+    q<HTMLButtonElement>(element, 'search-all-button').click();
+    expect(spies.onSearchAll).toHaveBeenCalled();
   });
 });

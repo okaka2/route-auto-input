@@ -37,4 +37,8 @@ export type AppState = {
   message: Message | null;
   /** 開いているダイアログ。なければ null。 */
   dialog: Dialog | null;
+  /** 一覧に出す範囲。'selected' は選んだ人だけ(薄く残す行を含む)。 */
+  listFilter: 'all' | 'selected';
+  /** 「選択中」の表示でチェックを外した行。表示を切り替えるまでは薄く残す。 */
+  dimmedIds: string[];
 };

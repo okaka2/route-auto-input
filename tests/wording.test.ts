@@ -40,6 +40,8 @@ const listHandlers = {
   onNew: noop,
   onOpenMenu: noop,
   onOpenSettings: noop,
+  onFilterChange: noop,
+  onSearchAll: noop,
 };
 const dialogHandlers = {
   onEdit: noop,
@@ -143,7 +145,10 @@ describe('画面の文言(禁止語が出ない)', () => {
       ).outerHTML,
     );
     expectClean('タブ', renderTabBar('list', true, { onSelect: noop }).outerHTML);
-    expectClean('選択バー', renderSelectionBar(3, { onNext: noop, onDeleteSelected: noop })!.outerHTML);
+    expectClean(
+      '選択バー',
+      renderSelectionBar(3, { onNext: noop, onDeleteSelected: noop, onShowSelected: noop })!.outerHTML,
+    );
   });
 
   it('検証メッセージ', () => {

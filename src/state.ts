@@ -13,6 +13,8 @@ export function createInitialState(patients: Patient[]): AppState {
     sortOrder: 'registered',
     message: null,
     dialog: null,
+    listFilter: 'all',
+    dimmedIds: [],
   };
 }
 
@@ -20,10 +22,12 @@ export function createInitialState(patients: Patient[]): AppState {
 export function withPatients(state: AppState, patients: Patient[]): AppState {
   const existingIds = new Set(patients.map((patient) => patient.id));
   const selectedIds = state.selectedIds.filter((id) => existingIds.has(id));
+  const dimmedIds = state.dimmedIds.filter((id) => existingIds.has(id));
   return {
     ...state,
     patients,
     selectedIds,
+    dimmedIds,
     dialog: keepDialog(state.dialog, existingIds, selectedIds),
   };
 }
@@ -47,7 +51,15 @@ function keepDialog(
 }
 
 export function withScreen(state: AppState, screen: Screen): AppState {
-  return { ...state, screen, message: null, dialog: null };
+  return { ...state, screen, message: null, dialog: null, listFilter: 'all', dimmedIds: [] };
+}
+
+/** 一覧に出す範囲を切り替える。誰も選んでいなければ「選択中」には切り替わらない。 */
+export function setListFilter(state: AppState, listFilter: 'all' | 'selected'): AppState {
+  if (listFilter === 'selected' && state.selectedIds.length === 0) {
+    return state;
+  }
+  return { ...state, listFilter, dimmedIds: [] };
 }
 
 export function withMessage(state: AppState, message: Message | null): AppState {
@@ -67,6 +79,7 @@ export function toggleSelection(state: AppState, id: string): AppState {
     return {
       ...state,
       selectedIds: state.selectedIds.filter((selectedId) => selectedId !== id),
+      dimmedIds: state.listFilter === 'selected' ? [...state.dimmedIds, id] : state.dimmedIds,
       message: null,
     };
   }
@@ -76,7 +89,12 @@ export function toggleSelection(state: AppState, id: string): AppState {
       message: { kind: 'error', text: `一度に選べるのは${MAX_SELECTION}件までです。` },
     };
   }
-  return { ...state, selectedIds: [...state.selectedIds, id], message: null };
+  return {
+    ...state,
+    selectedIds: [...state.selectedIds, id],
+    dimmedIds: state.dimmedIds.filter((d) => d !== id),
+    message: null,
+  };
 }
 
 /**
@@ -89,7 +107,7 @@ export function selectAllVisible(state: AppState): AppState {
 }
 
 export function clearSelection(state: AppState): AppState {
-  return { ...state, selectedIds: [], message: null };
+  return { ...state, selectedIds: [], dimmedIds: [], listFilter: 'all', message: null };
 }
 
 export function moveSelected(state: AppState, id: string, direction: -1 | 1): AppState {
@@ -106,12 +124,16 @@ export function moveSelected(state: AppState, id: string, direction: -1 | 1): Ap
 
 export function visiblePatients(state: AppState): Patient[] {
   const query = state.searchQuery.trim();
+  const scope =
+    state.listFilter === 'selected'
+      ? state.patients.filter(
+          (patient) => state.selectedIds.includes(patient.id) || state.dimmedIds.includes(patient.id),
+        )
+      : state.patients;
   const matched =
     query.length === 0
-      ? state.patients
-      : state.patients.filter(
-          (patient) => patient.name.includes(query) || patient.address.includes(query),
-        );
+      ? scope
+      : scope.filter((patient) => patient.name.includes(query) || patient.address.includes(query));
   if (state.sortOrder === 'registered') {
     return matched;
   }

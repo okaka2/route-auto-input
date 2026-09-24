@@ -36,6 +36,7 @@ import {
   openRowMenu,
   selectAllVisible,
   selectedPatients,
+  setListFilter,
   setSearchQuery,
   setSortOrder,
   toggleSelection,
@@ -611,6 +612,8 @@ function renderScreen(): HTMLElement {
           setState(withScreen(state, { name: 'settings' }));
           void loadSettingsInfo();
         },
+        onFilterChange: (filter) => setState(setListFilter(state, filter)),
+        onSearchAll: () => setState(setListFilter(setSearchQuery(state, state.searchQuery), 'all')),
       }, currentNotice());
     case 'form':
       return renderPatientForm(currentEditingPatient(), formDraft, state.message, {
@@ -680,6 +683,7 @@ function renderApp(): HTMLElement {
         ? renderSelectionBar(state.selectedIds.length, {
             onNext: handleNext,
             onDeleteSelected: handleRequestDeleteSelected,
+            onShowSelected: () => setState(setListFilter(state, 'selected')),
           })
         : null;
     // 固定バーに、内容の最後が隠れないよう、余白を取るクラスを付ける。

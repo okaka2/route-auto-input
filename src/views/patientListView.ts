@@ -17,6 +17,10 @@ export type PatientListHandlers = {
   /** 行の「⋯」。編集・複製・削除は、開いたメニューの中にある。 */
   onOpenMenu(id: string): void;
   onOpenSettings(): void;
+  /** 「すべて/選択中」の切り替え。 */
+  onFilterChange(filter: 'all' | 'selected'): void;
+  /** 選択中の表示で検索に当たらなかったときの「すべてから探す」。 */
+  onSearchAll(): void;
 };
 
 /**
@@ -35,7 +39,12 @@ export function renderPatientList(
   // 見出しと検索欄は、一覧をスクロールしても上部に残す(sticky)。
   const head = document.createElement('div');
   head.className = 'list-head';
-  head.append(renderTitleRow(handlers), renderSearch(state, handlers), renderListControls(state, handlers));
+  head.append(
+    renderTitleRow(handlers),
+    renderSearch(state, handlers),
+    renderListControls(state, handlers),
+    renderFilterToggle(state, handlers),
+  );
   container.append(head);
 
   if (notice) {
@@ -54,16 +63,35 @@ export function renderPatientList(
   newButton.addEventListener('click', () => handlers.onNew());
   container.append(newButton);
 
+  if (state.listFilter === 'selected') {
+    container.append(renderFilterBand(state, handlers));
+  }
+
   const patients = visiblePatients(state);
   if (patients.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'hint empty-text';
-    empty.dataset.testid = 'empty-text';
-    empty.textContent =
-      state.patients.length === 0
-        ? 'まだ訪問先が登録されていません。「＋ 訪問先を登録」から追加してください。'
-        : '該当する訪問先がありません';
-    container.append(empty);
+    if (state.listFilter === 'selected' && state.searchQuery.trim() !== '') {
+      const empty = document.createElement('p');
+      empty.className = 'hint empty-text';
+      empty.dataset.testid = 'empty-text';
+      empty.textContent = '選択中には見つかりません。';
+      container.append(empty);
+
+      const searchAll = document.createElement('button');
+      searchAll.type = 'button';
+      searchAll.dataset.testid = 'search-all-button';
+      searchAll.textContent = 'すべてから探す';
+      searchAll.addEventListener('click', () => handlers.onSearchAll());
+      container.append(searchAll);
+    } else {
+      const empty = document.createElement('p');
+      empty.className = 'hint empty-text';
+      empty.dataset.testid = 'empty-text';
+      empty.textContent =
+        state.patients.length === 0
+          ? 'まだ訪問先が登録されていません。「＋ 訪問先を登録」から追加してください。'
+          : '該当する訪問先がありません';
+      container.append(empty);
+    }
   } else {
     const list = document.createElement('ul');
     list.className = 'place-list';
@@ -194,13 +222,59 @@ function renderListControls(state: AppState, handlers: PatientListHandlers): HTM
   return row;
 }
 
+function renderFilterToggle(state: AppState, handlers: PatientListHandlers): HTMLElement {
+  const group = document.createElement('div');
+  group.className = 'segmented';
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', '表示する範囲');
+  const all = segment('filter-all', `すべて ${state.patients.length}`, state.listFilter === 'all', () =>
+    handlers.onFilterChange('all'),
+  );
+  const selected = segment(
+    'filter-selected',
+    `選択中 ${state.selectedIds.length}`,
+    state.listFilter === 'selected',
+    () => handlers.onFilterChange('selected'),
+  );
+  selected.disabled = state.selectedIds.length === 0;
+  group.append(all, selected);
+  return group;
+}
+
+function segment(testid: string, text: string, pressed: boolean, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `segment${pressed ? ' pressed' : ''}`;
+  button.dataset.testid = testid;
+  button.setAttribute('aria-pressed', String(pressed));
+  button.textContent = text;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function renderFilterBand(state: AppState, handlers: PatientListHandlers): HTMLElement {
+  const band = document.createElement('div');
+  band.className = 'filter-band';
+  band.dataset.testid = 'filter-band';
+  const text = document.createElement('span');
+  text.textContent = `選択中の${state.selectedIds.length}人を表示しています`;
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.dataset.testid = 'filter-band-all';
+  back.textContent = 'すべてに戻る';
+  back.addEventListener('click', () => handlers.onFilterChange('all'));
+  band.append(text, back);
+  return band;
+}
+
 function renderRow(patient: Patient, state: AppState, handlers: PatientListHandlers): HTMLElement {
   const selected = state.selectedIds.includes(patient.id);
   // 上限に達しているとき、未選択の行は選べない。
   const atLimit = !selected && state.selectedIds.length >= MAX_SELECTION;
+  const dimmed = state.dimmedIds.includes(patient.id);
 
   const row = document.createElement('li');
-  row.className = `place-row${selected ? ' selected' : ''}${atLimit ? ' disabled' : ''}`;
+  row.className = `place-row${selected ? ' selected' : ''}${atLimit ? ' disabled' : ''}${dimmed ? ' dimmed' : ''}`;
   row.dataset.testid = 'patient-row';
 
   // 行全体をラベルにして、どこをタップしても選択・解除できるようにする。
