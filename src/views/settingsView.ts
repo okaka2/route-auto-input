@@ -115,7 +115,7 @@ function renderTheme(info: SettingsInfo, handlers: SettingsHandlers): HTMLElemen
   for (const option of THEME_OPTIONS) {
     const item = radio('theme', option.value, `theme-${option.value}`, option.label);
     item.input.checked = option.value === info.theme;
-    item.input.addEventListener('click', () => handlers.onThemeChange(option.value));
+    item.input.addEventListener('change', () => handlers.onThemeChange(option.value));
     modes.append(item.label);
   }
   card.append(modes);

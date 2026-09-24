@@ -410,13 +410,20 @@ async function handleExport(): Promise<void> {
   try {
     const date = new Date().toISOString().slice(0, 10);
     downloadTextFile(`route-auto-input-${date}.json`, serializeBackup(state.patients));
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: 'バックアップを書き出せませんでした。' }));
+    return;
+  }
+  // 最後にバックアップした日時の記録は付随的なもの。ここが失敗しても、
+  // ファイルの書き出し自体は成功しているので、成功として扱う(lastBackupAtは更新しない)。
+  try {
     const lastBackupAt = new Date().toISOString();
     await setMeta('lastBackupAt', lastBackupAt);
     settingsInfo = { ...settingsInfo, lastBackupAt };
-    setState(withMessage(state, { kind: 'info', text: 'バックアップを書き出しました。' }));
   } catch {
-    setState(withMessage(state, { kind: 'error', text: 'バックアップを書き出せませんでした。' }));
+    // 記録できなかっただけ。書き出し自体は成功しているので、下のメッセージは変えない。
   }
+  setState(withMessage(state, { kind: 'info', text: 'バックアップを書き出しました。' }));
 }
 
 async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void> {

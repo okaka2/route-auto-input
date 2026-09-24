@@ -137,11 +137,15 @@ describe('renderSettings: 言葉と並び', () => {
   it('表示の切り替えは 自動/明るい/暗い の3択で、選ぶと onThemeChange が呼ばれる', () => {
     const spies = handlers();
     const element = renderSettings(createInitialState([]), { ...info(), theme: 'auto' }, spies);
+    // jsdomではラジオボタンがdocumentに接続されていないとchangeイベントが発火しないため、
+    // 操作の前に一時的にdocument.bodyへ入れる。
+    document.body.append(element);
     const radios = [...element.querySelectorAll<HTMLInputElement>('input[name="theme"]')];
     expect(radios.map((r) => r.value)).toEqual(['auto', 'light', 'dark']);
     expect(radios[0]!.checked).toBe(true);
     radios[2]!.click();
     expect(spies.onThemeChange).toHaveBeenCalledWith('dark');
+    element.remove();
   });
   it('このアプリについて に版の番号を出す', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
