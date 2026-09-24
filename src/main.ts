@@ -188,13 +188,14 @@ function requestProtectionOnce(): void {
   });
 }
 
-/** 設定画面用の情報をDBやブラウザから読み直す。設定画面を開いているときは、そのまま再描画する。 */
+/**
+ * 設定画面用の情報をDBやブラウザから読み直す。一覧画面のバックアップのお知らせも
+ * この情報(lastBackupAt)で出す/出さないを決めるため、どの画面でも読み直したら再描画する。
+ */
 async function loadSettingsInfo(): Promise<void> {
   const [lastBackupAt, persisted] = await Promise.all([getMeta('lastBackupAt'), isStoragePersisted()]);
   settingsInfo = { ...settingsInfo, lastBackupAt: lastBackupAt ?? null, persisted };
-  if (state.screen.name === 'settings') {
-    render();
-  }
+  render();
 }
 
 function setState(next: AppState): void {
