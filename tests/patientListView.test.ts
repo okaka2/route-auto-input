@@ -20,6 +20,8 @@ const noopHandlers = (): PatientListHandlers => ({
   onOpenSettings: vi.fn(),
   onFilterChange: vi.fn(),
   onSearchAll: vi.fn(),
+  onOpenHistory: vi.fn(),
+  onPickLastWeek: vi.fn(),
 });
 
 const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: string): T =>
@@ -81,6 +83,26 @@ describe('renderPatientList: 一覧の内容', () => {
     expect(button.classList.contains('primary')).toBe(true);
     button.click();
     expect(handlers.onNew).toHaveBeenCalledTimes(1);
+  });
+
+  it('「履歴から選ぶ」を登録ボタンの左に出し、先週の同じ曜日があれば近道も出す', () => {
+    const spies = noopHandlers();
+    const element = renderPatientList(createInitialState(makePatients(1)), spies, null, { date: '2026-09-22', count: 8 });
+    const row = element.querySelector('.list-new-row')!;
+    expect(row.children[0]!.getAttribute('data-testid')).toBe('history-button');
+    expect(row.children[1]!.getAttribute('data-testid')).toBe('new-button');
+    q<HTMLButtonElement>(element, 'history-button').click();
+    expect(spies.onOpenHistory).toHaveBeenCalled();
+    const shortcut = q<HTMLButtonElement>(element, 'last-week-button');
+    expect(shortcut.textContent).toBe('先週の火曜日と同じ(8人)');
+    shortcut.click();
+    expect(spies.onPickLastWeek).toHaveBeenCalled();
+  });
+
+  it('先週の記録が無ければ近道は出ない', () => {
+    expect(
+      renderPatientList(createInitialState([]), noopHandlers()).querySelector('[data-testid="last-week-button"]'),
+    ).toBeNull();
   });
 
   it('設定ボタンには「設定」という名前(aria-label)を付け、押すと onOpenSettings が呼ばれる', () => {

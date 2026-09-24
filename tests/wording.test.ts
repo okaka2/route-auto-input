@@ -13,7 +13,9 @@ import {
 import type { AppState, Patient } from '../src/types';
 import { validatePatientInput, validateSelection } from '../src/validation';
 import { googleMapsProvider } from '../src/mapProviders';
+import type { HistoryEntry } from '../src/db';
 import { renderDialog } from '../src/views/dialogs';
+import { renderHistory } from '../src/views/historyView';
 import { renderPatientForm } from '../src/views/patientFormView';
 import { renderPatientList } from '../src/views/patientListView';
 import { renderRouteMap } from '../src/views/routeMapView';
@@ -43,6 +45,8 @@ const listHandlers = {
   onOpenSettings: noop,
   onFilterChange: noop,
   onSearchAll: noop,
+  onOpenHistory: noop,
+  onPickLastWeek: noop,
 };
 const dialogHandlers = {
   onEdit: noop,
@@ -198,6 +202,30 @@ describe('画面の文言(禁止語が出ない)', () => {
       '選択バー',
       renderSelectionBar(3, { onNext: noop, onDeleteSelected: noop, onShowSelected: noop })!.outerHTML,
     );
+  });
+
+  it('履歴: 記録なし・1件閉じている・1件開いている(名簿にない人あり)', () => {
+    const historyHandlers = {
+      onOpenEntry: noop,
+      onFilterWeekday: noop,
+      onPick: noop,
+      onCopyVisits: noop,
+      onBack: noop,
+    };
+    const patient = createPatient('場所1', '東京都1-1');
+    const entry: HistoryEntry = {
+      date: '2026-09-22',
+      ids: [patient.id, 'gone'],
+      routeEnds: DEFAULT_ROUTE_ENDS,
+      visited: {},
+    };
+    const baseState = createInitialState([patient]);
+    const noneState = { ...baseState, screen: { name: 'history' as const, openDate: null, weekday: null } };
+    const closedState = { ...baseState, screen: { name: 'history' as const, openDate: null, weekday: null } };
+    const openState = { ...baseState, screen: { name: 'history' as const, openDate: '2026-09-22', weekday: null } };
+    expectClean('履歴(記録なし)', renderHistory(noneState, [], historyHandlers).outerHTML);
+    expectClean('履歴(閉じている)', renderHistory(closedState, [entry], historyHandlers).outerHTML);
+    expectClean('履歴(開いている)', renderHistory(openState, [entry], historyHandlers).outerHTML);
   });
 
   it('検証メッセージ', () => {

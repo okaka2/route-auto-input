@@ -1070,3 +1070,17 @@ input:focus-visible + .check {
 }
 .notice-text { margin: 0 0 0.5rem; }
 .notice-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+.weekday-filter { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.25rem; margin-bottom: var(--gap); }
+.weekday-filter .segment { border: 1px solid var(--border-strong); border-radius: var(--radius); }
+.history-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.75rem; }
+.history-row { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; width: 100%; min-height: var(--tap-primary); padding: 0.75rem var(--gap); text-align: left; }
+.history-head { font-weight: 700; font-size: 1.125rem; }
+.history-preview { color: var(--muted); }
+.history-detail { padding: 0.75rem var(--gap) var(--gap); border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius) var(--radius); background: var(--surface); }
+.history-names { margin: 0 0 0.75rem; padding-left: 0; list-style: none; }
+.history-visits { margin: 0 0 0.5rem; overflow-wrap: anywhere; }
+.list-new-row { display: flex; gap: 0.5rem; }
+.list-new-row > button { flex: 1; }
+.list-shortcut-row { margin-top: 0.5rem; }
+.list-shortcut-row button { width: 100%; border-color: var(--primary); color: var(--primary); }

@@ -1,6 +1,7 @@
 import { APP_NAME } from '../appInfo';
 import { MAX_SELECTION } from '../config';
 import { formatPhoneHref } from '../format';
+import { WEEKDAY_LABELS, weekdayOf } from '../history';
 import { visiblePatients } from '../state';
 import type { AppState, Patient, SortOrder } from '../types';
 import { renderMessage } from './common';
@@ -22,6 +23,10 @@ export type PatientListHandlers = {
   onFilterChange(filter: 'all' | 'selected'): void;
   /** 選択中の表示で検索に当たらなかったときの「すべてから探す」。 */
   onSearchAll(): void;
+  /** 「履歴から選ぶ」。 */
+  onOpenHistory(): void;
+  /** 「先週の◯曜日と同じ」の近道。 */
+  onPickLastWeek(): void;
 };
 
 /**
@@ -33,6 +38,7 @@ export function renderPatientList(
   state: AppState,
   handlers: PatientListHandlers,
   notice: Notice | null = null,
+  lastWeek: { date: string; count: number } | null = null,
 ): HTMLElement {
   const container = document.createElement('div');
   container.className = 'screen';
@@ -40,12 +46,11 @@ export function renderPatientList(
   // 見出しと検索欄は、一覧をスクロールしても上部に残す(sticky)。
   const head = document.createElement('div');
   head.className = 'list-head';
-  head.append(
-    renderTitleRow(handlers),
-    renderNewRow(handlers),
-    renderSearchRow(state, handlers),
-    renderListControls(state, handlers),
-  );
+  head.append(renderTitleRow(handlers), renderNewRow(handlers));
+  if (lastWeek) {
+    head.append(renderShortcutRow(lastWeek, handlers));
+  }
+  head.append(renderSearchRow(state, handlers), renderListControls(state, handlers));
   container.append(head);
 
   if (notice) {
@@ -130,6 +135,13 @@ function renderNewRow(handlers: PatientListHandlers): HTMLElement {
   const row = document.createElement('div');
   row.className = 'list-new-row';
 
+  const historyButton = document.createElement('button');
+  historyButton.type = 'button';
+  historyButton.className = 'block';
+  historyButton.dataset.testid = 'history-button';
+  historyButton.textContent = '履歴から選ぶ';
+  historyButton.addEventListener('click', () => handlers.onOpenHistory());
+
   const newButton = document.createElement('button');
   newButton.type = 'button';
   newButton.className = 'primary block';
@@ -137,7 +149,24 @@ function renderNewRow(handlers: PatientListHandlers): HTMLElement {
   newButton.textContent = '＋ 訪問先を登録';
   newButton.addEventListener('click', () => handlers.onNew());
 
-  row.append(newButton);
+  row.append(historyButton, newButton);
+  return row;
+}
+
+function renderShortcutRow(
+  lastWeek: { date: string; count: number },
+  handlers: PatientListHandlers,
+): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'list-shortcut-row';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.testid = 'last-week-button';
+  button.textContent = `先週の${WEEKDAY_LABELS[weekdayOf(lastWeek.date)]}曜日と同じ(${lastWeek.count}人)`;
+  button.addEventListener('click', () => handlers.onPickLastWeek());
+
+  row.append(button);
   return row;
 }
 

@@ -16,6 +16,15 @@ async function waitFor(assertion: () => void): Promise<void> {
   await vi.waitFor(assertion, { timeout: 2000, interval: 5 });
 }
 
+/**
+ * 「地図を開く」を押すと、裏で今日の記録(IndexedDB)が始まる。それを待たずにテストが終わると、
+ * 次のテストの beforeEach(接続を作り直す)と競合してテスト全体が止まってしまうことがあるため、
+ * 記録が終わるまで少し待つ。
+ */
+async function waitForHistoryRecorded(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
 const el = <T extends HTMLElement = HTMLElement>(selector: string): T | null =>
   document.querySelector<T>(selector);
 
@@ -161,6 +170,7 @@ describe('セッションの永続化(#1)', () => {
 
     await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await waitForHistoryRecorded();
     await waitFor(() => expect(el('[data-testid="open-route"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
 
@@ -290,6 +300,7 @@ describe('開いたルートの印(#6)', () => {
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await waitForHistoryRecorded();
     await waitFor(() => expect(el('[data-testid="open-route"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
 
@@ -303,6 +314,7 @@ describe('開いたルートの印(#6)', () => {
     el<HTMLButtonElement>('[data-testid="back-button"]')!.click();
     expect(el('h1')?.textContent).toBe('訪問順を決める');
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await waitForHistoryRecorded();
 
     expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
   });
@@ -316,6 +328,7 @@ describe('開いたルートの印(#6)', () => {
     el<HTMLInputElement>(`input[data-id="${ids[0]}"]`)!.click(); // 選び直す
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await waitForHistoryRecorded();
 
     expect(el('[data-testid="route-status"]')).toBeNull();
     expect(el('[data-testid="route-card"]')?.getAttribute('data-state')).toBe('next');
@@ -327,6 +340,7 @@ describe('開いたルートの印(#6)', () => {
     el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // 地図 → 訪問順
     el<HTMLButtonElement>('[data-testid="move-down"]')!.click(); // 1件目を下へ
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await waitForHistoryRecorded();
 
     expect(el('[data-testid="route-status"]')).toBeNull();
   });
@@ -338,6 +352,7 @@ describe('開いたルートの印(#6)', () => {
     // 先頭の▲は押せない(disabled)ので、押しても何も起きない。
     el<HTMLButtonElement>('[data-testid="move-up"]')!.click();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await waitForHistoryRecorded();
 
     expect(el('[data-testid="route-status"]')?.textContent).toContain('開きました');
   });
@@ -357,6 +372,7 @@ describe('開いたルートの印(#6)', () => {
 
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await waitForHistoryRecorded();
 
     expect(el('[data-testid="route-status"]')).toBeNull();
   });
@@ -375,6 +391,7 @@ describe('開いたルートの印(#6)', () => {
 
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await waitForHistoryRecorded();
 
     expect(el('[data-testid="route-status"]')).toBeNull();
   });
@@ -1218,6 +1235,7 @@ describe('出発・帰着の選択', () => {
     el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await waitForHistoryRecorded();
     await waitFor(() => expect(el('[data-testid="open-route"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
 
@@ -1239,5 +1257,45 @@ describe('事業所の登録', () => {
     await waitFor(() => expect(el('.message')?.textContent).toContain('事業所を保存しました'));
     const db = await import('../src/db');
     expect(await db.getMeta('office')).toEqual({ name: '本店', address: '東京都中央区1-1' });
+  });
+});
+
+describe('履歴から選ぶ', () => {
+  it('地図を開くと今日の記録ができ、履歴の画面から同じ人を選び直せる', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    dismissInstallNotice();
+
+    // 2件登録
+    el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+    el<HTMLInputElement>('[data-testid="name-input"]')!.value = '山田 太郎';
+    el<HTMLInputElement>('[data-testid="address-input"]')!.value = '東京都千代田区1-1';
+    el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+    el<HTMLInputElement>('[data-testid="name-input"]')!.value = '佐藤 花子';
+    el<HTMLInputElement>('[data-testid="address-input"]')!.value = '大阪府大阪市2-2';
+    el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+
+    // 全選択 → 訪問順 → 「この順番で地図を開く」
+    el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+
+    const db = await import('../src/db');
+    await waitFor(async () => expect((await db.listHistory()).length).toBe(1));
+
+    // 一覧へ戻り、選択を解除してから履歴で選び直す
+    el<HTMLButtonElement>('[data-testid="tab-list"]')!.click();
+    el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click(); // 全解除
+    el<HTMLButtonElement>('[data-testid="history-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="history-row"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="history-row"]')!.click();
+    el<HTMLButtonElement>('[data-testid="history-pick"]')!.click();
+    await waitFor(() => expect(el('[data-testid="stop-row"]')).not.toBeNull());
+    expect(document.querySelectorAll('[data-testid="stop-row"]')).toHaveLength(2);
   });
 });

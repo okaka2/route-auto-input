@@ -5,14 +5,19 @@ import {
   deleteMeta,
   deletePatient,
   deletePatients,
+  getHistory,
   getMeta,
+  listHistory,
   listPatients,
   mergePatients,
+  putHistory,
   replaceAllPatients,
   savePatient,
   setMeta,
+  type HistoryEntry,
 } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
+import { dateKey, lastWeekSameWeekday, restoreSelection } from './history';
 import { shouldShowInstallHint } from './installHint';
 import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
@@ -52,6 +57,7 @@ import {
 import type { AppState, Message, Patient, SortOrder } from './types';
 import { validatePatientInput, validateSelection } from './validation';
 import { renderDialog } from './views/dialogs';
+import { renderHistory } from './views/historyView';
 import { renderPatientForm, type PatientFormDraft } from './views/patientFormView';
 import { renderPatientList } from './views/patientListView';
 import { renderRouteOrder } from './views/routeOrderView';
@@ -150,6 +156,9 @@ let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: l
 
 // 出発・帰着の選び方と事業所。起動時に loadRouteContext() で読み直す(Task 3 が使う)。
 let routeContext: RouteContext = { ends: DEFAULT_ROUTE_ENDS, office: null };
+
+// 履歴(日付ごとの記録)。起動時と記録後に listHistory() で読み直す。
+let historyEntries: HistoryEntry[] = [];
 // loadSettingsInfo() が一度でも終わったか。終わる前はlastBackupAtがnullのままなので、
 // バックアップのお知らせ(「まだバックアップがありません」)を誤って出さないためのガード。
 let settingsLoaded = false;
@@ -290,6 +299,52 @@ async function loadRouteContext(): Promise<void> {
   }
   settingsInfo = { ...settingsInfo, office: routeContext.office };
   render();
+}
+
+async function loadHistory(): Promise<void> {
+  try {
+    historyEntries = await listHistory();
+  } catch {
+    historyEntries = [];
+  }
+  render();
+}
+
+/** 「地図を開く」を押したとき、その日の訪問先と順番を記録する(同じ日は上書き。済の記録は保つ)。 */
+async function recordTodayRoute(): Promise<void> {
+  const ids = state.selectedIds;
+  if (ids.length === 0) return;
+  const date = dateKey(new Date());
+  try {
+    const existing = await getHistory(date);
+    const visited = Object.fromEntries(Object.entries(existing?.visited ?? {}).filter(([id]) => ids.includes(id)));
+    await putHistory({ date, ids: [...ids], routeEnds: routeContext.ends, visited });
+    await loadHistory();
+  } catch {
+    // 記録できなくても地図は開ける。
+  }
+}
+
+function lastWeekShortcut(): { date: string; count: number } | null {
+  const entry = lastWeekSameWeekday(historyEntries, new Date());
+  return entry ? { date: entry.date, count: entry.ids.length } : null;
+}
+
+function pickHistory(date: string): void {
+  const entry = historyEntries.find((e) => e.date === date);
+  if (!entry) return;
+  const { ids, missing } = restoreSelection(entry, state.patients);
+  routeContext = { ...routeContext, ends: entry.routeEnds };
+  openedRoutes.clear();
+  const next = withScreen({ ...state, selectedIds: ids }, { name: 'order' });
+  setState(
+    withMessage(
+      next,
+      missing > 0
+        ? { kind: 'info', text: `${ids.length}人を選びました。${missing}人は名簿にないため選べませんでした。` }
+        : { kind: 'info', text: `${ids.length}人を選びました。` },
+    ),
+  );
 }
 
 async function handleSaveOffice(name: string, address: string): Promise<void> {
@@ -730,7 +785,12 @@ function renderScreen(): HTMLElement {
         },
         onFilterChange: (filter) => setState(setListFilter(state, filter)),
         onSearchAll: () => setState(setListFilter(setSearchQuery(state, state.searchQuery), 'all')),
-      }, currentNotice());
+        onOpenHistory: () => setState(withScreen(state, { name: 'history', openDate: null, weekday: null })),
+        onPickLastWeek: () => {
+          const s = lastWeekShortcut();
+          if (s) pickHistory(s.date);
+        },
+      }, currentNotice(), lastWeekShortcut());
     case 'form':
       return renderPatientForm(currentEditingPatient(), formDraft, state.message, {
         onSave: (name, address, phone) => {
@@ -758,7 +818,10 @@ function renderScreen(): HTMLElement {
           setState(openStopMenu(state, id));
         },
         onAddStops: () => setState(withScreen(state, { name: 'list' })),
-        onOpenMap: () => setState(withScreen(state, { name: 'map' })),
+        onOpenMap: () => {
+          setState(withScreen(state, { name: 'map' }));
+          void recordTodayRoute();
+        },
         onBack: () => setState(withScreen(state, { name: 'list' })),
         onEndsChange: (ends) => {
           void handleEndsChange(ends);
@@ -797,6 +860,18 @@ function renderScreen(): HTMLElement {
         onClearOffice: () => {
           void handleClearOffice();
         },
+      });
+    case 'history':
+      return renderHistory(state, historyEntries, {
+        onOpenEntry: (d) =>
+          setState({
+            ...state,
+            screen: { name: 'history', openDate: d, weekday: state.screen.name === 'history' ? state.screen.weekday : null },
+          }),
+        onFilterWeekday: (w) => setState({ ...state, screen: { name: 'history', openDate: null, weekday: w } }),
+        onPick: pickHistory,
+        onCopyVisits: () => {},
+        onBack: () => setState(withScreen(state, { name: 'list' })),
       });
   }
 }
@@ -922,6 +997,7 @@ function startApp(): void {
   void reloadPatients();
   void loadSettingsInfo();
   void loadRouteContext();
+  void loadHistory();
 }
 
 /**

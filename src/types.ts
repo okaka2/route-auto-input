@@ -15,7 +15,8 @@ export type Screen =
   | { name: 'form'; patientId: string | null }
   | { name: 'order' }
   | { name: 'map' }
-  | { name: 'settings' };
+  | { name: 'settings' }
+  | { name: 'history'; openDate: string | null; weekday: number | null };
 
 export type Message = { kind: 'error' | 'info'; text: string };
 
