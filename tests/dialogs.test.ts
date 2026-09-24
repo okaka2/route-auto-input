@@ -18,6 +18,8 @@ const handlers = (): DialogHandlers => ({
   onConfirmDeleteSelected: vi.fn(),
   onMoveToTop: vi.fn(),
   onMoveToBottom: vi.fn(),
+  onSaveAnyway: vi.fn(),
+  onOpenExisting: vi.fn(),
   onClose: vi.fn(),
 });
 
@@ -232,6 +234,31 @@ describe('renderDialog: 訪問順の「⋯」', () => {
     expect(spies.onMoveToTop).toHaveBeenCalledWith(patients[1]!.id);
     element.querySelector<HTMLButtonElement>('[data-testid="dialog-move-bottom"]')!.click();
     expect(spies.onMoveToBottom).toHaveBeenCalledWith(patients[1]!.id);
+  });
+});
+
+describe('renderDialog: 同じ人の知らせ', () => {
+  it('同じ人の知らせ: 見つかった人を出し、そのまま登録/登録済みを開く/戻って直す', () => {
+    const existing = createPatient('山田 太郎', '東京都1-2-3');
+    const state = {
+      ...createInitialState([existing]),
+      dialog: {
+        kind: 'similar' as const,
+        input: { name: '山田太郎', address: '大阪府', phone: '' },
+        matchIds: [existing.id],
+        continueAfter: false,
+      },
+    };
+    const spies = handlers();
+    const element = renderDialog(state, spies)!;
+    expect(element.textContent).toContain('同じ名前か住所の訪問先があります');
+    expect(element.textContent).toContain('山田 太郎');
+    element.querySelector<HTMLButtonElement>('[data-testid="dialog-save-anyway"]')!.click();
+    expect(spies.onSaveAnyway).toHaveBeenCalled();
+    element.querySelector<HTMLButtonElement>('[data-testid="dialog-open-existing"]')!.click();
+    expect(spies.onOpenExisting).toHaveBeenCalledWith(existing.id);
+    element.querySelector<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    expect(spies.onClose).toHaveBeenCalled();
   });
 });
 

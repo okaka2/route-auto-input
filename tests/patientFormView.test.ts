@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { createPatient } from '../src/patient';
 import { renderPatientForm, type PatientFormHandlers } from '../src/views/patientFormView';
 
-const handlers = (): PatientFormHandlers => ({ onSave: vi.fn(), onCancel: vi.fn() });
+const handlers = (): PatientFormHandlers => ({
+  onSave: vi.fn(),
+  onSaveAndContinue: vi.fn(),
+  onCancel: vi.fn(),
+});
 
 const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: string): T =>
   element.querySelector<T>(`[data-testid="${testid}"]`)!;
@@ -92,6 +96,28 @@ describe('renderPatientForm: 保存とキャンセル', () => {
     const element = renderPatientForm(null, null, null, spies);
     q<HTMLButtonElement>(element, 'cancel-button').click();
     expect(spies.onCancel).toHaveBeenCalled();
+  });
+
+  it('新規のときだけ「保存して続けて登録」を入力欄の下に出し、押すと onSaveAndContinue', () => {
+    const spies = handlers();
+    const element = renderPatientForm(null, null, null, spies);
+    nameInput(element).value = '山田';
+    addressInput(element).value = '東京都';
+    q<HTMLButtonElement>(element, 'save-continue-button').click();
+    expect(spies.onSaveAndContinue).toHaveBeenCalledWith('山田', '東京都', '');
+    expect(
+      renderPatientForm(createPatient('a', 'b'), null, null, handlers()).querySelector(
+        '[data-testid="save-continue-button"]',
+      ),
+    ).toBeNull();
+  });
+
+  it('キャンセルは、入力中の値を渡す', () => {
+    const spies = handlers();
+    const element = renderPatientForm(null, null, null, spies);
+    nameInput(element).value = '途中';
+    q<HTMLButtonElement>(element, 'cancel-button').click();
+    expect(spies.onCancel).toHaveBeenCalledWith('途中', '', '');
   });
 });
 

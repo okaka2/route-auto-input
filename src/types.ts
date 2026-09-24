@@ -28,7 +28,13 @@ export type Dialog =
   | { kind: 'confirmDelete'; id: string }
   | { kind: 'confirmDeleteSelected' }
   | { kind: 'installSteps' }
-  | { kind: 'stopMenu'; id: string };
+  | { kind: 'stopMenu'; id: string }
+  | {
+      kind: 'similar';
+      input: { name: string; address: string; phone: string };
+      matchIds: string[];
+      continueAfter: boolean;
+    };
 
 export type AppState = {
   screen: Screen;

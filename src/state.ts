@@ -47,6 +47,10 @@ function keepDialog(
   if (dialog.kind === 'confirmDeleteSelected') {
     return selectedIds.length > 0 ? dialog : null;
   }
+  if (dialog.kind === 'similar') {
+    const matchIds = dialog.matchIds.filter((id) => existingIds.has(id));
+    return matchIds.length > 0 ? { ...dialog, matchIds } : null;
+  }
   return existingIds.has(dialog.id) ? dialog : null;
 }
 

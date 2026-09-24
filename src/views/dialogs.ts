@@ -1,6 +1,6 @@
 import { installSteps } from '../installHint';
 import { installPlatform } from '../platform';
-import type { AppState, Patient } from '../types';
+import type { AppState, Dialog, Patient } from '../types';
 
 export type DialogHandlers = {
   onEdit(id: string): void;
@@ -15,6 +15,10 @@ export type DialogHandlers = {
   onMoveToTop(id: string): void;
   /** 訪問順の「⋯」: 最後へ。 */
   onMoveToBottom(id: string): void;
+  /** 同じ人の知らせ: そのまま登録する。 */
+  onSaveAnyway(): void;
+  /** 同じ人の知らせ: 登録済みの訪問先を開く。 */
+  onOpenExisting(id: string): void;
   onClose(): void;
 };
 
@@ -40,6 +44,8 @@ export function renderDialog(state: AppState, handlers: DialogHandlers): HTMLEle
     content = renderInstallSteps(handlers);
   } else if (dialog.kind === 'confirmDeleteSelected') {
     content = renderConfirmDeleteSelected(state.selectedIds.length, handlers);
+  } else if (dialog.kind === 'similar') {
+    content = renderSimilar(state, dialog, handlers);
   } else {
     const patient = state.patients.find((item) => item.id === dialog.id);
     if (patient === undefined) {
@@ -161,6 +167,43 @@ function renderInstallSteps(handlers: DialogHandlers): HTMLElement[] {
   buttons.className = 'sheet-buttons';
   buttons.append(actionButton('閉じる', 'dialog-cancel', () => handlers.onClose()));
   return [title, list, buttons];
+}
+
+function renderSimilar(
+  state: AppState,
+  dialog: Extract<Dialog, { kind: 'similar' }>,
+  handlers: DialogHandlers,
+): HTMLElement[] {
+  const title = document.createElement('h2');
+  title.id = 'dialog-title';
+  title.className = 'sheet-title';
+  title.textContent = '同じ名前か住所の訪問先があります';
+  const list = document.createElement('ul');
+  list.className = 'sheet-list';
+  const matches = dialog.matchIds
+    .map((id) => state.patients.find((p) => p.id === id))
+    .filter((p): p is Patient => p !== undefined);
+  for (const match of matches) {
+    const item = document.createElement('li');
+    item.textContent = `${match.name}(${match.address})`;
+    list.append(item);
+  }
+  const actions = document.createElement('ul');
+  actions.className = 'sheet-actions';
+  const first = matches[0];
+  const entries = [
+    { testid: 'dialog-save-anyway', label: 'そのまま登録', onClick: () => handlers.onSaveAnyway() },
+    ...(first
+      ? [{ testid: 'dialog-open-existing', label: '登録済みを開く', onClick: () => handlers.onOpenExisting(first.id) }]
+      : []),
+    { testid: 'dialog-cancel', label: '戻って直す', onClick: () => handlers.onClose() },
+  ];
+  for (const entry of entries) {
+    const item = document.createElement('li');
+    item.append(actionButton(entry.label, entry.testid, entry.onClick));
+    actions.append(item);
+  }
+  return [title, list, actions];
 }
 
 function renderConfirmDeleteSelected(count: number, handlers: DialogHandlers): HTMLElement[] {

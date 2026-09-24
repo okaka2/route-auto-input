@@ -6,7 +6,8 @@ export type PatientFormDraft = { name: string; address: string; phone: string };
 
 export type PatientFormHandlers = {
   onSave(name: string, address: string, phone: string): void;
-  onCancel(): void;
+  onSaveAndContinue(name: string, address: string, phone: string): void;
+  onCancel(name: string, address: string, phone: string): void;
 };
 
 /**
@@ -50,7 +51,9 @@ export function renderPatientForm(
   cancel.className = 'header-link cancel';
   cancel.dataset.testid = 'cancel-button';
   cancel.textContent = 'キャンセル';
-  cancel.addEventListener('click', () => handlers.onCancel());
+  cancel.addEventListener('click', () =>
+    handlers.onCancel(nameInput.value, addressInput.value, phoneInput.value),
+  );
 
   const title = document.createElement('h1');
   title.className = 'screen-title';
@@ -78,7 +81,33 @@ export function renderPatientForm(
     field('電話番号(任意)', phoneInput, false),
     renderMapCheck(addressInput),
   );
+
+  if (patient === null) {
+    const actions = document.createElement('div');
+    actions.className = 'form-actions';
+    const save = button('form-save-button', '保存', 'primary', () =>
+      handlers.onSave(nameInput.value, addressInput.value, phoneInput.value),
+    );
+    const cont = button('save-continue-button', '保存して続けて登録', '', () =>
+      handlers.onSaveAndContinue(nameInput.value, addressInput.value, phoneInput.value),
+    );
+    actions.append(save, cont);
+    container.append(actions);
+  }
+
   return container;
+}
+
+function button(testid: string, text: string, className: string, onClick: () => void): HTMLButtonElement {
+  const element = document.createElement('button');
+  element.type = 'button';
+  if (className) {
+    element.className = className;
+  }
+  element.dataset.testid = testid;
+  element.textContent = text;
+  element.addEventListener('click', onClick);
+  return element;
 }
 
 function textInput(testid: string, value: string, placeholder: string, required: boolean): HTMLInputElement {

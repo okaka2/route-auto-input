@@ -540,6 +540,12 @@ button.select-all {
   min-height: var(--tap-primary);
 }
 
+.sheet-list {
+  margin: 0 0 var(--gap);
+  padding-left: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
 .sheet-steps {
   margin: 0 0 var(--gap);
   padding-left: 1.25rem;
@@ -979,6 +985,18 @@ input:focus-visible + .check {
 .field {
   display: block;
   margin-bottom: var(--gap);
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: var(--gap);
+}
+
+.form-actions button {
+  flex: 1 1 10rem;
+  min-height: var(--tap-primary);
 }
 
 .field-label {
