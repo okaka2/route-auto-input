@@ -669,9 +669,35 @@ button.select-all {
   font-weight: 600;
 }
 
-.route-names {
+.route-stops {
   margin: 0.5rem 0 var(--gap);
+  padding: 0;
+  list-style: none;
+}
+
+.route-stops li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap-min);
+}
+
+.route-stop-name {
+  flex: 1;
   overflow-wrap: anywhere;
+}
+
+.visited-toggle {
+  min-height: var(--tap-min);
+  padding: 0 0.75rem;
+  white-space: nowrap;
+}
+
+.visited-toggle.done {
+  border-color: var(--success);
+  background: var(--success-soft);
+  color: var(--success);
+  font-weight: 700;
 }
 
 .route-status {

@@ -21,6 +21,7 @@ export type SettingsHandlers = {
   onBack(): void;
   onSaveOffice(name: string, address: string): void;
   onClearOffice(): void;
+  onClearHistory(): void;
 };
 
 /** 設定画面。出発地・帰着地 → バックアップ → データの保存状態 → 表示 → このアプリについて の順。 */
@@ -43,7 +44,7 @@ export function renderSettings(
     count,
     renderOffice(info, handlers),
     renderBackup(info, handlers, now),
-    renderProtection(info),
+    renderProtection(info, handlers),
     renderTheme(info, handlers),
     renderAbout(),
   );
@@ -124,7 +125,7 @@ function renderBackup(info: SettingsInfo, handlers: SettingsHandlers, now: Date)
   return card;
 }
 
-function renderProtection(info: SettingsInfo): HTMLElement {
+function renderProtection(info: SettingsInfo, handlers: SettingsHandlers): HTMLElement {
   const card = section('データの保存状態');
   const status = document.createElement('p');
   const label = document.createElement('span');
@@ -138,7 +139,10 @@ function renderProtection(info: SettingsInfo): HTMLElement {
   note.textContent =
     '「保護されています」なら、空き容量が少なくなってもデータが自動で消されにくくなります。' +
     'どちらの場合も、機種変更やアプリの削除に備えて、定期的にバックアップを書き出してください。';
-  card.append(status, note);
+  const historyHint = document.createElement('p');
+  historyHint.className = 'hint';
+  historyHint.textContent = '訪問の履歴(誰をどの順で回ったか・訪問した時刻)は8週間で自動的に消えます。';
+  card.append(status, note, historyHint, button('clear-history-button', '履歴をすべて消す', 'danger', () => handlers.onClearHistory()));
   return card;
 }
 

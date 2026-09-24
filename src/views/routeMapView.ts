@@ -1,5 +1,5 @@
 import { MAX_STOPS_PER_ROUTE } from '../config';
-import { formatDateTime, formatPhoneHref } from '../format';
+import { formatDateTime, formatPhoneHref, formatTime } from '../format';
 import type { MapProvider } from '../mapProviders';
 import { buildRoutePlans, stopsPerRoute, type RoutePlan, type RouteContext } from '../routePlan';
 import { selectedPatients } from '../state';
@@ -14,6 +14,8 @@ export type RouteMapHandlers = {
   onShare(): void;
   /** 「リンクをコピー」。共有メニューを使わず、URLをコピーする(PC向け)。 */
   onCopyLink(): void;
+  /** 訪問先の「済」ボタン。押すたびに訪問済み/未訪問を切り替える。 */
+  onToggleVisited(id: string): void;
 };
 
 /** done: 開いた / next: 次に開く(最初の未開封) / later: それ以降 */
@@ -25,12 +27,14 @@ type CardState = 'done' | 'next' | 'later';
  * 次に開くルートを最も目立たせ、開いたルートは「✓ 開きました」と日時で示す。
  *
  * @param opened 開いたルートの番号 → 開いた日時(ISO 8601。不明なら '')
+ * @param visited 訪問先の id → 訪問済みにした日時(ISO 8601)
  */
 export function renderRouteMap(
   state: AppState,
   opened: ReadonlyMap<number, string>,
   provider: MapProvider,
   context: RouteContext,
+  visited: ReadonlyMap<string, string>,
   handlers: RouteMapHandlers,
 ): HTMLElement {
   const container = document.createElement('div');
@@ -57,7 +61,7 @@ export function renderRouteMap(
   cards.className = 'route-cards';
   plans.forEach((plan, index) => {
     const cardState: CardState = opened.has(index) ? 'done' : index === nextIndex ? 'next' : 'later';
-    cards.append(renderRouteCard(plan, index, cardState, opened.get(index) ?? '', provider, handlers));
+    cards.append(renderRouteCard(plan, index, cardState, opened.get(index) ?? '', provider, visited, handlers));
   });
   container.append(cards, renderShare(handlers));
   return container;
@@ -137,6 +141,7 @@ function renderRouteCard(
   cardState: CardState,
   openedAt: string,
   provider: MapProvider,
+  visited: ReadonlyMap<string, string>,
   handlers: RouteMapHandlers,
 ): HTMLElement {
   const route = plan.stops;
@@ -171,31 +176,7 @@ function renderRouteCard(
     card.append(ends);
   }
 
-  const names = document.createElement('p');
-  names.className = 'route-names';
-  names.textContent = route.map((patient) => patient.name).join(' → ');
-  card.append(names);
-
-  const withPhone = route.filter((patient) => patient.phone);
-  if (withPhone.length > 0) {
-    const phones = document.createElement('p');
-    phones.className = 'route-phones';
-    phones.dataset.testid = 'route-phones';
-    withPhone.forEach((patient) => {
-      const entry = document.createElement('span');
-      entry.className = 'route-phone-entry';
-      entry.append(document.createTextNode(`${patient.name} `));
-      const link = document.createElement('a');
-      link.className = 'phone-link';
-      link.dataset.testid = 'phone-link';
-      link.href = formatPhoneHref(patient.phone!);
-      link.setAttribute('aria-label', `${patient.name}に電話`);
-      link.textContent = '☎';
-      entry.append(link);
-      phones.append(entry);
-    });
-    card.append(phones);
-  }
+  card.append(renderStops(route, visited, handlers));
 
   if (cardState === 'done') {
     const status = document.createElement('p');
@@ -230,4 +211,40 @@ function renderRouteCard(
   card.append(button);
 
   return card;
+}
+
+/** 訪問先ごとの行(名前・電話リンク・「済」ボタン)。 */
+function renderStops(route: readonly Patient[], visited: ReadonlyMap<string, string>, handlers: RouteMapHandlers): HTMLElement {
+  const list = document.createElement('ul');
+  list.className = 'route-stops';
+  list.dataset.testid = 'route-stops';
+  for (const patient of route) {
+    const item = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'route-stop-name';
+    name.textContent = patient.name;
+    item.append(name);
+    if (patient.phone) {
+      const phone = document.createElement('a');
+      phone.className = 'phone-link';
+      phone.dataset.testid = 'phone-link';
+      phone.href = formatPhoneHref(patient.phone);
+      phone.setAttribute('aria-label', `${patient.name}に電話`);
+      phone.textContent = '☎';
+      item.append(phone);
+    }
+    const at = visited.get(patient.id);
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = `visited-toggle${at ? ' done' : ''}`;
+    toggle.dataset.testid = 'visited-toggle';
+    toggle.dataset.id = patient.id;
+    toggle.setAttribute('aria-pressed', String(at !== undefined));
+    toggle.setAttribute('aria-label', `${patient.name}を訪問済みにする`);
+    toggle.textContent = at ? `済 ${formatTime(at)}` : '済';
+    toggle.addEventListener('click', () => handlers.onToggleVisited(patient.id));
+    item.append(toggle);
+    list.append(item);
+  }
+  return list;
 }

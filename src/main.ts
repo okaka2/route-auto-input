@@ -2,6 +2,8 @@ import './styles.css';
 import { parseBackup, serializeBackup } from './backup';
 import { MAX_STOPS_PER_ROUTE } from './config';
 import {
+  clearHistory,
+  deleteHistoryBefore,
   deleteMeta,
   deletePatient,
   deletePatients,
@@ -17,7 +19,7 @@ import {
   type HistoryEntry,
 } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
-import { dateKey, lastWeekSameWeekday, restoreSelection } from './history';
+import { dateKey, formatHistoryDate, formatVisits, keepFromDate, lastWeekSameWeekday, restoreSelection } from './history';
 import { shouldShowInstallHint } from './installHint';
 import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
@@ -118,6 +120,21 @@ function handleBeforeInstallPrompt(event: Event): void {
 }
 globalWindowForInstall.__routeAutoInputInstallPromptHandler = handleBeforeInstallPrompt;
 window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+// テストで main.ts を読み込み直す(vi.resetModules())たびに、前回読み込んだモジュールで
+// 動き出したまま残っていた非同期処理(起動時の古い履歴の削除など)が後から解決すると、
+// そのときには別のテストが動いていて、そのテストの localStorage やDOMへ古い状態で
+// 再描画してしまう(セッション記録を古い内容で上書きしてしまう、など)。
+// テストが1つ進むたびに window 上の世代番号が増える前提で、自分の世代と比べる
+// (再起動を模して同じテストの中で読み込み直す場合は世代が変わらないため、通常どおり動く)。
+type WindowWithTestGeneration = typeof window & { __routeAutoInputTestGeneration?: number };
+const globalWindowForGeneration = window as WindowWithTestGeneration;
+const mainGeneration = globalWindowForGeneration.__routeAutoInputTestGeneration;
+function isStaleGeneration(): boolean {
+  return (
+    mainGeneration !== undefined && globalWindowForGeneration.__routeAutoInputTestGeneration !== mainGeneration
+  );
+}
 
 // Googleマップへ遷移して戻ってきたときのために、選択・訪問順・開いたルートを
 // localStorageから復元する(Ruling 7)。復元できた場合、開いたルートがあれば地図の画面、
@@ -325,6 +342,51 @@ async function recordTodayRoute(): Promise<void> {
     await loadHistory();
   } catch {
     // 記録できなくても地図は開ける。
+  }
+}
+
+/** 今日の記録に残っている訪問済み(訪問先 id → 訪問済みにした日時)。記録が無ければ空。 */
+function todayVisited(): Map<string, string> {
+  const today = historyEntries.find((e) => e.date === dateKey(new Date()));
+  return new Map(Object.entries(today?.visited ?? {}));
+}
+
+/** 地図の画面の「済」ボタン。押すたびに訪問済み/未訪問を切り替える。 */
+async function toggleVisited(id: string): Promise<void> {
+  const date = dateKey(new Date());
+  try {
+    const existing = (await getHistory(date)) ?? { date, ids: [...state.selectedIds], routeEnds: routeContext.ends, visited: {} };
+    const visited = { ...existing.visited };
+    if (visited[id]) delete visited[id];
+    else visited[id] = new Date().toISOString();
+    await putHistory({ ...existing, visited });
+    await loadHistory();
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: '訪問済みを記録できませんでした。' }));
+  }
+}
+
+/** 履歴の画面の「コピー」。日報などに貼り付けられるよう、訪問した時刻と名前をテキストでコピーする。 */
+async function copyVisits(date: string): Promise<void> {
+  const entry = historyEntries.find((e) => e.date === date);
+  if (!entry) return;
+  try {
+    await copyText(`${formatHistoryDate(date)} 訪問: ${formatVisits(entry, state.patients)}`);
+    setState(withMessage(state, { kind: 'info', text: 'コピーしました。日報などに貼り付けてください。' }));
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: 'コピーできませんでした。' }));
+  }
+}
+
+/** 設定画面の「履歴をすべて消す」。確認してから全消去する。 */
+async function handleClearHistory(): Promise<void> {
+  if (!window.confirm('訪問の履歴をすべて消しますか?')) return;
+  try {
+    await clearHistory();
+    await loadHistory();
+    setState(withMessage(state, { kind: 'info', text: '履歴を消しました。' }));
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: '履歴を消せませんでした。' }));
   }
 }
 
@@ -836,7 +898,7 @@ function renderScreen(): HTMLElement {
         },
       });
     case 'map':
-      return renderRouteMap(state, new Map(openedRoutes), DEFAULT_MAP_PROVIDER, routeContext, {
+      return renderRouteMap(state, new Map(openedRoutes), DEFAULT_MAP_PROVIDER, routeContext, todayVisited(), {
         onOpenRoute: handleOpenRoute,
         onBack: () => setState(withScreen(state, { name: 'order' })),
         onChooseStops: () => setState(withScreen(state, { name: 'list' })),
@@ -845,6 +907,9 @@ function renderScreen(): HTMLElement {
         },
         onCopyLink: () => {
           void handleCopyRouteLink();
+        },
+        onToggleVisited: (id) => {
+          void toggleVisited(id);
         },
       });
     case 'settings':
@@ -868,6 +933,9 @@ function renderScreen(): HTMLElement {
         onClearOffice: () => {
           void handleClearOffice();
         },
+        onClearHistory: () => {
+          void handleClearHistory();
+        },
       });
     case 'history':
       return renderHistory(state, historyEntries, {
@@ -878,7 +946,9 @@ function renderScreen(): HTMLElement {
           }),
         onFilterWeekday: (w) => setState({ ...state, screen: { name: 'history', openDate: null, weekday: w } }),
         onPick: pickHistory,
-        onCopyVisits: () => {},
+        onCopyVisits: (d) => {
+          void copyVisits(d);
+        },
         onBack: () => setState(withScreen(state, { name: 'list' })),
       });
   }
@@ -1005,7 +1075,14 @@ function startApp(): void {
   void reloadPatients();
   void loadSettingsInfo();
   void loadRouteContext();
-  void loadHistory();
+  void deleteHistoryBefore(keepFromDate(new Date()))
+    .catch(() => undefined)
+    .then(() => {
+      if (!isStaleGeneration()) {
+        return loadHistory();
+      }
+      return undefined;
+    });
 }
 
 /**

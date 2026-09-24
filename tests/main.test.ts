@@ -60,14 +60,27 @@ function dismissInstallNotice(): void {
   el<HTMLButtonElement>('[data-testid="notice-install-dismiss"]')?.click();
 }
 
+type WindowWithTestGeneration = typeof window & { __routeAutoInputTestGeneration?: number };
+
 beforeEach(async () => {
   document.body.innerHTML = '<div id="app"></div>';
   vi.resetModules();
+  // main.ts が、前のテストで動き出したまま残っていた非同期処理(起動時の古い履歴の
+  // 削除など)を、自分の世代でなくなったと判断して無視できるようにする。
+  const globalWindowForGeneration = window as WindowWithTestGeneration;
+  globalWindowForGeneration.__routeAutoInputTestGeneration =
+    (globalWindowForGeneration.__routeAutoInputTestGeneration ?? 0) + 1;
   window.localStorage.clear();
   // ロック画面自体を検証するテスト以外は、ロックを経由せずアプリの中身を直接検証したいので、
   // 既定で解錠しておく。
   unlock();
   await deleteDB('route-auto-input');
+  // deleteDB が終わる(=前のテストで開いていた接続が確実に閉じ終わった)まで、
+  // 前のテストの afterEach(closeDbForTest(true))によるブロックは解除しない。
+  // 先に解除すると、前のテストで動き出したまま残っていた非同期処理が、ここでの
+  // deleteDB 待ちの最中に紛れ込んで新しい接続を開いてしまう(次のdeleteDBがブロックされる)。
+  const { resetDbGuardForTest } = await import('../src/db');
+  resetDbGuardForTest();
   // vi.resetModules() はモジュールの読み込みキャッシュを消すだけで、
   // vi.mock('../src/openRoute', ...) が作ったモック関数の呼び出し履歴は
   // テストをまたいで残る。呼び出し回数を検証するテストのために、ここでクリアする。
@@ -82,7 +95,7 @@ afterEach(async () => {
   // main.tsが内部で使っている(今のモジュールキャッシュ上の)db接続を閉じる。
   // 閉じないと次のbeforeEachのdeleteDBがブロックされる。
   const db = await import('../src/db');
-  await db.closeDbForTest();
+  await db.closeDbForTest(true);
 });
 
 describe('入力内容の保持(#2)', () => {
@@ -1356,5 +1369,94 @@ describe('履歴から選ぶ', () => {
     );
     expect(el('[data-testid="history-row"]')).not.toBeNull();
     expect(el('[data-testid="stop-row"]')).toBeNull();
+  });
+});
+
+describe('訪問済みと時刻・履歴のコピー・古い履歴の削除', () => {
+  it('地図の画面で「済」を押すと、履歴に時刻が残り、もう一度押すと消える', async () => {
+    const { createPatient } = await import('../src/patient');
+    const patientA = createPatient('山田 太郎', '東京都千代田区1-1');
+    const patientB = createPatient('佐藤 花子', '大阪府大阪市2-2');
+    const { savePatient, closeDbForTest } = await import('../src/db');
+    await savePatient(patientA);
+    await savePatient(patientB);
+    await closeDbForTest();
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    const historyRecorded = await armHistoryRecordWait();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await historyRecorded();
+    await waitFor(() => expect(el('[data-testid="visited-toggle"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="visited-toggle"]')!.click();
+    const db = await import('../src/db');
+    await waitFor(async () => expect(Object.keys((await db.listHistory())[0]!.visited)).toHaveLength(1));
+    await waitFor(() => expect(el('[data-testid="visited-toggle"]')!.textContent).toMatch(/^済 \d+:\d{2}$/));
+
+    el<HTMLButtonElement>('[data-testid="visited-toggle"]')!.click();
+    await waitFor(async () => expect(Object.keys((await db.listHistory())[0]!.visited)).toHaveLength(0));
+  });
+
+  it('起動時に56日より古い履歴を消す', async () => {
+    const db = await import('../src/db');
+    await db.putHistory({ date: '2020-01-01', ids: [], routeEnds: { start: 'first', end: 'last' }, visited: {} });
+    await db.closeDbForTest();
+
+    await import('../src/main');
+    await waitFor(async () => expect(await db.listHistory()).toEqual([]));
+  });
+
+  it('履歴の「コピー」を押すと、訪問した時刻と名前がクリップボードにコピーされる', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const db = await import('../src/db');
+    await db.savePatient(patient);
+    await db.putHistory({
+      date: '2026-09-22',
+      ids: [patient.id],
+      routeEnds: { start: 'first', end: 'last' },
+      visited: { [patient.id]: new Date(2026, 8, 22, 9, 12).toISOString() },
+    });
+    await db.closeDbForTest();
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="history-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="history-row"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="history-row"]')!.click();
+    await waitFor(() => expect(el('[data-testid="history-copy"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="history-copy"]')!.click();
+
+    await waitFor(() => expect(el('.message')?.textContent).toContain('コピーしました'));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('山田 太郎'));
+  });
+
+  it('設定の「履歴をすべて消す」で確認すると、履歴が消える', async () => {
+    const db = await import('../src/db');
+    await db.putHistory({ date: '2026-09-20', ids: [], routeEnds: { start: 'first', end: 'last' }, visited: {} });
+    await db.closeDbForTest();
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    dismissInstallNotice();
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="clear-history-button"]')).not.toBeNull());
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="clear-history-button"]')!.click();
+
+    await waitFor(async () => expect(await db.listHistory()).toEqual([]));
   });
 });

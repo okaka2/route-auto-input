@@ -10,6 +10,7 @@ const handlers = (): SettingsHandlers => ({
   onBack: vi.fn(),
   onSaveOffice: vi.fn(),
   onClearOffice: vi.fn(),
+  onClearHistory: vi.fn(),
 });
 
 const info = (): SettingsInfo => ({ lastBackupAt: null, persisted: null, theme: 'auto', office: null });
@@ -152,6 +153,15 @@ describe('renderSettings: 言葉と並び', () => {
   it('このアプリについて に版の番号を出す', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
     expect(element.textContent).toContain('版:');
+  });
+});
+
+describe('renderSettings: データの保存状態', () => {
+  it('「データの保存状態」に「履歴をすべて消す」があり、押すと onClearHistory', () => {
+    const spies = handlers();
+    const element = renderSettings(createInitialState([]), info(), spies);
+    q<HTMLButtonElement>(element, 'clear-history-button').click();
+    expect(spies.onClearHistory).toHaveBeenCalled();
   });
 });
 

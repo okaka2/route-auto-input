@@ -35,7 +35,21 @@ interface RouteAutoInputDB extends DBSchema {
 
 let connection: Promise<IDBPDatabase<RouteAutoInputDB>> | null = null;
 
+// テストで closeDbForTest(true)(後片付け)が呼ばれた後、そのテストの中で動き出したまま
+// 残っていた非同期処理(起動時の古い履歴の削除など)から getDb() が呼ばれても、静かに
+// 新しい接続を開き直さない(開き直すと、次のテストの deleteDB が誰も閉じない接続で
+// ブロックされ続けてしまう)。vi.resetModules() をまたいでも(テストの再起動を模した
+// テストなど、このモジュールが複数回読み込まれても)同じフラグを見られるよう、
+// モジュールの変数ではなく window に置く。
+type WindowWithDbTestGuard = typeof window & { __routeAutoInputDbClosedForTest?: boolean };
+function dbTestGuard(): WindowWithDbTestGuard | undefined {
+  return typeof window === 'undefined' ? undefined : (window as WindowWithDbTestGuard);
+}
+
 function getDb(): Promise<IDBPDatabase<RouteAutoInputDB>> {
+  if (dbTestGuard()?.__routeAutoInputDbClosedForTest) {
+    return Promise.reject(new Error('closeDbForTest(true) の後に getDb() が呼ばれました。'));
+  }
   connection ??= openDB<RouteAutoInputDB>(DB_NAME, DB_VERSION, {
     upgrade(db, oldVersion) {
       if (oldVersion < 1) {
@@ -71,14 +85,34 @@ export async function deleteMeta(key: keyof MetaValues): Promise<void> {
 /**
  * テストでデータベースを作り直すために接続を閉じる。
  * 接続を開いたままにすると deleteDB がブロックされるため、必ず close する。
+ *
+ * @param final テストの後片付け(afterEach)として呼ぶときは true にする。true だと、
+ *   この後に getDb() が呼ばれても新しい接続を開き直さない(次のテストの beforeEach で
+ *   resetForTest() が呼ばれるまで)。テストの途中で「一度閉じてから、すぐ読み直す」目的
+ *   (seed → closeDbForTest() → main.tsの起動、再起動を模したテスト、など)では
+ *   false(既定)のままにする。
  */
-export async function closeDbForTest(): Promise<void> {
+export async function closeDbForTest(final = false): Promise<void> {
+  if (final) {
+    const guard = dbTestGuard();
+    if (guard) {
+      guard.__routeAutoInputDbClosedForTest = true;
+    }
+  }
   if (connection === null) {
     return;
   }
   const db = await connection;
   db.close();
   connection = null;
+}
+
+/** 新しいテストの開始時に呼び、前のテストの closeDbForTest(true) によるブロックを解除する。 */
+export function resetDbGuardForTest(): void {
+  const guard = dbTestGuard();
+  if (guard) {
+    guard.__routeAutoInputDbClosedForTest = false;
+  }
 }
 
 /** 登録が新しい順に返す。 */

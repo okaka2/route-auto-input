@@ -168,7 +168,7 @@ describe('画面の文言(禁止語が出ない)', () => {
   });
 
   it('地図: 0件・1本・分割・開いた後(事業所あり/なし)', () => {
-    const handlers = { onOpenRoute: noop, onBack: noop, onChooseStops: noop, onShare: noop, onCopyLink: noop };
+    const handlers = { onOpenRoute: noop, onBack: noop, onChooseStops: noop, onShare: noop, onCopyLink: noop, onToggleVisited: noop };
     const at = new Date(2026, 8, 21, 14, 32).toISOString();
     for (const [label, state, opened] of [
       ['0件', createInitialState([]), new Map<number, string>()],
@@ -182,7 +182,7 @@ describe('画面の文言(禁止語が出ない)', () => {
       ] as const) {
         expectClean(
           `地図(${label}・${ctxLabel})`,
-          renderRouteMap(state, opened, googleMapsProvider, context, handlers).outerHTML,
+          renderRouteMap(state, opened, googleMapsProvider, context, new Map(), handlers).outerHTML,
         );
       }
     }
@@ -194,7 +194,7 @@ describe('画面の文言(禁止語が出ない)', () => {
       renderSettings(
         createInitialState(places(2)),
         { lastBackupAt: null, persisted: null, theme: 'auto', office: null },
-        { onExport: noop, onImport: noop, onThemeChange: noop, onBack: noop, onSaveOffice: noop, onClearOffice: noop },
+        { onExport: noop, onImport: noop, onThemeChange: noop, onBack: noop, onSaveOffice: noop, onClearOffice: noop, onClearHistory: noop },
       ).outerHTML,
     );
     expectClean('タブ', renderTabBar('list', true, { onSelect: noop }).outerHTML);

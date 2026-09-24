@@ -14,7 +14,10 @@ const handlers = (): RouteMapHandlers => ({
   onChooseStops: vi.fn(),
   onShare: vi.fn(),
   onCopyLink: vi.fn(),
+  onToggleVisited: vi.fn(),
 });
+
+const ctx = (): RouteContext => defaultContext;
 
 const office: Office = { name: '本店', address: '東京都中央区1-1' };
 const defaultContext: RouteContext = { ends: DEFAULT_ROUTE_ENDS, office: null };
@@ -40,7 +43,8 @@ const render = (
   spies: RouteMapHandlers = handlers(),
   provider: MapProvider = googleMapsProvider,
   context: RouteContext = defaultContext,
-) => renderRouteMap(state, opened, provider, context, spies);
+  visited: ReadonlyMap<string, string> = new Map(),
+) => renderRouteMap(state, opened, provider, context, visited, spies);
 
 const cards = (element: HTMLElement) =>
   [...element.querySelectorAll<HTMLElement>('[data-testid="route-card"]')];
@@ -106,9 +110,8 @@ describe('renderRouteMap: ルートの分割', () => {
       const card = cards(element)[index]!;
       expect(card.querySelector('.route-title')?.textContent).toBe(`ルート${index + 1}`);
       expect(card.querySelector('.route-count')?.textContent).toBe(`${route.length}地点`);
-      expect(card.querySelector('.route-names')?.textContent).toBe(
-        route.map((patient) => patient.name).join(' → '),
-      );
+      const stopNames = [...card.querySelectorAll('.route-stop-name')].map((el) => el.textContent);
+      expect(stopNames).toEqual(route.map((patient) => patient.name));
     });
   });
 
@@ -274,9 +277,26 @@ describe('renderRouteMap: 電話番号', () => {
     expect(links[0]!.getAttribute('href')).toBe('tel:0312345678');
   });
 
-  it('誰も電話番号を持たないカードには、電話の行が出ない', () => {
+  it('誰も電話番号を持たないカードには、電話リンクが出ない', () => {
     const element = render(stateWithSelection(2));
-    expect(element.querySelector('[data-testid="route-phones"]')).toBeNull();
+    expect(element.querySelector('[data-testid="phone-link"]')).toBeNull();
+  });
+});
+
+describe('renderRouteMap: 訪問済み', () => {
+  it('各訪問先に「済」ボタンがあり、済なら時刻を出す。押すと onToggleVisited(id)', () => {
+    const state = selectedState(2);
+    const [a, b] = state.patients;
+    const visited = new Map([[a!.id, new Date(2026, 8, 22, 9, 12).toISOString()]]);
+    const spies = handlers();
+    const element = renderRouteMap(state, new Map(), googleMapsProvider, ctx(), visited, spies);
+    const buttons = [...element.querySelectorAll<HTMLButtonElement>('[data-testid="visited-toggle"]')];
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]!.textContent).toBe('済 9:12');
+    expect(buttons[0]!.getAttribute('aria-pressed')).toBe('true');
+    expect(buttons[1]!.textContent).toBe('済');
+    buttons[1]!.click();
+    expect(spies.onToggleVisited).toHaveBeenCalledWith(b!.id);
   });
 });
 
@@ -288,6 +308,7 @@ describe('renderRouteMap: 出発・帰着', () => {
       new Map(),
       googleMapsProvider,
       { ends: { start: 'office', end: 'office' }, office },
+      new Map(),
       handlers(),
     );
     const cards = [...element.querySelectorAll('[data-testid="route-card"]')];
@@ -301,6 +322,7 @@ describe('renderRouteMap: 出発・帰着', () => {
       new Map(),
       googleMapsProvider,
       { ends: DEFAULT_ROUTE_ENDS, office: null },
+      new Map(),
       handlers(),
     );
     expect(element.querySelector('[data-testid="route-ends"]')).toBeNull();
@@ -311,6 +333,7 @@ describe('renderRouteMap: 出発・帰着', () => {
       new Map(),
       googleMapsProvider,
       { ends: { start: 'office', end: 'office' }, office },
+      new Map(),
       handlers(),
     );
     expect(element.querySelectorAll('[data-testid="route-card"]')).toHaveLength(2);
