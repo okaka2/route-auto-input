@@ -31,9 +31,11 @@ import {
   createInitialState,
   hasSelection,
   moveSelected,
+  moveSelectedToEdge,
   openDeleteConfirm,
   openDeleteSelectedConfirm,
   openRowMenu,
+  openStopMenu,
   selectAllVisible,
   selectedPatients,
   setListFilter,
@@ -635,6 +637,10 @@ function renderScreen(): HTMLElement {
           }
           setState(next);
         },
+        onOpenStopMenu: (id) => {
+          dialogReturnId = id;
+          setState(openStopMenu(state, id));
+        },
         onAddStops: () => setState(withScreen(state, { name: 'list' })),
         onOpenMap: () => setState(withScreen(state, { name: 'map' })),
         onBack: () => setState(withScreen(state, { name: 'list' })),
@@ -708,6 +714,14 @@ function renderApp(): HTMLElement {
     onConfirmDeleteSelected: () => {
       void handleConfirmDeleteSelected();
     },
+    onMoveToTop: (id) => {
+      openedRoutes.clear();
+      setState(moveSelectedToEdge(state, id, 'top'));
+    },
+    onMoveToBottom: (id) => {
+      openedRoutes.clear();
+      setState(moveSelectedToEdge(state, id, 'bottom'));
+    },
     onClose: closeAnyDialog,
   });
   if (dialog) {
@@ -740,7 +754,9 @@ function render(): void {
   }
   if (hadDialog && dialogReturnId !== null) {
     root!
-      .querySelector<HTMLElement>(`[data-testid="row-menu"][data-id="${dialogReturnId}"]`)
+      .querySelector<HTMLElement>(
+        `[data-testid="row-menu"][data-id="${dialogReturnId}"], [data-testid="stop-menu"][data-id="${dialogReturnId}"]`,
+      )
       ?.focus();
     dialogReturnId = null;
     return;

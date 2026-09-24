@@ -16,6 +16,8 @@ const handlers = (): DialogHandlers => ({
   onRequestDelete: vi.fn(),
   onConfirmDelete: vi.fn(),
   onConfirmDeleteSelected: vi.fn(),
+  onMoveToTop: vi.fn(),
+  onMoveToBottom: vi.fn(),
   onClose: vi.fn(),
 });
 
@@ -213,6 +215,23 @@ describe('renderDialog: アクセシビリティ', () => {
     } finally {
       element.remove();
     }
+  });
+});
+
+describe('renderDialog: 訪問順の「⋯」', () => {
+  it('訪問順の「⋯」: 先頭へ / 最後へ / キャンセル', () => {
+    const patients = [createPatient('山田 太郎', '東京都'), createPatient('鈴木 花子', '大阪府')];
+    const state = {
+      ...createInitialState(patients),
+      selectedIds: patients.map((p) => p.id),
+      dialog: { kind: 'stopMenu' as const, id: patients[1]!.id },
+    };
+    const spies = handlers();
+    const element = renderDialog(state, spies)!;
+    element.querySelector<HTMLButtonElement>('[data-testid="dialog-move-top"]')!.click();
+    expect(spies.onMoveToTop).toHaveBeenCalledWith(patients[1]!.id);
+    element.querySelector<HTMLButtonElement>('[data-testid="dialog-move-bottom"]')!.click();
+    expect(spies.onMoveToBottom).toHaveBeenCalledWith(patients[1]!.id);
   });
 });
 

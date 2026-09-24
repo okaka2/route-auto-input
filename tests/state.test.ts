@@ -7,9 +7,11 @@ import {
   createInitialState,
   hasSelection,
   moveSelected,
+  moveSelectedToEdge,
   openDeleteConfirm,
   openDeleteSelectedConfirm,
   openRowMenu,
+  openStopMenu,
   selectAllVisible,
   selectedPatients,
   setListFilter,
@@ -115,6 +117,32 @@ describe('moveSelected', () => {
     const state = toggleSelection(createInitialState(patients), patients[0]!.id);
     const moved = moveSelected(state, patients[1]!.id, -1);
     expect(moved.selectedIds).toEqual(state.selectedIds);
+  });
+});
+
+describe('moveSelectedToEdge', () => {
+  it('先頭へ/最後へ動かせる。すでに端なら同じ状態', () => {
+    const patients = makePatients(3);
+    const base = { ...createInitialState(patients), selectedIds: patients.map((p) => p.id) };
+    expect(moveSelectedToEdge(base, patients[2]!.id, 'top').selectedIds).toEqual([
+      patients[2]!.id,
+      patients[0]!.id,
+      patients[1]!.id,
+    ]);
+    expect(moveSelectedToEdge(base, patients[0]!.id, 'bottom').selectedIds).toEqual([
+      patients[1]!.id,
+      patients[2]!.id,
+      patients[0]!.id,
+    ]);
+    expect(moveSelectedToEdge(base, patients[0]!.id, 'top')).toBe(base);
+  });
+
+  it('openStopMenu は stopMenu ダイアログを開く', () => {
+    const patients = makePatients(1);
+    expect(openStopMenu(createInitialState(patients), patients[0]!.id).dialog).toEqual({
+      kind: 'stopMenu',
+      id: patients[0]!.id,
+    });
   });
 });
 

@@ -11,6 +11,10 @@ export type DialogHandlers = {
   onConfirmDelete(id: string): void;
   /** 複数選択の一括削除の確認で「削除」を押した。対象はstate.selectedIds。 */
   onConfirmDeleteSelected(): void;
+  /** 訪問順の「⋯」: 先頭へ。 */
+  onMoveToTop(id: string): void;
+  /** 訪問順の「⋯」: 最後へ。 */
+  onMoveToBottom(id: string): void;
   onClose(): void;
 };
 
@@ -41,7 +45,13 @@ export function renderDialog(state: AppState, handlers: DialogHandlers): HTMLEle
     if (patient === undefined) {
       return null;
     }
-    content = dialog.kind === 'rowMenu' ? renderMenu(patient, handlers) : renderConfirmDelete(patient, handlers);
+    if (dialog.kind === 'rowMenu') {
+      content = renderMenu(patient, handlers);
+    } else if (dialog.kind === 'stopMenu') {
+      content = renderStopMenu(patient, handlers);
+    } else {
+      content = renderConfirmDelete(patient, handlers);
+    }
   }
 
   const overlay = document.createElement('div');
@@ -89,6 +99,27 @@ function renderMenu(patient: Patient, handlers: DialogHandlers): HTMLElement[] {
   for (const action of actions) {
     const item = document.createElement('li');
     item.append(actionButton(action.label, action.testid, action.onClick, action.className));
+    list.append(item);
+  }
+  return [title, list];
+}
+
+function renderStopMenu(patient: Patient, handlers: DialogHandlers): HTMLElement[] {
+  const title = document.createElement('h2');
+  title.id = 'dialog-title';
+  title.className = 'sheet-title';
+  title.textContent = patient.name;
+
+  const list = document.createElement('ul');
+  list.className = 'sheet-actions';
+  const actions: { testid: string; label: string; onClick: () => void }[] = [
+    { testid: 'dialog-move-top', label: '先頭へ', onClick: () => handlers.onMoveToTop(patient.id) },
+    { testid: 'dialog-move-bottom', label: '最後へ', onClick: () => handlers.onMoveToBottom(patient.id) },
+    { testid: 'dialog-cancel', label: 'キャンセル', onClick: () => handlers.onClose() },
+  ];
+  for (const action of actions) {
+    const item = document.createElement('li');
+    item.append(actionButton(action.label, action.testid, action.onClick));
     list.append(item);
   }
   return [title, list];

@@ -721,6 +721,11 @@ button.select-all {
   padding: 0;
 }
 
+.stop-menu-button {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+}
+
 .route-divider {
   padding: 0.25rem 0 1rem;
   color: var(--muted);

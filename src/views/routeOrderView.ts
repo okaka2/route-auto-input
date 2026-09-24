@@ -6,6 +6,8 @@ import { renderMessage, renderScreenHeader } from './common';
 
 export type RouteOrderHandlers = {
   onMove(id: string, direction: -1 | 1): void;
+  /** 「⋯」。先頭へ/最後へ動かすメニューを開く。 */
+  onOpenStopMenu(id: string): void;
   /** 「＋ 訪問先を追加」。訪問先を選ぶ画面へ戻る。 */
   onAddStops(): void;
   /** 「この順番で地図を開く →」。地図を開く画面へ進む。 */
@@ -152,7 +154,15 @@ function renderStopRow(
   down.disabled = index === total - 1;
   down.setAttribute('aria-label', `${patient.name}を下へ`);
   down.addEventListener('click', () => handlers.onMove(patient.id, 1));
-  move.append(up, down);
+  const stopMenu = document.createElement('button');
+  stopMenu.type = 'button';
+  stopMenu.textContent = '⋯';
+  stopMenu.className = 'stop-menu-button';
+  stopMenu.dataset.testid = 'stop-menu';
+  stopMenu.dataset.id = patient.id;
+  stopMenu.setAttribute('aria-label', `${patient.name}の順番のメニュー`);
+  stopMenu.addEventListener('click', () => handlers.onOpenStopMenu(patient.id));
+  move.append(up, down, stopMenu);
 
   row.append(rail, body, move);
   return row;

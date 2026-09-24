@@ -122,6 +122,19 @@ export function moveSelected(state: AppState, id: string, direction: -1 | 1): Ap
   return { ...state, selectedIds };
 }
 
+/** 訪問順の「⋯」から、先頭または最後へ動かす。すでに端ならそのまま。 */
+export function moveSelectedToEdge(state: AppState, id: string, edge: 'top' | 'bottom'): AppState {
+  const index = state.selectedIds.indexOf(id);
+  if (index === -1) {
+    return state;
+  }
+  if ((edge === 'top' && index === 0) || (edge === 'bottom' && index === state.selectedIds.length - 1)) {
+    return state;
+  }
+  const rest = state.selectedIds.filter((s) => s !== id);
+  return { ...state, selectedIds: edge === 'top' ? [id, ...rest] : [...rest, id], dialog: null };
+}
+
 export function visiblePatients(state: AppState): Patient[] {
   const query = state.searchQuery.trim();
   const scope =
@@ -155,6 +168,11 @@ export function openRowMenu(state: AppState, id: string): AppState {
 
 export function openDeleteConfirm(state: AppState, id: string): AppState {
   return { ...state, dialog: { kind: 'confirmDelete', id } };
+}
+
+/** 訪問順の「⋯」メニューを開く。 */
+export function openStopMenu(state: AppState, id: string): AppState {
+  return { ...state, dialog: { kind: 'stopMenu', id } };
 }
 
 export function openDeleteSelectedConfirm(state: AppState): AppState {

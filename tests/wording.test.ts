@@ -49,6 +49,8 @@ const dialogHandlers = {
   onRequestDelete: noop,
   onConfirmDelete: noop,
   onConfirmDeleteSelected: noop,
+  onMoveToTop: noop,
+  onMoveToBottom: noop,
   onClose: noop,
 };
 
@@ -95,6 +97,13 @@ describe('画面の文言(禁止語が出ない)', () => {
       'ホーム画面への追加の手順',
       renderDialog({ ...base, dialog: { kind: 'installSteps' } }, dialogHandlers)!.outerHTML,
     );
+    expectClean(
+      '訪問順の「⋯」',
+      renderDialog(
+        { ...base, dialog: { kind: 'stopMenu', id: patients[0]!.id } },
+        dialogHandlers,
+      )!.outerHTML,
+    );
   });
 
   it('登録・編集フォーム: 新規・編集・下書き・メッセージ', () => {
@@ -110,7 +119,7 @@ describe('画面の文言(禁止語が出ない)', () => {
   });
 
   it('訪問順: 0件・1件・複数件・同じ住所', () => {
-    const handlers = { onMove: noop, onAddStops: noop, onOpenMap: noop, onBack: noop };
+    const handlers = { onMove: noop, onOpenStopMenu: noop, onAddStops: noop, onOpenMap: noop, onBack: noop };
     const same = places(2).map((place) => ({ ...place, address: '東京都1-1' }));
     for (const [label, state] of [
       ['0件', createInitialState([])],

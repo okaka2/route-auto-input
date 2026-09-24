@@ -7,6 +7,7 @@ import type { AppState, Patient } from '../src/types';
 
 const handlers = (): RouteOrderHandlers => ({
   onMove: vi.fn(),
+  onOpenStopMenu: vi.fn(),
   onAddStops: vi.fn(),
   onOpenMap: vi.fn(),
   onBack: vi.fn(),
@@ -125,6 +126,21 @@ describe('renderRouteOrder: 並べ替え(▲▼)', () => {
   it('並べ替えの案内文を出す', () => {
     const element = renderRouteOrder(stateWithSelection(2), handlers());
     expect(element.querySelector('[data-testid="order-hint"]')?.textContent).toContain('▲▼');
+  });
+});
+
+describe('renderRouteOrder: 「⋯」メニュー', () => {
+  it('各行に「⋯」があり、押すと onOpenStopMenu が id つきで呼ばれる', () => {
+    const state = stateWithSelection(2);
+    const spies = handlers();
+    const element = renderRouteOrder(state, spies);
+    const menus = [...element.querySelectorAll<HTMLButtonElement>('[data-testid="stop-menu"]')];
+    expect(menus).toHaveLength(2);
+    state.selectedIds.forEach((id, i) => {
+      expect(menus[i]?.dataset.id).toBe(id);
+    });
+    menus[0]!.click();
+    expect(spies.onOpenStopMenu).toHaveBeenCalledWith(state.selectedIds[0]);
   });
 });
 
