@@ -89,6 +89,7 @@ describe('入力内容の保持(#2)', () => {
   });
 
   it('新規登録に切り替えると前の失敗時の入力は引き継がない', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     await import('../src/main');
     await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
 
@@ -810,6 +811,9 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
     expect(el<HTMLInputElement>('[data-testid="address-input"]')!.value).toBe('東京都千代田区1-1');
 
     el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
+    // 名前・住所とも複製元と同じなので、同じ人の知らせが出る。「そのまま登録」で別の訪問先として保存する。
+    await waitFor(() => expect(el('[data-testid="dialog-save-anyway"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="dialog-save-anyway"]')!.click();
     await waitFor(() => expect(rows()).toHaveLength(2));
     // 元の訪問先はそのまま残っている。
     expect(checkbox(first!)).not.toBeNull();
@@ -1083,5 +1087,40 @@ describe('バックアップのお知らせ', () => {
     await waitFor(() => expect(el('[data-testid="backup-notice"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="notice-later"]')!.click();
     expect(el('[data-testid="backup-notice"]')).toBeNull();
+  });
+});
+
+describe('保存して続けて登録・同じ人の知らせ', () => {
+  it('保存して続けて登録すると、フォームが空のまま残り、件数のお知らせが出る', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    dismissInstallNotice();
+    el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+    el<HTMLInputElement>('[data-testid="name-input"]')!.value = '山田';
+    el<HTMLInputElement>('[data-testid="address-input"]')!.value = '東京都1';
+    el<HTMLButtonElement>('[data-testid="save-continue-button"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('山田様を登録しました(続けて1人目)'));
+    expect(el<HTMLInputElement>('[data-testid="name-input"]')!.value).toBe('');
+  });
+
+  it('同じ住所があれば知らせ、「そのまま登録」で保存される', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    dismissInstallNotice();
+    let count = 0;
+    for (const name of ['山田', '佐藤']) {
+      await waitFor(() => expect(rows()).toHaveLength(count));
+      el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+      el<HTMLInputElement>('[data-testid="name-input"]')!.value = name;
+      el<HTMLInputElement>('[data-testid="address-input"]')!.value = '東京都１－２－３';
+      el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
+      if (name === '佐藤') {
+        await waitFor(() => expect(el('[data-testid="dialog-save-anyway"]')).not.toBeNull());
+        el<HTMLButtonElement>('[data-testid="dialog-save-anyway"]')!.click();
+      }
+      count += 1;
+      await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    }
+    await waitFor(() => expect(rows()).toHaveLength(2));
   });
 });

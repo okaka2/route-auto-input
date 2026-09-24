@@ -51,6 +51,8 @@ const dialogHandlers = {
   onConfirmDeleteSelected: noop,
   onMoveToTop: noop,
   onMoveToBottom: noop,
+  onSaveAnyway: noop,
+  onOpenExisting: noop,
   onClose: noop,
 };
 
@@ -104,10 +106,25 @@ describe('画面の文言(禁止語が出ない)', () => {
         dialogHandlers,
       )!.outerHTML,
     );
+    expectClean(
+      '同じ人の知らせ',
+      renderDialog(
+        {
+          ...base,
+          dialog: {
+            kind: 'similar',
+            input: { name: patients[0]!.name, address: patients[0]!.address, phone: '' },
+            matchIds: [patients[0]!.id],
+            continueAfter: false,
+          },
+        },
+        dialogHandlers,
+      )!.outerHTML,
+    );
   });
 
   it('登録・編集フォーム: 新規・編集・下書き・メッセージ', () => {
-    const handlers = { onSave: noop, onCancel: noop };
+    const handlers = { onSave: noop, onSaveAndContinue: noop, onCancel: noop };
     const patient = createPatient('場所1', '東京都1-1');
     expectClean('新規', renderPatientForm(null, null, null, handlers).outerHTML);
     expectClean('編集', renderPatientForm(patient, null, null, handlers).outerHTML);

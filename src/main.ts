@@ -16,6 +16,7 @@ import { shouldShowInstallHint } from './installHint';
 import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
 import { checkPassword, isUnlocked, renderPasswordGate, unlock } from './passwordGate';
+import { findSimilar } from './normalize';
 import { createPatient, updatePatientFields } from './patient';
 import { isStandaloneDisplay } from './platform';
 import { isStoragePersisted, requestPersistentStorage } from './protection';
@@ -135,6 +136,8 @@ let formDraft: PatientFormDraft | null = null;
 
 // 保存/削除の二重実行防止(ボタンを連打してもDBへ二重に書き込まない)。
 let savingPatient = false;
+// 「保存して続けて登録」で続けて登録した人数。
+let continueCount = 0;
 const deletingPatientIds = new Set<string>();
 let deletingSelected = false;
 
@@ -313,15 +316,29 @@ function currentEditingPatient(): Patient | null {
   return state.patients.find((patient) => patient.id === id) ?? null;
 }
 
-async function handleSave(name: string, address: string, phone: string): Promise<void> {
-  if (savingPatient) {
-    // 保存中の二重タップ。何もしない(2件目のUUIDが発行されるのを防ぐ)。
+type FormInput = { name: string; address: string; phone: string };
+
+/** 保存の入口。検証 → 同じ人の確認 → 保存。 */
+async function handleSaveRequest(input: FormInput, continueAfter: boolean): Promise<void> {
+  const validation = validatePatientInput(input.name, input.address);
+  if (!validation.ok) {
+    formDraft = input;
+    setState(withMessage(state, { kind: 'error', text: validation.message }));
     return;
   }
-  const validation = validatePatientInput(name, address);
-  if (!validation.ok) {
-    formDraft = { name, address, phone };
-    setState(withMessage(state, { kind: 'error', text: validation.message }));
+  const editing = currentEditingPatient();
+  const matches = findSimilar(state.patients, input, editing?.id ?? null);
+  if (matches.length > 0) {
+    formDraft = input;
+    setState({ ...state, dialog: { kind: 'similar', input, matchIds: matches.map((m) => m.id), continueAfter } });
+    return;
+  }
+  await commitSave(input, continueAfter);
+}
+
+async function commitSave(input: FormInput, continueAfter: boolean): Promise<void> {
+  if (savingPatient) {
+    // 保存中の二重タップ。何もしない(2件目のUUIDが発行されるのを防ぐ)。
     return;
   }
   savingPatient = true;
@@ -329,8 +346,8 @@ async function handleSave(name: string, address: string, phone: string): Promise
     const existing = currentEditingPatient();
     const patient =
       existing === null
-        ? createPatient(name, address, new Date(), phone)
-        : updatePatientFields(existing, name, address, new Date(), phone);
+        ? createPatient(input.name, input.address, new Date(), input.phone)
+        : updatePatientFields(existing, input.name, input.address, new Date(), input.phone);
     if (existing !== null && state.selectedIds.includes(existing.id)) {
       // 選択中(=ルートに入っている)訪問先の編集。住所が変わったかもしれないので、
       // そのルートについて開いた印は古くなる前に消す。
@@ -338,15 +355,42 @@ async function handleSave(name: string, address: string, phone: string): Promise
     }
     await savePatient(patient);
     requestProtectionOnce();
+    if (continueAfter && existing === null) {
+      continueCount += 1;
+      formDraft = { name: '', address: '', phone: '' };
+      setState({
+        ...withScreen(state, { name: 'form', patientId: null }),
+        message: { kind: 'info', text: `${patient.name}様を登録しました(続けて${continueCount}人目)` },
+      });
+      await reloadPatients();
+      root!.querySelector<HTMLInputElement>('[data-testid="name-input"]')?.focus();
+      return;
+    }
+    continueCount = 0;
     formDraft = null;
     setState(withScreen(state, { name: 'list' }));
     await reloadPatients({ kind: 'info', text: '保存しました。' });
   } catch {
-    formDraft = { name, address, phone };
+    formDraft = input;
     setState(withMessage(state, { kind: 'error', text: 'データを保存できませんでした。' }));
   } finally {
     savingPatient = false;
   }
+}
+
+/** フォームの「キャンセル」。入力途中なら確認してから戻る。 */
+function handleFormCancel(input: FormInput): void {
+  const original = currentEditingPatient();
+  const dirty =
+    original === null
+      ? input.name.trim() !== '' || input.address.trim() !== '' || input.phone.trim() !== ''
+      : input.name !== original.name || input.address !== original.address || input.phone !== (original.phone ?? '');
+  if (dirty && !window.confirm('入力中の内容を捨てますか?')) {
+    return;
+  }
+  continueCount = 0;
+  formDraft = null;
+  setState(withScreen(state, { name: 'list' }));
 }
 
 async function handleDelete(id: string): Promise<void> {
@@ -608,6 +652,7 @@ function renderScreen(): HTMLElement {
         onSortChange: handleSortChange,
         onToggleSelectAll: handleToggleSelectAll,
         onNew: () => {
+          continueCount = 0;
           formDraft = null;
           setState(withScreen(state, { name: 'form', patientId: null }));
         },
@@ -622,11 +667,13 @@ function renderScreen(): HTMLElement {
     case 'form':
       return renderPatientForm(currentEditingPatient(), formDraft, state.message, {
         onSave: (name, address, phone) => {
-          void handleSave(name, address, phone);
+          void handleSaveRequest({ name, address, phone }, false);
         },
-        onCancel: () => {
-          formDraft = null;
-          setState(withScreen(state, { name: 'list' }));
+        onSaveAndContinue: (name, address, phone) => {
+          void handleSaveRequest({ name, address, phone }, true);
+        },
+        onCancel: (name, address, phone) => {
+          handleFormCancel({ name, address, phone });
         },
       });
     case 'order':
@@ -723,6 +770,18 @@ function renderApp(): HTMLElement {
     onMoveToBottom: (id) => {
       openedRoutes.clear();
       setState(moveSelectedToEdge(state, id, 'bottom'));
+    },
+    onSaveAnyway: () => {
+      const d = state.dialog;
+      if (d?.kind === 'similar') {
+        setState(closeDialog(state));
+        void commitSave(d.input, d.continueAfter);
+      }
+    },
+    onOpenExisting: (id) => {
+      continueCount = 0;
+      formDraft = null;
+      setState(withScreen(state, { name: 'form', patientId: id }));
     },
     onClose: closeAnyDialog,
   });
