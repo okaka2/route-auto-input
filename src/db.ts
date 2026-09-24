@@ -2,8 +2,14 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { Patient } from './types';
 
 const DB_NAME = 'route-auto-input';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'patients';
+const META_STORE = 'meta';
+
+/** 設定値のキーと型。段階2以降で office / routeEnds などを足す。 */
+export type MetaValues = {
+  lastBackupAt: string;
+};
 
 interface RouteAutoInputDB extends DBSchema {
   patients: {
@@ -11,18 +17,34 @@ interface RouteAutoInputDB extends DBSchema {
     value: Patient;
     indexes: { createdAt: string };
   };
+  meta: { key: string; value: unknown };
 }
 
 let connection: Promise<IDBPDatabase<RouteAutoInputDB>> | null = null;
 
 function getDb(): Promise<IDBPDatabase<RouteAutoInputDB>> {
   connection ??= openDB<RouteAutoInputDB>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      const store = db.createObjectStore(STORE, { keyPath: 'id' });
-      store.createIndex('createdAt', 'createdAt');
+    upgrade(db, oldVersion) {
+      if (oldVersion < 1) {
+        const store = db.createObjectStore(STORE, { keyPath: 'id' });
+        store.createIndex('createdAt', 'createdAt');
+      }
+      if (oldVersion < 2) {
+        db.createObjectStore(META_STORE);
+      }
     },
   });
   return connection;
+}
+
+export async function getMeta<K extends keyof MetaValues>(key: K): Promise<MetaValues[K] | undefined> {
+  const db = await getDb();
+  return (await db.get(META_STORE, key)) as MetaValues[K] | undefined;
+}
+
+export async function setMeta<K extends keyof MetaValues>(key: K, value: MetaValues[K]): Promise<void> {
+  const db = await getDb();
+  await db.put(META_STORE, value, key);
 }
 
 /**

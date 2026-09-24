@@ -6,3 +6,5 @@
 export const APP_NAME = '訪問ルート作成';
 
 export const APP_DESCRIPTION = '訪問先を選んで、訪問順を決めて、地図でルートを開きます。';
+
+export const APP_VERSION = '2.0.0';

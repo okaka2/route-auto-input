@@ -1,17 +1,27 @@
 import './styles.css';
 import { parseBackup, serializeBackup } from './backup';
 import { MAX_STOPS_PER_ROUTE } from './config';
-import { deletePatient, deletePatients, listPatients, mergePatients, replaceAllPatients, savePatient } from './db';
+import {
+  deletePatient,
+  deletePatients,
+  getMeta,
+  listPatients,
+  mergePatients,
+  replaceAllPatients,
+  savePatient,
+  setMeta,
+} from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
 import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
 import { checkPassword, isUnlocked, renderPasswordGate, unlock } from './passwordGate';
 import { createPatient, updatePatientFields } from './patient';
+import { isStoragePersisted } from './protection';
 import { splitIntoRoutes } from './routeSplitter';
 import { clearSession, loadSession, saveSession } from './session';
 import { buildShareText, copyText, shareText } from './share';
 import { registerServiceWorkerUpdates } from './swUpdate';
-import { initTheme } from './theme';
+import { applyTheme, initTheme, loadThemeSetting, saveThemeSetting } from './theme';
 import {
   clearSelection,
   closeDialog,
@@ -39,7 +49,7 @@ import { renderPatientList } from './views/patientListView';
 import { renderRouteOrder } from './views/routeOrderView';
 import { renderRouteMap } from './views/routeMapView';
 import { renderSelectionBar } from './views/selectionBar';
-import { renderSettings } from './views/settingsView';
+import { renderSettings, type SettingsInfo } from './views/settingsView';
 import { renderTabBar, type Step } from './views/tabBar';
 
 const root = document.querySelector<HTMLDivElement>('#app');
@@ -104,6 +114,18 @@ let deletingSelected = false;
 
 // 「⋯」から開いたダイアログを、編集・複製・削除以外で閉じたとき、フォーカスを戻す行のid。
 let dialogReturnId: string | null = null;
+
+// 設定画面に出す情報(最後のバックアップ日時・データの保存状態・表示の設定)。
+let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting() };
+
+/** 設定画面用の情報をDBやブラウザから読み直す。設定画面を開いているときは、そのまま再描画する。 */
+async function loadSettingsInfo(): Promise<void> {
+  const [lastBackupAt, persisted] = await Promise.all([getMeta('lastBackupAt'), isStoragePersisted()]);
+  settingsInfo = { ...settingsInfo, lastBackupAt: lastBackupAt ?? null, persisted };
+  if (state.screen.name === 'settings') {
+    render();
+  }
+}
 
 function setState(next: AppState): void {
   state = next;
@@ -384,10 +406,13 @@ function showCopiedMessage(): void {
   );
 }
 
-function handleExport(): void {
+async function handleExport(): Promise<void> {
   try {
     const date = new Date().toISOString().slice(0, 10);
     downloadTextFile(`route-auto-input-${date}.json`, serializeBackup(state.patients));
+    const lastBackupAt = new Date().toISOString();
+    await setMeta('lastBackupAt', lastBackupAt);
+    settingsInfo = { ...settingsInfo, lastBackupAt };
     setState(withMessage(state, { kind: 'info', text: 'バックアップを書き出しました。' }));
   } catch {
     setState(withMessage(state, { kind: 'error', text: 'バックアップを書き出せませんでした。' }));
@@ -441,7 +466,10 @@ function renderScreen(): HTMLElement {
           setState(withScreen(state, { name: 'form', patientId: null }));
         },
         onOpenMenu: openMenu,
-        onOpenSettings: () => setState(withScreen(state, { name: 'settings' })),
+        onOpenSettings: () => {
+          setState(withScreen(state, { name: 'settings' }));
+          void loadSettingsInfo();
+        },
       });
     case 'form':
       return renderPatientForm(currentEditingPatient(), formDraft, state.message, {
@@ -480,10 +508,18 @@ function renderScreen(): HTMLElement {
         },
       });
     case 'settings':
-      return renderSettings(state, {
-        onExport: handleExport,
+      return renderSettings(state, settingsInfo, {
+        onExport: () => {
+          void handleExport();
+        },
         onImport: (file, mode) => {
           void handleImport(file, mode);
+        },
+        onThemeChange: (setting) => {
+          saveThemeSetting(setting);
+          applyTheme(setting);
+          settingsInfo = { ...settingsInfo, theme: setting };
+          render();
         },
         onBack: () => setState(withScreen(state, { name: 'list' })),
       });

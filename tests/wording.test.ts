@@ -132,7 +132,11 @@ describe('画面の文言(禁止語が出ない)', () => {
   it('設定・タブ・選択バー', () => {
     expectClean(
       '設定',
-      renderSettings(createInitialState(places(2)), { onExport: noop, onImport: noop, onBack: noop }).outerHTML,
+      renderSettings(
+        createInitialState(places(2)),
+        { lastBackupAt: null, persisted: null, theme: 'auto' },
+        { onExport: noop, onImport: noop, onThemeChange: noop, onBack: noop },
+      ).outerHTML,
     );
     expectClean('タブ', renderTabBar('list', true, { onSelect: noop }).outerHTML);
     expectClean('選択バー', renderSelectionBar(3, { onNext: noop, onDeleteSelected: noop })!.outerHTML);

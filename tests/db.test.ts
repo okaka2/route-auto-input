@@ -5,10 +5,12 @@ import {
   closeDbForTest,
   deletePatient,
   deletePatients,
+  getMeta,
   listPatients,
   mergePatients,
   replaceAllPatients,
   savePatient,
+  setMeta,
 } from '../src/db';
 import { createPatient, updatePatientFields } from '../src/patient';
 
@@ -86,5 +88,16 @@ describe('インポート', () => {
     const stored = await listPatients();
     expect(stored).toHaveLength(1);
     expect(stored[0]?.name).toBe('更新後');
+  });
+});
+
+describe('meta(設定値の保存)', () => {
+  it('保存していないキーは undefined', async () => {
+    expect(await getMeta('lastBackupAt')).toBeUndefined();
+  });
+  it('保存した値を読み戻せ、同じキーは上書きされる', async () => {
+    await setMeta('lastBackupAt', '2026-09-20T00:00:00.000Z');
+    await setMeta('lastBackupAt', '2026-09-21T00:00:00.000Z');
+    expect(await getMeta('lastBackupAt')).toBe('2026-09-21T00:00:00.000Z');
   });
 });
