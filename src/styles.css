@@ -468,6 +468,15 @@ button.select-all {
   min-height: var(--tap-primary);
 }
 
+.sheet-steps {
+  margin: 0 0 var(--gap);
+  padding-left: 1.25rem;
+}
+
+.sheet-steps li {
+  margin-bottom: 0.5rem;
+}
+
 .sheet-buttons {
   display: flex;
   gap: 0.75rem;

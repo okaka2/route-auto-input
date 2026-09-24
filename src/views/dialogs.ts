@@ -1,3 +1,5 @@
+import { installSteps } from '../installHint';
+import { installPlatform } from '../platform';
 import type { AppState, Patient } from '../types';
 
 export type DialogHandlers = {
@@ -30,7 +32,9 @@ export function renderDialog(state: AppState, handlers: DialogHandlers): HTMLEle
   }
 
   let content: HTMLElement[];
-  if (dialog.kind === 'confirmDeleteSelected') {
+  if (dialog.kind === 'installSteps') {
+    content = renderInstallSteps(handlers);
+  } else if (dialog.kind === 'confirmDeleteSelected') {
     content = renderConfirmDeleteSelected(state.selectedIds.length, handlers);
   } else {
     const patient = state.patients.find((item) => item.id === dialog.id);
@@ -108,6 +112,24 @@ function renderConfirmDelete(patient: Patient, handlers: DialogHandlers): HTMLEl
     actionButton('削除', 'dialog-confirm-delete', () => handlers.onConfirmDelete(patient.id), 'danger-fill'),
   );
   return [title, target, buttons];
+}
+
+function renderInstallSteps(handlers: DialogHandlers): HTMLElement[] {
+  const title = document.createElement('h2');
+  title.id = 'dialog-title';
+  title.className = 'sheet-title';
+  title.textContent = 'ホーム画面に追加する';
+  const list = document.createElement('ol');
+  list.className = 'sheet-steps';
+  for (const step of installSteps(installPlatform())) {
+    const item = document.createElement('li');
+    item.textContent = step;
+    list.append(item);
+  }
+  const buttons = document.createElement('div');
+  buttons.className = 'sheet-buttons';
+  buttons.append(actionButton('閉じる', 'dialog-cancel', () => handlers.onClose()));
+  return [title, list, buttons];
 }
 
 function renderConfirmDeleteSelected(count: number, handlers: DialogHandlers): HTMLElement[] {

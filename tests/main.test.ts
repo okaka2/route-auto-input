@@ -1053,10 +1053,21 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
   });
 });
 
+describe('ホーム画面への追加の案内', () => {
+  it('タブで開いていると、ホーム画面への追加の案内が出て、閉じると消える', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="install-notice"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="notice-install-dismiss"]')!.click();
+    expect(el('[data-testid="install-notice"]')).toBeNull();
+  });
+});
+
 describe('バックアップのお知らせ', () => {
   it('5件登録すると、お知らせが出て「あとで」で消える', async () => {
     await import('../src/main');
     await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    // ホーム画面への追加の案内が優先して出るので、先に閉じておく。
+    el<HTMLButtonElement>('[data-testid="notice-install-dismiss"]')!.click();
     for (let i = 1; i <= 5; i += 1) {
       el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
       el<HTMLInputElement>('[data-testid="name-input"]')!.value = `場所${i}`;

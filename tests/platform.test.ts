@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isMobileDevice, isStandaloneDisplay, shouldOpenMapInNewTab } from '../src/platform';
+import { installPlatform, isMobileDevice, isStandaloneDisplay, shouldOpenMapInNewTab } from '../src/platform';
 
 const DESKTOP_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
@@ -58,6 +58,17 @@ describe('isMobileDevice', () => {
   it('PC(Windows Chrome)のUAならfalse', () => {
     stubUserAgent(DESKTOP_UA);
     expect(isMobileDevice()).toBe(false);
+  });
+});
+
+describe('installPlatform', () => {
+  it.each([
+    ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15', 'ios'],
+    ['Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120 Mobile', 'android'],
+    ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120', 'pc'],
+  ])('%s → %s', (ua, expected) => {
+    stubUserAgent(ua);
+    expect(installPlatform()).toBe(expected);
   });
 });
 

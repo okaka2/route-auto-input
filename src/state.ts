@@ -37,6 +37,9 @@ function keepDialog(
   if (dialog === null) {
     return null;
   }
+  if (dialog.kind === 'installSteps') {
+    return dialog;
+  }
   if (dialog.kind === 'confirmDeleteSelected') {
     return selectedIds.length > 0 ? dialog : null;
   }

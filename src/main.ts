@@ -12,10 +12,12 @@ import {
   setMeta,
 } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
+import { shouldShowInstallHint } from './installHint';
 import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
 import { checkPassword, isUnlocked, renderPasswordGate, unlock } from './passwordGate';
 import { createPatient, updatePatientFields } from './patient';
+import { isStandaloneDisplay } from './platform';
 import { isStoragePersisted, requestPersistentStorage } from './protection';
 import { shouldRemindBackup } from './backupReminder';
 import { splitIntoRoutes } from './routeSplitter';
@@ -87,6 +89,25 @@ function handleEscapeKeydown(event: KeyboardEvent): void {
 globalWindow.__routeAutoInputEscapeHandler = handleEscapeKeydown;
 document.addEventListener('keydown', handleEscapeKeydown);
 
+// Android の Chrome が「インストールできる」と知らせてきたイベント。ボタン1つで追加するために取っておく。
+// テストで main.ts を読み込み直すたびに window へリスナーが積み重ならないよう、
+// 前回のハンドラーを覚えておき、新しく付ける前に外す(Escキーのハンドラーと同じ理由)。
+type WindowWithInstallPromptHandler = typeof window & {
+  __routeAutoInputInstallPromptHandler?: (event: Event) => void;
+};
+const globalWindowForInstall = window as WindowWithInstallPromptHandler;
+if (globalWindowForInstall.__routeAutoInputInstallPromptHandler) {
+  window.removeEventListener('beforeinstallprompt', globalWindowForInstall.__routeAutoInputInstallPromptHandler);
+}
+let deferredInstallPrompt: (Event & { prompt(): Promise<void> }) | null = null;
+function handleBeforeInstallPrompt(event: Event): void {
+  event.preventDefault();
+  deferredInstallPrompt = event as Event & { prompt(): Promise<void> };
+  render();
+}
+globalWindowForInstall.__routeAutoInputInstallPromptHandler = handleBeforeInstallPrompt;
+window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
 // Googleマップへ遷移して戻ってきたときのために、選択・訪問順・開いたルートを
 // localStorageから復元する(Ruling 7)。復元できた場合、開いたルートがあれば地図の画面、
 // なければ訪問順の画面から始める。
@@ -122,6 +143,8 @@ let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: l
 
 // バックアップのお知らせで「あとで」を押した日時を覚えておくキー。
 const BACKUP_LATER_KEY = 'route-auto-input:backup-later';
+// ホーム画面への追加の案内で「閉じる」を押した日時を覚えておくキー。
+const INSTALL_DISMISS_KEY = 'route-auto-input:install-dismissed';
 // データ保護のお願い(Storage API)は、一度成功したら繰り返し頼まない。
 let persistRequested = false;
 
@@ -146,6 +169,45 @@ function daysSince(iso: string): number {
 
 /** 一覧の上に出すお知らせ。Task 4 でホーム画面の案内を先頭に足す。 */
 function currentNotice(): Notice | null {
+  if (
+    shouldShowInstallHint({
+      standalone: isStandaloneDisplay(),
+      dismissedAt: readLocal(INSTALL_DISMISS_KEY),
+      now: new Date(),
+    })
+  ) {
+    const install = deferredInstallPrompt;
+    return {
+      testid: 'install-notice',
+      text: 'ホーム画面に追加すると、データが消えにくくなり、アプリのように使えます。',
+      actions: [
+        install
+          ? {
+              label: 'ホーム画面に追加',
+              testid: 'notice-install',
+              primary: true,
+              onClick: () => {
+                void install.prompt();
+                deferredInstallPrompt = null;
+              },
+            }
+          : {
+              label: 'やり方を見る',
+              testid: 'notice-install-steps',
+              primary: true,
+              onClick: () => setState({ ...state, dialog: { kind: 'installSteps' } }),
+            },
+        {
+          label: '閉じる',
+          testid: 'notice-install-dismiss',
+          onClick: () => {
+            writeLocal(INSTALL_DISMISS_KEY, new Date().toISOString());
+            render();
+          },
+        },
+      ],
+    };
+  }
   if (
     shouldRemindBackup({
       patientCount: state.patients.length,

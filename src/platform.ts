@@ -4,7 +4,7 @@
 
 /** ホーム画面に追加してアプリのように起動しているか(=スタンドアロン表示)。 */
 export function isStandaloneDisplay(): boolean {
-  if (window.matchMedia('(display-mode: standalone)').matches) {
+  if (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) {
     return true;
   }
   // iOS Safariは display-mode: standalone を報告しないことがあるため、
@@ -27,4 +27,14 @@ export function isMobileDevice(): boolean {
  */
 export function shouldOpenMapInNewTab(): boolean {
   return !isStandaloneDisplay() && !isMobileDevice();
+}
+
+export type InstallPlatform = 'android' | 'ios' | 'pc';
+
+/** ホーム画面への追加の手順を出し分けるための端末の種類。 */
+export function installPlatform(): InstallPlatform {
+  const ua = window.navigator.userAgent;
+  if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
+  if (/Android/i.test(ua)) return 'android';
+  return 'pc';
 }

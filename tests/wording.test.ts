@@ -89,6 +89,10 @@ describe('画面の文言(禁止語が出ない)', () => {
       '一括削除の確認',
       renderDialog(openDeleteSelectedConfirm(twoSelected), dialogHandlers)!.outerHTML,
     );
+    expectClean(
+      'ホーム画面への追加の手順',
+      renderDialog({ ...base, dialog: { kind: 'installSteps' } }, dialogHandlers)!.outerHTML,
+    );
   });
 
   it('登録・編集フォーム: 新規・編集・下書き・メッセージ', () => {

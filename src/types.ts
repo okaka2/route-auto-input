@@ -24,7 +24,8 @@ export type SortOrder = 'registered' | 'name' | 'address';
 export type Dialog =
   | { kind: 'rowMenu'; id: string }
   | { kind: 'confirmDelete'; id: string }
-  | { kind: 'confirmDeleteSelected' };
+  | { kind: 'confirmDeleteSelected' }
+  | { kind: 'installSteps' };
 
 export type AppState = {
   screen: Screen;
