@@ -1,4 +1,5 @@
 import { MAX_STOPS_PER_ROUTE } from '../config';
+import { stopsPerRoute, type RouteContext, type RouteEnd, type RouteEnds, type RouteStart } from '../routePlan';
 import { selectedPatients } from '../state';
 import type { AppState, Patient } from '../types';
 import { findDuplicateAddresses } from '../validation';
@@ -13,13 +14,25 @@ export type RouteOrderHandlers = {
   /** 「この順番で地図を開く →」。地図を開く画面へ進む。 */
   onOpenMap(): void;
   onBack(): void;
+  /** 出発・帰着の選び方を変えた。 */
+  onEndsChange(ends: RouteEnds): void;
 };
+
+const START_OPTIONS: { value: RouteStart; label: string; needsOffice: boolean }[] = [
+  { value: 'office', label: '事業所から出発', needsOffice: true },
+  { value: 'current', label: '現在地から出発', needsOffice: false },
+  { value: 'first', label: '1件目の訪問先から', needsOffice: false },
+];
+const END_OPTIONS: { value: RouteEnd; label: string; needsOffice: boolean }[] = [
+  { value: 'office', label: '事業所に戻る', needsOffice: true },
+  { value: 'last', label: '最後の訪問先で終わる', needsOffice: false },
+];
 
 /**
  * 訪問順の画面。START から GOAL までを、番号つきの縦の並びで示し、▲▼で並べ替える。
  * 訪問順の自動最適化はしない。ユーザーが決めた順番のまま、地図の画面へ渡す。
  */
-export function renderRouteOrder(state: AppState, handlers: RouteOrderHandlers): HTMLElement {
+export function renderRouteOrder(state: AppState, context: RouteContext, handlers: RouteOrderHandlers): HTMLElement {
   const container = document.createElement('div');
   container.className = 'screen';
   container.append(renderScreenHeader('訪問順を決める', { onBack: handlers.onBack }));
@@ -27,6 +40,8 @@ export function renderRouteOrder(state: AppState, handlers: RouteOrderHandlers):
   if (state.message) {
     container.append(renderMessage(state.message));
   }
+
+  container.append(renderEndsPanel(context, handlers));
 
   const stops = selectedPatients(state);
 
@@ -55,15 +70,16 @@ export function renderRouteOrder(state: AppState, handlers: RouteOrderHandlers):
     container.append(single);
   }
 
+  const perRoute = stopsPerRoute(context.ends, context.office, MAX_STOPS_PER_ROUTE);
   const list = document.createElement('ol');
   list.className = 'stop-timeline';
   stops.forEach((patient, index) => {
-    if (index > 0 && index % MAX_STOPS_PER_ROUTE === 0) {
+    if (index > 0 && index % perRoute === 0) {
       const divider = document.createElement('li');
       divider.className = 'route-divider';
       divider.dataset.testid = 'route-divider';
-      divider.setAttribute('aria-label', `ここからルート${index / MAX_STOPS_PER_ROUTE + 1}`);
-      divider.textContent = `── ここからルート${index / MAX_STOPS_PER_ROUTE + 1} ──`;
+      divider.setAttribute('aria-label', `ここからルート${index / perRoute + 1}`);
+      divider.textContent = `── ここからルート${index / perRoute + 1} ──`;
       list.append(divider);
     }
     list.append(renderStopRow(patient, index, stops.length, handlers));
@@ -73,7 +89,7 @@ export function renderRouteOrder(state: AppState, handlers: RouteOrderHandlers):
   const hint = document.createElement('p');
   hint.className = 'order-hint';
   hint.dataset.testid = 'order-hint';
-  hint.textContent = '▲▼ボタンで、順番を入れ替えられます。';
+  hint.textContent = `▲▼ボタンで、順番を入れ替えられます。訪問先は1ルート${perRoute}件までです。`;
   container.append(hint);
 
   const actions = document.createElement('div');
@@ -166,4 +182,57 @@ function renderStopRow(
 
   row.append(rail, body, move);
   return row;
+}
+
+function renderEndsPanel(context: RouteContext, handlers: RouteOrderHandlers): HTMLElement {
+  const panel = document.createElement('section');
+  panel.className = 'card ends-panel';
+  panel.dataset.testid = 'ends-panel';
+  const hasOffice = context.office !== null;
+  const start = selectFor('route-start-select', '出発', START_OPTIONS, context.ends.start, hasOffice);
+  const end = selectFor('route-end-select', '帰着', END_OPTIONS, context.ends.end, hasOffice);
+  start.addEventListener('change', () => handlers.onEndsChange({ start: start.value as RouteStart, end: end.value as RouteEnd }));
+  end.addEventListener('change', () => handlers.onEndsChange({ start: start.value as RouteStart, end: end.value as RouteEnd }));
+  const row = document.createElement('div');
+  row.className = 'ends-row';
+  row.append(labelled('出発', start), labelled('帰着', end));
+  panel.append(row);
+  if (!hasOffice) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = '設定で事業所を登録すると、事業所から出発・事業所に戻るを選べます。';
+    panel.append(hint);
+  }
+  return panel;
+}
+
+function selectFor<V extends string>(
+  testid: string,
+  label: string,
+  options: { value: V; label: string; needsOffice: boolean }[],
+  current: V,
+  hasOffice: boolean,
+): HTMLSelectElement {
+  const select = document.createElement('select');
+  select.dataset.testid = testid;
+  select.setAttribute('aria-label', label);
+  for (const option of options) {
+    const element = document.createElement('option');
+    element.value = option.value;
+    element.textContent = option.label;
+    element.disabled = option.needsOffice && !hasOffice;
+    select.append(element);
+  }
+  select.value = current;
+  return select;
+}
+
+function labelled(text: string, select: HTMLSelectElement): HTMLLabelElement {
+  const label = document.createElement('label');
+  label.className = 'ends-field';
+  const caption = document.createElement('span');
+  caption.className = 'field-label';
+  caption.textContent = text;
+  label.append(caption, select);
+  return label;
 }

@@ -687,6 +687,32 @@ button.select-all {
 }
 
 /* ===== 訪問順の画面 ===== */
+.ends-panel {
+  padding: 0.75rem var(--gap);
+}
+
+.ends-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.ends-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ends-field select {
+  min-height: var(--tap-min);
+  padding: 0 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1rem;
+}
+
 .stop-timeline {
   margin: var(--gap) 0;
   padding: 0;

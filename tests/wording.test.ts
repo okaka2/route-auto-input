@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_SELECTION } from '../src/config';
 import { createPatient } from '../src/patient';
+import { DEFAULT_ROUTE_ENDS, type RouteContext } from '../src/routePlan';
 import {
   createInitialState,
   openDeleteConfirm,
@@ -138,8 +139,14 @@ describe('画面の文言(禁止語が出ない)', () => {
     );
   });
 
-  it('訪問順: 0件・1件・複数件・同じ住所', () => {
-    const handlers = { onMove: noop, onOpenStopMenu: noop, onAddStops: noop, onOpenMap: noop, onBack: noop };
+  const noOfficeContext: RouteContext = { ends: DEFAULT_ROUTE_ENDS, office: null };
+  const officeContext: RouteContext = {
+    ends: { start: 'office', end: 'office' },
+    office: { name: '本店', address: '東京都1' },
+  };
+
+  it('訪問順: 0件・1件・複数件・同じ住所(事業所あり/なし)', () => {
+    const handlers = { onMove: noop, onOpenStopMenu: noop, onAddStops: noop, onOpenMap: noop, onBack: noop, onEndsChange: noop };
     const same = places(2).map((place) => ({ ...place, address: '東京都1-1' }));
     for (const [label, state] of [
       ['0件', createInitialState([])],
@@ -147,11 +154,16 @@ describe('画面の文言(禁止語が出ない)', () => {
       ['3件', selected(places(3))],
       ['同じ住所', selected(same)],
     ] as const) {
-      expectClean(`訪問順(${label})`, renderRouteOrder(state, handlers).outerHTML);
+      for (const [ctxLabel, context] of [
+        ['事業所なし', noOfficeContext],
+        ['事業所あり', officeContext],
+      ] as const) {
+        expectClean(`訪問順(${label}・${ctxLabel})`, renderRouteOrder(state, context, handlers).outerHTML);
+      }
     }
   });
 
-  it('地図: 0件・1本・分割・開いた後', () => {
+  it('地図: 0件・1本・分割・開いた後(事業所あり/なし)', () => {
     const handlers = { onOpenRoute: noop, onBack: noop, onChooseStops: noop, onShare: noop, onCopyLink: noop };
     const at = new Date(2026, 8, 21, 14, 32).toISOString();
     for (const [label, state, opened] of [
@@ -160,7 +172,15 @@ describe('画面の文言(禁止語が出ない)', () => {
       ['分割', selected(places(12)), new Map<number, string>()],
       ['開いた後', selected(places(12)), new Map<number, string>([[0, at]])],
     ] as const) {
-      expectClean(`地図(${label})`, renderRouteMap(state, opened, googleMapsProvider, handlers).outerHTML);
+      for (const [ctxLabel, context] of [
+        ['事業所なし', noOfficeContext],
+        ['事業所あり', officeContext],
+      ] as const) {
+        expectClean(
+          `地図(${label}・${ctxLabel})`,
+          renderRouteMap(state, opened, googleMapsProvider, context, handlers).outerHTML,
+        );
+      }
     }
   });
 

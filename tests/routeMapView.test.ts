@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MAX_STOPS_PER_ROUTE } from '../src/config';
 import { googleMapsProvider, type MapProvider } from '../src/mapProviders';
 import { createPatient } from '../src/patient';
+import { DEFAULT_ROUTE_ENDS, type Office, type RouteContext } from '../src/routePlan';
 import { splitIntoRoutes } from '../src/routeSplitter';
 import { createInitialState } from '../src/state';
 import type { AppState, Patient } from '../src/types';
@@ -14,6 +15,9 @@ const handlers = (): RouteMapHandlers => ({
   onShare: vi.fn(),
   onCopyLink: vi.fn(),
 });
+
+const office: Office = { name: '本店', address: '東京都中央区1-1' };
+const defaultContext: RouteContext = { ends: DEFAULT_ROUTE_ENDS, office: null };
 
 function makeStops(count: number): Patient[] {
   return Array.from({ length: count }, (_, i) => createPatient(`場所${i + 1}`, `東京都${i + 1}-1`));
@@ -28,12 +32,15 @@ function stateWithSelection(count: number): AppState {
   return { ...createInitialState(patients), selectedIds: patients.map((p) => p.id) };
 }
 
+const selectedState = stateWithSelection;
+
 const render = (
   state: AppState,
   opened: ReadonlyMap<number, string> = new Map(),
   spies: RouteMapHandlers = handlers(),
   provider: MapProvider = googleMapsProvider,
-) => renderRouteMap(state, opened, provider, spies);
+  context: RouteContext = defaultContext,
+) => renderRouteMap(state, opened, provider, context, spies);
 
 const cards = (element: HTMLElement) =>
   [...element.querySelectorAll<HTMLElement>('[data-testid="route-card"]')];
@@ -270,5 +277,43 @@ describe('renderRouteMap: 電話番号', () => {
   it('誰も電話番号を持たないカードには、電話の行が出ない', () => {
     const element = render(stateWithSelection(2));
     expect(element.querySelector('[data-testid="route-phones"]')).toBeNull();
+  });
+});
+
+describe('renderRouteMap: 出発・帰着', () => {
+  it('出発・帰着の指定を、1本目と最後のカードに出す', () => {
+    const state = selectedState(12);
+    const element = renderRouteMap(
+      state,
+      new Map(),
+      googleMapsProvider,
+      { ends: { start: 'office', end: 'office' }, office },
+      handlers(),
+    );
+    const cards = [...element.querySelectorAll('[data-testid="route-card"]')];
+    expect(cards).toHaveLength(2);
+    expect(cards[0]!.querySelector('[data-testid="route-ends"]')?.textContent).toBe('事業所から');
+    expect(cards[1]!.querySelector('[data-testid="route-ends"]')?.textContent).toBe('事業所へ戻る');
+  });
+  it('指定が無ければ出発・帰着の行は出ない', () => {
+    const element = renderRouteMap(
+      selectedState(3),
+      new Map(),
+      googleMapsProvider,
+      { ends: DEFAULT_ROUTE_ENDS, office: null },
+      handlers(),
+    );
+    expect(element.querySelector('[data-testid="route-ends"]')).toBeNull();
+  });
+  it('分割は事業所ぶんを引いた件数で行う', () => {
+    const element = renderRouteMap(
+      selectedState(9),
+      new Map(),
+      googleMapsProvider,
+      { ends: { start: 'office', end: 'office' }, office },
+      handlers(),
+    );
+    expect(element.querySelectorAll('[data-testid="route-card"]')).toHaveLength(2);
+    expect(element.querySelector('[data-testid="map-summary"]')?.textContent).toContain('最大8地点');
   });
 });

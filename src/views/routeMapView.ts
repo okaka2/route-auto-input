@@ -1,7 +1,7 @@
 import { MAX_STOPS_PER_ROUTE } from '../config';
 import { formatDateTime, formatPhoneHref } from '../format';
 import type { MapProvider } from '../mapProviders';
-import { splitIntoRoutes } from '../routeSplitter';
+import { buildRoutePlans, stopsPerRoute, type RoutePlan, type RouteContext } from '../routePlan';
 import { selectedPatients } from '../state';
 import type { AppState, Patient } from '../types';
 import { renderMessage, renderScreenHeader } from './common';
@@ -30,6 +30,7 @@ export function renderRouteMap(
   state: AppState,
   opened: ReadonlyMap<number, string>,
   provider: MapProvider,
+  context: RouteContext,
   handlers: RouteMapHandlers,
 ): HTMLElement {
   const container = document.createElement('div');
@@ -46,16 +47,17 @@ export function renderRouteMap(
     return container;
   }
 
-  const routes = splitIntoRoutes(stops, MAX_STOPS_PER_ROUTE);
-  container.append(renderSummary(stops.length, routes.length));
+  const plans = buildRoutePlans(stops, context.ends, context.office, MAX_STOPS_PER_ROUTE);
+  const perRoute = stopsPerRoute(context.ends, context.office, MAX_STOPS_PER_ROUTE);
+  container.append(renderSummary(stops.length, plans.length, perRoute));
 
   // 最初の未開封が「次に開く」。すべて開いていれば -1(「次に開く」は無い)。
-  const nextIndex = routes.findIndex((_, index) => !opened.has(index));
+  const nextIndex = plans.findIndex((_, index) => !opened.has(index));
   const cards = document.createElement('div');
   cards.className = 'route-cards';
-  routes.forEach((route, index) => {
+  plans.forEach((plan, index) => {
     const cardState: CardState = opened.has(index) ? 'done' : index === nextIndex ? 'next' : 'later';
-    cards.append(renderRouteCard(route, index, cardState, opened.get(index) ?? '', provider, handlers));
+    cards.append(renderRouteCard(plan, index, cardState, opened.get(index) ?? '', provider, handlers));
   });
   container.append(cards, renderShare(handlers));
   return container;
@@ -110,7 +112,7 @@ function renderEmpty(handlers: RouteMapHandlers): HTMLElement {
   return card;
 }
 
-function renderSummary(stopCount: number, routeCount: number): HTMLElement {
+function renderSummary(stopCount: number, routeCount: number, perRoute: number): HTMLElement {
   const card = document.createElement('section');
   card.className = 'card summary-card';
   card.dataset.testid = 'map-summary';
@@ -123,20 +125,21 @@ function renderSummary(stopCount: number, routeCount: number): HTMLElement {
   if (routeCount > 1) {
     const split = document.createElement('p');
     split.className = 'summary-split';
-    split.textContent = `${routeCount}つのルートに分割します。1つのルートは最大${MAX_STOPS_PER_ROUTE}地点までです。上から順に開いてください。`;
+    split.textContent = `${routeCount}つのルートに分割します。1つのルートは最大${perRoute}地点までです。上から順に開いてください。`;
     card.append(split);
   }
   return card;
 }
 
 function renderRouteCard(
-  route: readonly Patient[],
+  plan: RoutePlan<Patient>,
   index: number,
   cardState: CardState,
   openedAt: string,
   provider: MapProvider,
   handlers: RouteMapHandlers,
 ): HTMLElement {
+  const route = plan.stops;
   const card = document.createElement('section');
   card.className = `route-card ${cardState}`;
   card.dataset.testid = 'route-card';
@@ -159,6 +162,14 @@ function renderRouteCard(
     head.append(label);
   }
   card.append(head);
+
+  if (plan.startLabel || plan.endLabel) {
+    const ends = document.createElement('p');
+    ends.className = 'route-ends';
+    ends.dataset.testid = 'route-ends';
+    ends.textContent = [plan.startLabel, plan.endLabel].filter((label) => label !== '').join(' → ');
+    card.append(ends);
+  }
 
   const names = document.createElement('p');
   names.className = 'route-names';

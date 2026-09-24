@@ -1198,6 +1198,35 @@ describe('保存して続けて登録・同じ人の知らせ', () => {
   });
 });
 
+describe('出発・帰着の選択', () => {
+  it('事業所から出発を選ぶと、地図のURLの origin が事業所の住所になる', async () => {
+    const { savePatient, setMeta, closeDbForTest } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patientA = createPatient('場所A', '東京都千代田区1-1');
+    const patientB = createPatient('場所B', '大阪府大阪市2-2');
+    await savePatient(patientA);
+    await savePatient(patientB);
+    await setMeta('office', { name: '本店', address: '東京都中央区1-1' });
+    await setMeta('routeEnds', { start: 'office', end: 'last' });
+    await closeDbForTest();
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(2));
+
+    el<HTMLInputElement>(`input[data-id="${patientA.id}"]`)!.click();
+    el<HTMLInputElement>(`input[data-id="${patientB.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-route"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="open-route"]')!.click();
+
+    const { openUrl } = await import('../src/openRoute');
+    const url = new URL(vi.mocked(openUrl).mock.calls[0]![0]);
+    expect(url.searchParams.get('origin')).toBe('東京都中央区1-1');
+  });
+});
+
 describe('事業所の登録', () => {
   it('設定で事業所を保存すると、開き直しても残る', async () => {
     await import('../src/main');

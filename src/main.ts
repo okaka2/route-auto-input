@@ -22,8 +22,7 @@ import { createPatient, updatePatientFields } from './patient';
 import { isStandaloneDisplay } from './platform';
 import { isStoragePersisted, requestPersistentStorage } from './protection';
 import { daysBetween, shouldRemindBackup } from './backupReminder';
-import { DEFAULT_ROUTE_ENDS, type Office, type RouteEnds } from './routePlan';
-import { splitIntoRoutes } from './routeSplitter';
+import { buildRoutePlans, DEFAULT_ROUTE_ENDS, type RouteContext, type RouteEnds } from './routePlan';
 import { clearSession, loadSession, saveSession } from './session';
 import { buildShareText, copyText, shareText } from './share';
 import { registerServiceWorkerUpdates } from './swUpdate';
@@ -150,7 +149,7 @@ let dialogReturnId: string | null = null;
 let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting(), office: null };
 
 // 出発・帰着の選び方と事業所。起動時に loadRouteContext() で読み直す(Task 3 が使う)。
-let routeContext: { ends: RouteEnds; office: Office | null } = { ends: DEFAULT_ROUTE_ENDS, office: null };
+let routeContext: RouteContext = { ends: DEFAULT_ROUTE_ENDS, office: null };
 // loadSettingsInfo() が一度でも終わったか。終わる前はlastBackupAtがnullのままなので、
 // バックアップのお知らせ(「まだバックアップがありません」)を誤って出さないためのガード。
 let settingsLoaded = false;
@@ -572,19 +571,31 @@ function handleSelectStep(step: Step): void {
 }
 
 function handleOpenRoute(routeIndex: number): void {
-  const routes = splitIntoRoutes(selectedPatients(state), MAX_STOPS_PER_ROUTE);
-  const route = routes[routeIndex];
-  if (!route) {
+  const plans = buildRoutePlans(selectedPatients(state), routeContext.ends, routeContext.office, MAX_STOPS_PER_ROUTE);
+  const plan = plans[routeIndex];
+  if (!plan) {
     return;
   }
   try {
-    const url = DEFAULT_MAP_PROVIDER.buildUrl(route.map((patient) => patient.address));
+    const url = DEFAULT_MAP_PROVIDER.buildUrl(plan.addresses, { fromCurrentLocation: plan.fromCurrentLocation });
     openedRoutes.set(routeIndex, new Date().toISOString());
     render();
     openUrl(url);
   } catch (error) {
     const message = error instanceof Error ? error.message : '地図を開けませんでした。';
     setState(withMessage(state, { kind: 'error', text: message }));
+  }
+}
+
+/** 訪問順の画面の出発・帰着の選択を変える。 */
+async function handleEndsChange(ends: RouteEnds): Promise<void> {
+  routeContext = { ...routeContext, ends };
+  openedRoutes.clear();
+  render();
+  try {
+    await setMeta('routeEnds', ends);
+  } catch {
+    // 保存に失敗しても、この起動中は選んだ内容で動く。
   }
 }
 
@@ -733,7 +744,7 @@ function renderScreen(): HTMLElement {
         },
       });
     case 'order':
-      return renderRouteOrder(state, {
+      return renderRouteOrder(state, routeContext, {
         onMove: (id, direction) => {
           const next = moveSelected(state, id, direction);
           // 順番が実際に変わったときだけ、開いたルートの印を消す(端の▲▼は何も変えない)。
@@ -749,9 +760,12 @@ function renderScreen(): HTMLElement {
         onAddStops: () => setState(withScreen(state, { name: 'list' })),
         onOpenMap: () => setState(withScreen(state, { name: 'map' })),
         onBack: () => setState(withScreen(state, { name: 'list' })),
+        onEndsChange: (ends) => {
+          void handleEndsChange(ends);
+        },
       });
     case 'map':
-      return renderRouteMap(state, new Map(openedRoutes), DEFAULT_MAP_PROVIDER, {
+      return renderRouteMap(state, new Map(openedRoutes), DEFAULT_MAP_PROVIDER, routeContext, {
         onOpenRoute: handleOpenRoute,
         onBack: () => setState(withScreen(state, { name: 'order' })),
         onChooseStops: () => setState(withScreen(state, { name: 'list' })),

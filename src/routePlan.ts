@@ -7,6 +7,8 @@ export type RouteEnds = { start: RouteStart; end: RouteEnd };
 
 export const DEFAULT_ROUTE_ENDS: RouteEnds = { start: 'first', end: 'last' };
 
+export type RouteContext = { ends: RouteEnds; office: Office | null };
+
 /** 事業所が未登録なら、事業所を使う指定は「1件目の訪問先から」「最後の訪問先で終わる」に読み替える。 */
 function effectiveEnds(ends: RouteEnds, office: Office | null): RouteEnds {
   if (office !== null) {
