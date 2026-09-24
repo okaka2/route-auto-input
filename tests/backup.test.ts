@@ -65,4 +65,21 @@ describe('parseBackup', () => {
   it('患者0件のファイルは空配列として読み込める', () => {
     expect(parseBackup(serializeBackup([]))).toEqual([]);
   });
+
+  it('電話番号つきの訪問先も、往復して phone が残る', () => {
+    const patients = [createPatient('山田 太郎', '東京都千代田区1-1', new Date(), '03-1234-5678')];
+    expect(parseBackup(serializeBackup(patients))).toEqual(patients);
+  });
+
+  it('phone が無い古いデータも読み込める', () => {
+    const text = JSON.stringify({
+      version: BACKUP_VERSION,
+      exportedAt: '',
+      patients: [
+        { id: 'a', name: '山田太郎', address: '東京都千代田区1-1', createdAt: 't1', updatedAt: 't2' },
+      ],
+    });
+    const result = parseBackup(text);
+    expect('phone' in result[0]!).toBe(false);
+  });
 });

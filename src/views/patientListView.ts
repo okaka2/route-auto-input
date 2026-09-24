@@ -1,5 +1,6 @@
 import { APP_NAME } from '../appInfo';
 import { MAX_SELECTION } from '../config';
+import { formatPhoneHref } from '../format';
 import { visiblePatients } from '../state';
 import type { AppState, Patient, SortOrder } from '../types';
 import { renderMessage } from './common';
@@ -309,6 +310,19 @@ function renderRow(patient: Patient, state: AppState, handlers: PatientListHandl
 
   main.append(checkbox, check, text);
 
+  row.append(main);
+
+  // 電話番号があれば、電話をかけるリンクを行の選択(ラベル)の外に置く。押しても選択は変わらない。
+  if (patient.phone) {
+    const phoneLink = document.createElement('a');
+    phoneLink.className = 'phone-link';
+    phoneLink.dataset.testid = 'phone-link';
+    phoneLink.href = formatPhoneHref(patient.phone);
+    phoneLink.setAttribute('aria-label', `${patient.name}に電話`);
+    phoneLink.textContent = '☎';
+    row.append(phoneLink);
+  }
+
   // 「⋯」は、行の選択(ラベル)の外に置く。押しても選択は変わらない。
   const more = document.createElement('button');
   more.type = 'button';
@@ -320,6 +334,6 @@ function renderRow(patient: Patient, state: AppState, handlers: PatientListHandl
   more.textContent = '⋯';
   more.addEventListener('click', () => handlers.onOpenMenu(patient.id));
 
-  row.append(main, more);
+  row.append(more);
   return row;
 }

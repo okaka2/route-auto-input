@@ -13,3 +13,8 @@ export function formatDateTime(iso: string): string {
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${minutes}`;
 }
+
+/** 電話番号を tel: リンクにする。数字と + だけを残す(ハイフンや空白は取り除く)。 */
+export function formatPhoneHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, '')}`;
+}

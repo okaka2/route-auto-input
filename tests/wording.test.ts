@@ -111,7 +111,10 @@ describe('画面の文言(禁止語が出ない)', () => {
     const patient = createPatient('場所1', '東京都1-1');
     expectClean('新規', renderPatientForm(null, null, null, handlers).outerHTML);
     expectClean('編集', renderPatientForm(patient, null, null, handlers).outerHTML);
-    expectClean('下書き', renderPatientForm(null, { name: 'a', address: 'b' }, null, handlers).outerHTML);
+    expectClean(
+      '下書き',
+      renderPatientForm(null, { name: 'a', address: 'b', phone: '' }, null, handlers).outerHTML,
+    );
     expectClean(
       'メッセージ',
       renderPatientForm(null, null, { kind: 'error', text: 'x' }, handlers).outerHTML,

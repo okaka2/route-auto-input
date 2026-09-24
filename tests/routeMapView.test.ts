@@ -255,3 +255,20 @@ describe('renderRouteMap: ルートの共有', () => {
     expect(element.textContent).toContain('現在地から');
   });
 });
+
+describe('renderRouteMap: 電話番号', () => {
+  it('電話番号を持つ訪問先がいるカードには、tel: リンクがある', () => {
+    const withPhone = createPatient('山田 太郎', '東京都1-1', new Date(), '03-1234-5678');
+    const noPhone = createPatient('鈴木 花子', '東京都2-2');
+    const state = { ...createInitialState([withPhone, noPhone]), selectedIds: [withPhone.id, noPhone.id] };
+    const element = render(state);
+    const links = element.querySelectorAll<HTMLAnchorElement>('[data-testid="phone-link"]');
+    expect(links).toHaveLength(1);
+    expect(links[0]!.getAttribute('href')).toBe('tel:0312345678');
+  });
+
+  it('誰も電話番号を持たないカードには、電話の行が出ない', () => {
+    const element = render(stateWithSelection(2));
+    expect(element.querySelector('[data-testid="route-phones"]')).toBeNull();
+  });
+});

@@ -1,5 +1,5 @@
 import { MAX_STOPS_PER_ROUTE } from '../config';
-import { formatDateTime } from '../format';
+import { formatDateTime, formatPhoneHref } from '../format';
 import type { MapProvider } from '../mapProviders';
 import { splitIntoRoutes } from '../routeSplitter';
 import { selectedPatients } from '../state';
@@ -164,6 +164,27 @@ function renderRouteCard(
   names.className = 'route-names';
   names.textContent = route.map((patient) => patient.name).join(' → ');
   card.append(names);
+
+  const withPhone = route.filter((patient) => patient.phone);
+  if (withPhone.length > 0) {
+    const phones = document.createElement('p');
+    phones.className = 'route-phones';
+    phones.dataset.testid = 'route-phones';
+    withPhone.forEach((patient) => {
+      const entry = document.createElement('span');
+      entry.className = 'route-phone-entry';
+      entry.append(document.createTextNode(`${patient.name} `));
+      const link = document.createElement('a');
+      link.className = 'phone-link';
+      link.dataset.testid = 'phone-link';
+      link.href = formatPhoneHref(patient.phone!);
+      link.setAttribute('aria-label', `${patient.name}に電話`);
+      link.textContent = '☎';
+      entry.append(link);
+      phones.append(entry);
+    });
+    card.append(phones);
+  }
 
   if (cardState === 'done') {
     const status = document.createElement('p');

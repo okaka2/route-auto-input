@@ -2,15 +2,15 @@ import { DEFAULT_MAP_PROVIDER } from '../mapProviders';
 import type { Message, Patient } from '../types';
 import { renderMessage } from './common';
 
-export type PatientFormDraft = { name: string; address: string };
+export type PatientFormDraft = { name: string; address: string; phone: string };
 
 export type PatientFormHandlers = {
-  onSave(name: string, address: string): void;
+  onSave(name: string, address: string, phone: string): void;
   onCancel(): void;
 };
 
 /**
- * 訪問先の登録・編集フォーム。入力項目は名前と住所だけ。
+ * 訪問先の登録・編集フォーム。入力項目は名前・住所・電話番号(任意)。
  * 住所は地図へ渡すために欠かせないので、保存できるのは、名前と住所がそろっているときだけ(検証は呼び出し側)。
  *
  * `draft` は保存に失敗した直後の入力値(または複製元の値)。渡された場合は `patient` の値より
@@ -25,12 +25,21 @@ export function renderPatientForm(
   const container = document.createElement('div');
   container.className = 'screen';
 
-  const nameInput = textInput('name-input', draft?.name ?? patient?.name ?? '', '例) 山田 太郎');
+  const nameInput = textInput('name-input', draft?.name ?? patient?.name ?? '', '例) 山田 太郎', true);
   const addressInput = textInput(
     'address-input',
     draft?.address ?? patient?.address ?? '',
     '例) 東京都世田谷区桜丘1-2-3',
+    true,
   );
+  const phoneInput = textInput(
+    'phone-input',
+    draft?.phone ?? patient?.phone ?? '',
+    '例) 03-1234-5678',
+    false,
+  );
+  phoneInput.type = 'tel';
+  phoneInput.inputMode = 'tel';
 
   // 見出しの行: 左に「キャンセル」、中央に見出し、右に「保存」。
   const header = document.createElement('header');
@@ -52,7 +61,9 @@ export function renderPatientForm(
   save.className = 'header-link save';
   save.dataset.testid = 'save-button';
   save.textContent = '保存';
-  save.addEventListener('click', () => handlers.onSave(nameInput.value, addressInput.value));
+  save.addEventListener('click', () =>
+    handlers.onSave(nameInput.value, addressInput.value, phoneInput.value),
+  );
 
   header.append(cancel, title, save);
   container.append(header);
@@ -61,33 +72,42 @@ export function renderPatientForm(
     container.append(renderMessage(message));
   }
 
-  container.append(field('名前', nameInput), field('住所', addressInput), renderMapCheck(addressInput));
+  container.append(
+    field('名前', nameInput, true),
+    field('住所', addressInput, true),
+    field('電話番号(任意)', phoneInput, false),
+    renderMapCheck(addressInput),
+  );
   return container;
 }
 
-function textInput(testid: string, value: string, placeholder: string): HTMLInputElement {
+function textInput(testid: string, value: string, placeholder: string, required: boolean): HTMLInputElement {
   const input = document.createElement('input');
   input.type = 'text';
   input.value = value;
   input.placeholder = placeholder;
   input.autocomplete = 'off';
   input.dataset.testid = testid;
-  input.setAttribute('aria-required', 'true');
+  if (required) {
+    input.setAttribute('aria-required', 'true');
+  }
   return input;
 }
 
-/** ラベル(名前と「必須」の表示)で入力欄を包む。 */
-function field(labelText: string, input: HTMLInputElement): HTMLLabelElement {
+/** ラベル(名前と、必須なら「必須」の表示)で入力欄を包む。 */
+function field(labelText: string, input: HTMLInputElement, required: boolean): HTMLLabelElement {
   const label = document.createElement('label');
   label.className = 'field';
 
   const caption = document.createElement('span');
   caption.className = 'field-label';
   caption.append(document.createTextNode(labelText));
-  const required = document.createElement('span');
-  required.className = 'required';
-  required.textContent = '必須';
-  caption.append(required);
+  if (required) {
+    const requiredMark = document.createElement('span');
+    requiredMark.className = 'required';
+    requiredMark.textContent = '必須';
+    caption.append(requiredMark);
+  }
 
   label.append(caption, input);
   return label;

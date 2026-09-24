@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDateTime } from '../src/format';
+import { formatDateTime, formatPhoneHref } from '../src/format';
 
 // 端末のタイムゾーンに左右されないよう、ローカル時刻の成分から日時を作る。
 const local = (month: number, day: number, hour: number, minute: number): string =>
@@ -20,5 +20,12 @@ describe('formatDateTime', () => {
 
   it('読めない日時なら空文字を返し、例外を投げない', () => {
     expect(formatDateTime('いつか')).toBe('');
+  });
+});
+
+describe('formatPhoneHref', () => {
+  it('数字と+だけを残した tel: リンクにする', () => {
+    expect(formatPhoneHref('03-1234-5678')).toBe('tel:0312345678');
+    expect(formatPhoneHref('+81 90 1234 5678')).toBe('tel:+819012345678');
   });
 });

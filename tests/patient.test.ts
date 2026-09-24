@@ -34,3 +34,12 @@ describe('updatePatientFields', () => {
     expect(updated.updatedAt).toBe('2026-09-02T00:00:00.000Z');
   });
 });
+
+describe('電話番号', () => {
+  it('電話番号は、あれば trim して持ち、空なら持たない', () => {
+    expect(createPatient('a', 'b', new Date(), ' 03-1234-5678 ').phone).toBe('03-1234-5678');
+    expect('phone' in createPatient('a', 'b')).toBe(false);
+    const updated = updatePatientFields(createPatient('a', 'b', new Date(), '090'), 'a', 'b', new Date(), '');
+    expect('phone' in updated).toBe(false);
+  });
+});

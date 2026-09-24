@@ -313,14 +313,14 @@ function currentEditingPatient(): Patient | null {
   return state.patients.find((patient) => patient.id === id) ?? null;
 }
 
-async function handleSave(name: string, address: string): Promise<void> {
+async function handleSave(name: string, address: string, phone: string): Promise<void> {
   if (savingPatient) {
     // 保存中の二重タップ。何もしない(2件目のUUIDが発行されるのを防ぐ)。
     return;
   }
   const validation = validatePatientInput(name, address);
   if (!validation.ok) {
-    formDraft = { name, address };
+    formDraft = { name, address, phone };
     setState(withMessage(state, { kind: 'error', text: validation.message }));
     return;
   }
@@ -328,7 +328,9 @@ async function handleSave(name: string, address: string): Promise<void> {
   try {
     const existing = currentEditingPatient();
     const patient =
-      existing === null ? createPatient(name, address) : updatePatientFields(existing, name, address);
+      existing === null
+        ? createPatient(name, address, new Date(), phone)
+        : updatePatientFields(existing, name, address, new Date(), phone);
     if (existing !== null && state.selectedIds.includes(existing.id)) {
       // 選択中(=ルートに入っている)訪問先の編集。住所が変わったかもしれないので、
       // そのルートについて開いた印は古くなる前に消す。
@@ -340,7 +342,7 @@ async function handleSave(name: string, address: string): Promise<void> {
     setState(withScreen(state, { name: 'list' }));
     await reloadPatients({ kind: 'info', text: '保存しました。' });
   } catch {
-    formDraft = { name, address };
+    formDraft = { name, address, phone };
     setState(withMessage(state, { kind: 'error', text: 'データを保存できませんでした。' }));
   } finally {
     savingPatient = false;
@@ -432,7 +434,7 @@ function handleDuplicate(id: string): void {
     return;
   }
   dialogReturnId = null;
-  formDraft = { name: source.name, address: source.address };
+  formDraft = { name: source.name, address: source.address, phone: source.phone ?? '' };
   setState(withScreen(state, { name: 'form', patientId: null }));
 }
 
@@ -619,8 +621,8 @@ function renderScreen(): HTMLElement {
       }, currentNotice());
     case 'form':
       return renderPatientForm(currentEditingPatient(), formDraft, state.message, {
-        onSave: (name, address) => {
-          void handleSave(name, address);
+        onSave: (name, address, phone) => {
+          void handleSave(name, address, phone);
         },
         onCancel: () => {
           formDraft = null;

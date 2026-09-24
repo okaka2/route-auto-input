@@ -6,6 +6,8 @@ export type Patient = {
   createdAt: string;
   /** ISO 8601 */
   updatedAt: string;
+  /** 任意。無ければ持たない。 */
+  phone?: string;
 };
 
 export type Screen =

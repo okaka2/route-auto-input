@@ -61,5 +61,6 @@ function toPatient(item: unknown, index: number): Patient {
     address: record.address as string,
     createdAt: record.createdAt as string,
     updatedAt: record.updatedAt as string,
+    ...(typeof record.phone === 'string' && record.phone !== '' ? { phone: record.phone } : {}),
   };
 }

@@ -402,3 +402,18 @@ describe('すべて/選択中の切り替え', () => {
     expect(spies.onSearchAll).toHaveBeenCalled();
   });
 });
+
+describe('renderPatientList: 電話番号', () => {
+  it('電話番号がある行には、tel: リンクがある', () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1', new Date(), '03-1234-5678');
+    const element = renderPatientList(createInitialState([patient]), noopHandlers());
+    const link = q<HTMLAnchorElement>(element, 'phone-link');
+    expect(link.getAttribute('href')).toBe('tel:0312345678');
+  });
+
+  it('電話番号が無い行には、tel: リンクが無い', () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const element = renderPatientList(createInitialState([patient]), noopHandlers());
+    expect(element.querySelector('[data-testid="phone-link"]')).toBeNull();
+  });
+});

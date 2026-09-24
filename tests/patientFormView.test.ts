@@ -8,6 +8,7 @@ const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: st
   element.querySelector<T>(`[data-testid="${testid}"]`)!;
 const nameInput = (element: HTMLElement) => q<HTMLInputElement>(element, 'name-input');
 const addressInput = (element: HTMLElement) => q<HTMLInputElement>(element, 'address-input');
+const phoneInput = (element: HTMLElement) => q<HTMLInputElement>(element, 'phone-input');
 
 describe('renderPatientForm: 見出しと入力欄', () => {
   it('新規登録では、見出しが「訪問先を登録」で、入力欄が空になる', () => {
@@ -25,11 +26,15 @@ describe('renderPatientForm: 見出しと入力欄', () => {
     expect(addressInput(element).value).toBe('東京都千代田区1-1');
   });
 
-  it('入力欄は、名前と住所の2つだけ', () => {
+  it('入力欄は、名前・住所・電話番号の3つ', () => {
     const element = renderPatientForm(null, null, null, handlers());
     const inputs = [...element.querySelectorAll('input')];
-    expect(inputs).toHaveLength(2);
-    expect(inputs.map((input) => input.dataset.testid)).toEqual(['name-input', 'address-input']);
+    expect(inputs).toHaveLength(3);
+    expect(inputs.map((input) => input.dataset.testid)).toEqual([
+      'name-input',
+      'address-input',
+      'phone-input',
+    ]);
   });
 
   it('名前と住所は、必須と分かる表示を持つ', () => {
@@ -37,6 +42,15 @@ describe('renderPatientForm: 見出しと入力欄', () => {
     expect(element.querySelectorAll('.required')).toHaveLength(2);
     expect(nameInput(element).getAttribute('aria-required')).toBe('true');
     expect(addressInput(element).getAttribute('aria-required')).toBe('true');
+  });
+
+  it('電話番号の入力欄は type=tel で、必須の表示を持たない', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    expect(phoneInput(element).type).toBe('tel');
+    const labels = [...element.querySelectorAll('.field-label')];
+    const phoneLabel = labels.find((label) => label.textContent?.includes('電話番号'));
+    expect(phoneLabel?.querySelector('.required')).toBeNull();
+    expect(phoneInput(element).hasAttribute('aria-required')).toBe(false);
   });
 
   it('入力欄のラベルは「名前」「住所」', () => {
@@ -68,8 +82,9 @@ describe('renderPatientForm: 保存とキャンセル', () => {
     const element = renderPatientForm(null, null, null, spies);
     nameInput(element).value = '鈴木 花子';
     addressInput(element).value = '大阪市北区2-2';
+    phoneInput(element).value = '03-1234-5678';
     q<HTMLButtonElement>(element, 'save-button').click();
-    expect(spies.onSave).toHaveBeenCalledWith('鈴木 花子', '大阪市北区2-2');
+    expect(spies.onSave).toHaveBeenCalledWith('鈴木 花子', '大阪市北区2-2', '03-1234-5678');
   });
 
   it('キャンセルボタンで onCancel が呼ばれる', () => {
@@ -119,15 +134,16 @@ describe('renderPatientForm: メッセージと下書き', () => {
   });
 
   it('draft があれば、新規登録でも patient より優先して表示する(入力内容を残す)', () => {
-    const draft = { name: '入力途中の名前', address: '入力途中の住所' };
+    const draft = { name: '入力途中の名前', address: '入力途中の住所', phone: '090-0000-0000' };
     const element = renderPatientForm(null, draft, null, handlers());
     expect(nameInput(element).value).toBe('入力途中の名前');
     expect(addressInput(element).value).toBe('入力途中の住所');
+    expect(phoneInput(element).value).toBe('090-0000-0000');
   });
 
   it('draft があれば、編集中の既存値より優先して表示する', () => {
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
-    const draft = { name: '編集途中の名前', address: '' };
+    const draft = { name: '編集途中の名前', address: '', phone: '' };
     const element = renderPatientForm(patient, draft, null, handlers());
     expect(nameInput(element).value).toBe('編集途中の名前');
     expect(addressInput(element).value).toBe('');
