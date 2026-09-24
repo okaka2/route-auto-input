@@ -1052,3 +1052,20 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
     });
   });
 });
+
+describe('バックアップのお知らせ', () => {
+  it('5件登録すると、お知らせが出て「あとで」で消える', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    for (let i = 1; i <= 5; i += 1) {
+      el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+      el<HTMLInputElement>('[data-testid="name-input"]')!.value = `場所${i}`;
+      el<HTMLInputElement>('[data-testid="address-input"]')!.value = `東京都${i}`;
+      el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
+      await waitFor(() => expect(rows()).toHaveLength(i));
+    }
+    await waitFor(() => expect(el('[data-testid="backup-notice"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="notice-later"]')!.click();
+    expect(el('[data-testid="backup-notice"]')).toBeNull();
+  });
+});

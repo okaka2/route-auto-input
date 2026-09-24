@@ -3,6 +3,7 @@ import { MAX_SELECTION } from '../config';
 import { visiblePatients } from '../state';
 import type { AppState, Patient, SortOrder } from '../types';
 import { renderMessage } from './common';
+import { renderNotice, type Notice } from './notice';
 
 export type PatientListHandlers = {
   onSearch(query: string): void;
@@ -23,7 +24,11 @@ export type PatientListHandlers = {
  * 編集・複製・削除は、行の右端の「⋯」から開くメニューに置き、通常の操作では誤って触れないようにする。
  * 選択件数と「訪問順を決める →」は、下部の選択バー(main.ts が重ねる)が担当する。
  */
-export function renderPatientList(state: AppState, handlers: PatientListHandlers): HTMLElement {
+export function renderPatientList(
+  state: AppState,
+  handlers: PatientListHandlers,
+  notice: Notice | null = null,
+): HTMLElement {
   const container = document.createElement('div');
   container.className = 'screen';
 
@@ -32,6 +37,10 @@ export function renderPatientList(state: AppState, handlers: PatientListHandlers
   head.className = 'list-head';
   head.append(renderTitleRow(handlers), renderSearch(state, handlers), renderListControls(state, handlers));
   container.append(head);
+
+  if (notice) {
+    container.append(renderNotice(notice));
+  }
 
   if (state.message) {
     container.append(renderMessage(state.message));

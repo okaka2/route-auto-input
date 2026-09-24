@@ -888,3 +888,13 @@ input:focus-visible + .check {
   font-size: 0.875rem;
   font-weight: 600;
 }
+
+.notice {
+  margin: 0 0 var(--gap);
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+}
+.notice-text { margin: 0 0 0.5rem; }
+.notice-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }

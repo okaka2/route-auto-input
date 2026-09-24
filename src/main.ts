@@ -16,7 +16,8 @@ import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
 import { checkPassword, isUnlocked, renderPasswordGate, unlock } from './passwordGate';
 import { createPatient, updatePatientFields } from './patient';
-import { isStoragePersisted } from './protection';
+import { isStoragePersisted, requestPersistentStorage } from './protection';
+import { shouldRemindBackup } from './backupReminder';
 import { splitIntoRoutes } from './routeSplitter';
 import { clearSession, loadSession, saveSession } from './session';
 import { buildShareText, copyText, shareText } from './share';
@@ -51,6 +52,7 @@ import { renderRouteMap } from './views/routeMapView';
 import { renderSelectionBar } from './views/selectionBar';
 import { renderSettings, type SettingsInfo } from './views/settingsView';
 import { renderTabBar, type Step } from './views/tabBar';
+import type { Notice } from './views/notice';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) {
@@ -117,6 +119,74 @@ let dialogReturnId: string | null = null;
 
 // 設定画面に出す情報(最後のバックアップ日時・データの保存状態・表示の設定)。
 let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting() };
+
+// バックアップのお知らせで「あとで」を押した日時を覚えておくキー。
+const BACKUP_LATER_KEY = 'route-auto-input:backup-later';
+// データ保護のお願い(Storage API)は、一度成功したら繰り返し頼まない。
+let persistRequested = false;
+
+function readLocal(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeLocal(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // 使えない環境では諦める。
+  }
+}
+
+function daysSince(iso: string): number {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+}
+
+/** 一覧の上に出すお知らせ。Task 4 でホーム画面の案内を先頭に足す。 */
+function currentNotice(): Notice | null {
+  if (
+    shouldRemindBackup({
+      patientCount: state.patients.length,
+      lastBackupAt: settingsInfo.lastBackupAt,
+      laterAt: readLocal(BACKUP_LATER_KEY),
+      now: new Date(),
+    })
+  ) {
+    const text =
+      settingsInfo.lastBackupAt === null
+        ? 'まだバックアップがありません。スマホの故障や機種変更に備えて、保存しておきましょう。'
+        : `最後のバックアップから${daysSince(settingsInfo.lastBackupAt)}日たちました。スマホの故障や機種変更に備えて、保存しておきましょう。`;
+    return {
+      testid: 'backup-notice',
+      text,
+      actions: [
+        { label: '今すぐバックアップ', testid: 'notice-backup', primary: true, onClick: () => { void handleExport(); } },
+        {
+          label: 'あとで',
+          testid: 'notice-later',
+          onClick: () => {
+            writeLocal(BACKUP_LATER_KEY, new Date().toISOString());
+            render();
+          },
+        },
+      ],
+    };
+  }
+  return null;
+}
+
+/** ブラウザに「このサイトのデータは消さないで」と一度だけ頼む(Task 3)。 */
+function requestProtectionOnce(): void {
+  if (persistRequested) {
+    return;
+  }
+  persistRequested = true;
+  void requestPersistentStorage().then((granted) => {
+    settingsInfo = { ...settingsInfo, persisted: granted ? true : settingsInfo.persisted };
+  });
+}
 
 /** 設定画面用の情報をDBやブラウザから読み直す。設定画面を開いているときは、そのまま再描画する。 */
 async function loadSettingsInfo(): Promise<void> {
@@ -199,6 +269,7 @@ async function handleSave(name: string, address: string): Promise<void> {
       openedRoutes.clear();
     }
     await savePatient(patient);
+    requestProtectionOnce();
     formDraft = null;
     setState(withScreen(state, { name: 'list' }));
     await reloadPatients({ kind: 'info', text: '保存しました。' });
@@ -477,7 +548,7 @@ function renderScreen(): HTMLElement {
           setState(withScreen(state, { name: 'settings' }));
           void loadSettingsInfo();
         },
-      });
+      }, currentNotice());
     case 'form':
       return renderPatientForm(currentEditingPatient(), formDraft, state.message, {
         onSave: (name, address) => {
@@ -629,6 +700,7 @@ function render(): void {
 function startApp(): void {
   render();
   void reloadPatients();
+  void loadSettingsInfo();
 }
 
 /**
