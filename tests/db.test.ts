@@ -3,6 +3,7 @@ import { deleteDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   closeDbForTest,
+  deleteMeta,
   deletePatient,
   deletePatients,
   getMeta,
@@ -99,5 +100,18 @@ describe('meta(設定値の保存)', () => {
     await setMeta('lastBackupAt', '2026-09-20T00:00:00.000Z');
     await setMeta('lastBackupAt', '2026-09-21T00:00:00.000Z');
     expect(await getMeta('lastBackupAt')).toBe('2026-09-21T00:00:00.000Z');
+  });
+});
+
+describe('meta: 事業所と出発・帰着', () => {
+  it('事業所を保存・削除できる', async () => {
+    await setMeta('office', { name: '本店', address: '東京都中央区1-1' });
+    expect(await getMeta('office')).toEqual({ name: '本店', address: '東京都中央区1-1' });
+    await deleteMeta('office');
+    expect(await getMeta('office')).toBeUndefined();
+  });
+  it('出発・帰着の選び方を保存できる', async () => {
+    await setMeta('routeEnds', { start: 'office', end: 'last' });
+    expect(await getMeta('routeEnds')).toEqual({ start: 'office', end: 'last' });
   });
 });

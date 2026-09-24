@@ -169,8 +169,8 @@ describe('画面の文言(禁止語が出ない)', () => {
       '設定',
       renderSettings(
         createInitialState(places(2)),
-        { lastBackupAt: null, persisted: null, theme: 'auto' },
-        { onExport: noop, onImport: noop, onThemeChange: noop, onBack: noop },
+        { lastBackupAt: null, persisted: null, theme: 'auto', office: null },
+        { onExport: noop, onImport: noop, onThemeChange: noop, onBack: noop, onSaveOffice: noop, onClearOffice: noop },
       ).outerHTML,
     );
     expectClean('タブ', renderTabBar('list', true, { onSelect: noop }).outerHTML);

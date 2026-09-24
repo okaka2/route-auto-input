@@ -8,9 +8,11 @@ const handlers = (): SettingsHandlers => ({
   onImport: vi.fn(),
   onThemeChange: vi.fn(),
   onBack: vi.fn(),
+  onSaveOffice: vi.fn(),
+  onClearOffice: vi.fn(),
 });
 
-const info = (): SettingsInfo => ({ lastBackupAt: null, persisted: null, theme: 'auto' });
+const info = (): SettingsInfo => ({ lastBackupAt: null, persisted: null, theme: 'auto', office: null });
 
 const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: string): T =>
   element.querySelector<T>(`[data-testid="${testid}"]`)!;
@@ -110,10 +112,10 @@ describe('renderSettings: 言葉と並び', () => {
     expect(element.textContent).not.toContain('エクスポート');
     expect(element.textContent).not.toContain('インポート');
   });
-  it('見出しの順は バックアップ → データの保存状態 → 表示 → このアプリについて', () => {
+  it('見出しの順は 出発地・帰着地 → バックアップ → データの保存状態 → 表示 → このアプリについて', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
     const headings = [...element.querySelectorAll('h2')].map((h) => h.textContent);
-    expect(headings).toEqual(['バックアップ', 'データの保存状態', '表示', 'このアプリについて']);
+    expect(headings).toEqual(['出発地・帰着地', 'バックアップ', 'データの保存状態', '表示', 'このアプリについて']);
   });
   it('最後のバックアップが無ければ「まだありません」、あれば日付と何日前か', () => {
     const none = renderSettings(createInitialState([]), info(), handlers());
@@ -150,5 +152,35 @@ describe('renderSettings: 言葉と並び', () => {
   it('このアプリについて に版の番号を出す', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
     expect(element.textContent).toContain('版:');
+  });
+});
+
+describe('renderSettings: 出発地・帰着地', () => {
+  it('見出しの先頭が「出発地・帰着地」になる', () => {
+    const element = renderSettings(createInitialState([]), info(), handlers());
+    expect(element.querySelector('h2')?.textContent).toBe('出発地・帰着地');
+  });
+  it('未登録なら入力欄と「保存」、登録済みなら名前・住所と「消す」を出す', () => {
+    const none = renderSettings(createInitialState([]), info(), handlers());
+    expect(q<HTMLInputElement>(none, 'office-name-input').value).toBe('');
+    expect(q(none, 'office-save-button').textContent).toBe('保存');
+    const saved = renderSettings(createInitialState([]), { ...info(), office: { name: '本店', address: '東京都中央区1-1' } }, handlers());
+    expect(q<HTMLInputElement>(saved, 'office-name-input').value).toBe('本店');
+    expect(q<HTMLInputElement>(saved, 'office-address-input').value).toBe('東京都中央区1-1');
+    expect(q(saved, 'office-clear-button')).not.toBeNull();
+  });
+  it('「保存」で onSaveOffice(name, address)、「消す」で onClearOffice', () => {
+    const spies = handlers();
+    const element = renderSettings(createInitialState([]), { ...info(), office: { name: '本店', address: 'X' } }, spies);
+    q<HTMLInputElement>(element, 'office-name-input').value = '支店';
+    q<HTMLInputElement>(element, 'office-address-input').value = '大阪府';
+    q<HTMLButtonElement>(element, 'office-save-button').click();
+    expect(spies.onSaveOffice).toHaveBeenCalledWith('支店', '大阪府');
+    q<HTMLButtonElement>(element, 'office-clear-button').click();
+    expect(spies.onClearOffice).toHaveBeenCalled();
+  });
+  it('説明に、訪問順の画面で出発・帰着を選べることを書く', () => {
+    const element = renderSettings(createInitialState([]), info(), handlers());
+    expect(element.textContent).toContain('訪問順の画面で');
   });
 });

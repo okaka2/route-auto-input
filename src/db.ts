@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import type { Office, RouteEnds } from './routePlan';
 import type { Patient } from './types';
 
 const DB_NAME = 'route-auto-input';
@@ -6,9 +7,11 @@ const DB_VERSION = 2;
 const STORE = 'patients';
 const META_STORE = 'meta';
 
-/** 設定値のキーと型。段階2以降で office / routeEnds などを足す。 */
+/** 設定値のキーと型。 */
 export type MetaValues = {
   lastBackupAt: string;
+  office: Office;
+  routeEnds: RouteEnds;
 };
 
 interface RouteAutoInputDB extends DBSchema {
@@ -45,6 +48,11 @@ export async function getMeta<K extends keyof MetaValues>(key: K): Promise<MetaV
 export async function setMeta<K extends keyof MetaValues>(key: K, value: MetaValues[K]): Promise<void> {
   const db = await getDb();
   await db.put(META_STORE, value, key);
+}
+
+export async function deleteMeta(key: keyof MetaValues): Promise<void> {
+  const db = await getDb();
+  await db.delete(META_STORE, key);
 }
 
 /**

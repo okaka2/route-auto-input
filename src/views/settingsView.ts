@@ -1,5 +1,6 @@
 import { APP_NAME, APP_VERSION } from '../appInfo';
 import { formatLastBackup } from '../backupReminder';
+import type { Office } from '../routePlan';
 import type { ThemeSetting } from '../theme';
 import type { AppState } from '../types';
 import { renderMessage, renderScreenHeader } from './common';
@@ -10,6 +11,7 @@ export type SettingsInfo = {
   /** ブラウザがデータの保護を約束しているか。まだ確かめていなければ null。 */
   persisted: boolean | null;
   theme: ThemeSetting;
+  office: Office | null;
 };
 
 export type SettingsHandlers = {
@@ -17,9 +19,11 @@ export type SettingsHandlers = {
   onImport(file: File, mode: 'replace' | 'merge'): void;
   onThemeChange(setting: ThemeSetting): void;
   onBack(): void;
+  onSaveOffice(name: string, address: string): void;
+  onClearOffice(): void;
 };
 
-/** 設定画面。バックアップ → データの保存状態 → 表示 → このアプリについて の順。 */
+/** 設定画面。出発地・帰着地 → バックアップ → データの保存状態 → 表示 → このアプリについて の順。 */
 export function renderSettings(
   state: AppState,
   info: SettingsInfo,
@@ -37,12 +41,52 @@ export function renderSettings(
   count.textContent = `登録されている訪問先: ${state.patients.length}件`;
   container.append(
     count,
+    renderOffice(info, handlers),
     renderBackup(info, handlers, now),
     renderProtection(info),
     renderTheme(info, handlers),
     renderAbout(),
   );
   return container;
+}
+
+function renderOffice(info: SettingsInfo, handlers: SettingsHandlers): HTMLElement {
+  const card = section('出発地・帰着地');
+  const note = document.createElement('p');
+  note.textContent = '事業所を登録すると、訪問順の画面で「事業所から出発」「事業所へ戻る」を選べます。';
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.value = info.office?.name ?? '';
+  nameInput.placeholder = '例) 本店';
+  nameInput.dataset.testid = 'office-name-input';
+  nameInput.setAttribute('aria-label', '事業所の名前');
+  const addressInput = document.createElement('input');
+  addressInput.type = 'text';
+  addressInput.value = info.office?.address ?? '';
+  addressInput.placeholder = '例) 東京都中央区1-2-3';
+  addressInput.dataset.testid = 'office-address-input';
+  addressInput.setAttribute('aria-label', '事業所の住所');
+  const fields = document.createElement('div');
+  fields.className = 'office-fields';
+  fields.append(labelled('名前', nameInput), labelled('住所', addressInput));
+  const buttons = document.createElement('div');
+  buttons.className = 'office-buttons';
+  buttons.append(button('office-save-button', '保存', 'primary', () => handlers.onSaveOffice(nameInput.value, addressInput.value)));
+  if (info.office) {
+    buttons.append(button('office-clear-button', '消す', '', () => handlers.onClearOffice()));
+  }
+  card.append(note, fields, buttons);
+  return card;
+}
+
+function labelled(text: string, input: HTMLInputElement): HTMLLabelElement {
+  const label = document.createElement('label');
+  label.className = 'field';
+  const caption = document.createElement('span');
+  caption.className = 'field-label';
+  caption.textContent = text;
+  label.append(caption, input);
+  return label;
 }
 
 function renderBackup(info: SettingsInfo, handlers: SettingsHandlers, now: Date): HTMLElement {

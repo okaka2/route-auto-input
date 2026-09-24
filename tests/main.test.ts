@@ -1197,3 +1197,18 @@ describe('保存して続けて登録・同じ人の知らせ', () => {
     await waitFor(() => expect(rows()).toHaveLength(2));
   });
 });
+
+describe('事業所の登録', () => {
+  it('設定で事業所を保存すると、開き直しても残る', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="office-name-input"]')).not.toBeNull());
+    el<HTMLInputElement>('[data-testid="office-name-input"]')!.value = '本店';
+    el<HTMLInputElement>('[data-testid="office-address-input"]')!.value = '東京都中央区1-1';
+    el<HTMLButtonElement>('[data-testid="office-save-button"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('事業所を保存しました'));
+    const db = await import('../src/db');
+    expect(await db.getMeta('office')).toEqual({ name: '本店', address: '東京都中央区1-1' });
+  });
+});

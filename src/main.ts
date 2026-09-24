@@ -2,6 +2,7 @@ import './styles.css';
 import { parseBackup, serializeBackup } from './backup';
 import { MAX_STOPS_PER_ROUTE } from './config';
 import {
+  deleteMeta,
   deletePatient,
   deletePatients,
   getMeta,
@@ -21,6 +22,7 @@ import { createPatient, updatePatientFields } from './patient';
 import { isStandaloneDisplay } from './platform';
 import { isStoragePersisted, requestPersistentStorage } from './protection';
 import { daysBetween, shouldRemindBackup } from './backupReminder';
+import { DEFAULT_ROUTE_ENDS, type Office, type RouteEnds } from './routePlan';
 import { splitIntoRoutes } from './routeSplitter';
 import { clearSession, loadSession, saveSession } from './session';
 import { buildShareText, copyText, shareText } from './share';
@@ -144,8 +146,11 @@ let deletingSelected = false;
 // 「⋯」から開いたダイアログを、編集・複製・削除以外で閉じたとき、フォーカスを戻す行のid。
 let dialogReturnId: string | null = null;
 
-// 設定画面に出す情報(最後のバックアップ日時・データの保存状態・表示の設定)。
-let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting() };
+// 設定画面に出す情報(最後のバックアップ日時・データの保存状態・表示の設定・事業所)。
+let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting(), office: null };
+
+// 出発・帰着の選び方と事業所。起動時に loadRouteContext() で読み直す(Task 3 が使う)。
+let routeContext: { ends: RouteEnds; office: Office | null } = { ends: DEFAULT_ROUTE_ENDS, office: null };
 // loadSettingsInfo() が一度でも終わったか。終わる前はlastBackupAtがnullのままなので、
 // バックアップのお知らせ(「まだバックアップがありません」)を誤って出さないためのガード。
 let settingsLoaded = false;
@@ -273,6 +278,47 @@ async function loadSettingsInfo(): Promise<void> {
   } finally {
     settingsLoaded = true;
     render();
+  }
+}
+
+/** 出発・帰着の選び方と事業所をDBから読み直す(Task 3 が使う)。 */
+async function loadRouteContext(): Promise<void> {
+  try {
+    const [ends, office] = await Promise.all([getMeta('routeEnds'), getMeta('office')]);
+    routeContext = { ends: ends ?? DEFAULT_ROUTE_ENDS, office: office ?? null };
+  } catch {
+    // 読めなければ既定のまま。
+  }
+  settingsInfo = { ...settingsInfo, office: routeContext.office };
+  render();
+}
+
+async function handleSaveOffice(name: string, address: string): Promise<void> {
+  const office = { name: name.trim(), address: address.trim() };
+  if (office.name === '' || office.address === '') {
+    setState(withMessage(state, { kind: 'error', text: '事業所の名前と住所を入力してください。' }));
+    return;
+  }
+  try {
+    await setMeta('office', office);
+    routeContext = { ...routeContext, office };
+    settingsInfo = { ...settingsInfo, office };
+    openedRoutes.clear();
+    setState(withMessage(state, { kind: 'info', text: '事業所を保存しました。' }));
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: '事業所を保存できませんでした。' }));
+  }
+}
+
+async function handleClearOffice(): Promise<void> {
+  try {
+    await deleteMeta('office');
+    routeContext = { ...routeContext, office: null };
+    settingsInfo = { ...settingsInfo, office: null };
+    openedRoutes.clear();
+    setState(withMessage(state, { kind: 'info', text: '事業所を消しました。' }));
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: '事業所を消せませんでした。' }));
   }
 }
 
@@ -731,6 +777,12 @@ function renderScreen(): HTMLElement {
           render();
         },
         onBack: () => setState(withScreen(state, { name: 'list' })),
+        onSaveOffice: (name, address) => {
+          void handleSaveOffice(name, address);
+        },
+        onClearOffice: () => {
+          void handleClearOffice();
+        },
       });
   }
 }
@@ -855,6 +907,7 @@ function startApp(): void {
   render();
   void reloadPatients();
   void loadSettingsInfo();
+  void loadRouteContext();
 }
 
 /**
