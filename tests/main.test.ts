@@ -60,27 +60,16 @@ function dismissInstallNotice(): void {
   el<HTMLButtonElement>('[data-testid="notice-install-dismiss"]')?.click();
 }
 
-type WindowWithTestGeneration = typeof window & { __routeAutoInputTestGeneration?: number };
+type WindowWithStartup = typeof window & { __routeAutoInputStartup?: Promise<void> };
 
 beforeEach(async () => {
   document.body.innerHTML = '<div id="app"></div>';
   vi.resetModules();
-  // main.ts が、前のテストで動き出したまま残っていた非同期処理(起動時の古い履歴の
-  // 削除など)を、自分の世代でなくなったと判断して無視できるようにする。
-  const globalWindowForGeneration = window as WindowWithTestGeneration;
-  globalWindowForGeneration.__routeAutoInputTestGeneration =
-    (globalWindowForGeneration.__routeAutoInputTestGeneration ?? 0) + 1;
   window.localStorage.clear();
   // ロック画面自体を検証するテスト以外は、ロックを経由せずアプリの中身を直接検証したいので、
   // 既定で解錠しておく。
   unlock();
   await deleteDB('route-auto-input');
-  // deleteDB が終わる(=前のテストで開いていた接続が確実に閉じ終わった)まで、
-  // 前のテストの afterEach(closeDbForTest(true))によるブロックは解除しない。
-  // 先に解除すると、前のテストで動き出したまま残っていた非同期処理が、ここでの
-  // deleteDB 待ちの最中に紛れ込んで新しい接続を開いてしまう(次のdeleteDBがブロックされる)。
-  const { resetDbGuardForTest } = await import('../src/db');
-  resetDbGuardForTest();
   // vi.resetModules() はモジュールの読み込みキャッシュを消すだけで、
   // vi.mock('../src/openRoute', ...) が作ったモック関数の呼び出し履歴は
   // テストをまたいで残る。呼び出し回数を検証するテストのために、ここでクリアする。
@@ -92,10 +81,14 @@ afterEach(async () => {
   // spyOn をテスト間に持ち越さない(持ち越すと、前のテストで記録された呼び出しのせいで、
   // 待つべき処理を待たずに検証が通ってしまう)。
   vi.restoreAllMocks();
+  // main.tsの起動時の読み込み(古い履歴の削除→読み直しを含む)が終わるまで待つ。
+  // 待たずに次のbeforeEachのdeleteDBへ進むと、まだ動いている読み込みが後から
+  // 接続を開き直してしまい、そのdeleteDBがブロックされてしまうことがある。
+  await (window as WindowWithStartup).__routeAutoInputStartup;
   // main.tsが内部で使っている(今のモジュールキャッシュ上の)db接続を閉じる。
   // 閉じないと次のbeforeEachのdeleteDBがブロックされる。
   const db = await import('../src/db');
-  await db.closeDbForTest(true);
+  await db.closeDbForTest();
 });
 
 describe('入力内容の保持(#2)', () => {
@@ -224,8 +217,10 @@ describe('セッションの永続化(#1)', () => {
 
     // iOSがPWAをメモリから追い出して再起動した状況を模す:
     // localStorageとIndexedDBのデータはそのまま、JS側だけを作り直す。
-    // 先にこのテストで開いたDB接続を閉じておかないと、次のbeforeEachの
-    // deleteDBが(閉じられていない接続のせいで)ブロックされてしまう。
+    // 先に、再起動前のインスタンスの起動時の読み込みを待ってからDB接続を閉じる
+    // (待たずに閉じると、まだ動いている読み込みが後から接続を開き直してしまい、
+    // 次のbeforeEachのdeleteDBがブロックされてしまう)。
+    await (window as WindowWithStartup).__routeAutoInputStartup;
     const dbBeforeRestart = await import('../src/db');
     await dbBeforeRestart.closeDbForTest();
     document.body.innerHTML = '<div id="app"></div>';
@@ -544,7 +539,9 @@ describe('合言葉のロック画面', () => {
     await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
 
     // 再起動を模して、モジュールを読み込み直す(localStorageはそのまま)。
-    // 読み込み直す前に、今の接続を閉じておく(閉じないと次のdeleteDBがブロックされる)。
+    // 起動時の読み込みを待ってから今の接続を閉じる(閉じないと次のdeleteDBがブロックされる。
+    // 待たずに閉じると、まだ動いている読み込みが後から接続を開き直してしまう)。
+    await (window as WindowWithStartup).__routeAutoInputStartup;
     const dbBeforeRestart = await import('../src/db');
     await dbBeforeRestart.closeDbForTest();
     document.body.innerHTML = '<div id="app"></div>';

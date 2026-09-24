@@ -121,21 +121,6 @@ function handleBeforeInstallPrompt(event: Event): void {
 globalWindowForInstall.__routeAutoInputInstallPromptHandler = handleBeforeInstallPrompt;
 window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-// テストで main.ts を読み込み直す(vi.resetModules())たびに、前回読み込んだモジュールで
-// 動き出したまま残っていた非同期処理(起動時の古い履歴の削除など)が後から解決すると、
-// そのときには別のテストが動いていて、そのテストの localStorage やDOMへ古い状態で
-// 再描画してしまう(セッション記録を古い内容で上書きしてしまう、など)。
-// テストが1つ進むたびに window 上の世代番号が増える前提で、自分の世代と比べる
-// (再起動を模して同じテストの中で読み込み直す場合は世代が変わらないため、通常どおり動く)。
-type WindowWithTestGeneration = typeof window & { __routeAutoInputTestGeneration?: number };
-const globalWindowForGeneration = window as WindowWithTestGeneration;
-const mainGeneration = globalWindowForGeneration.__routeAutoInputTestGeneration;
-function isStaleGeneration(): boolean {
-  return (
-    mainGeneration !== undefined && globalWindowForGeneration.__routeAutoInputTestGeneration !== mainGeneration
-  );
-}
-
 // Googleマップへ遷移して戻ってきたときのために、選択・訪問順・開いたルートを
 // localStorageから復元する(Ruling 7)。復元できた場合、開いたルートがあれば地図の画面、
 // なければ訪問順の画面から始める。
@@ -356,6 +341,8 @@ async function toggleVisited(id: string): Promise<void> {
   const date = dateKey(new Date());
   try {
     const existing = (await getHistory(date)) ?? { date, ids: [...state.selectedIds], routeEnds: routeContext.ends, visited: {} };
+    // 今日の記録に無い(=今日のルートに含まれない)訪問先は、済にできない。
+    if (existing.ids.length > 0 && !existing.ids.includes(id)) return;
     const visited = { ...existing.visited };
     if (visited[id]) delete visited[id];
     else visited[id] = new Date().toISOString();
@@ -370,8 +357,13 @@ async function toggleVisited(id: string): Promise<void> {
 async function copyVisits(date: string): Promise<void> {
   const entry = historyEntries.find((e) => e.date === date);
   if (!entry) return;
+  const visits = formatVisits(entry, state.patients);
+  if (visits === '') {
+    setState(withMessage(state, { kind: 'info', text: 'まだ訪問済みがありません。' }));
+    return;
+  }
   try {
-    await copyText(`${formatHistoryDate(date)} 訪問: ${formatVisits(entry, state.patients)}`);
+    await copyText(`${formatHistoryDate(date)} 訪問: ${visits}`);
     setState(withMessage(state, { kind: 'info', text: 'コピーしました。日報などに貼り付けてください。' }));
   } catch {
     setState(withMessage(state, { kind: 'error', text: 'コピーできませんでした。' }));
@@ -1069,20 +1061,23 @@ function render(): void {
   }
 }
 
+/**
+ * 起動時の読み込みがすべて終わったかどうか。テストが(閉じたDB接続を誤って開き直したり
+ * しないよう)後片付けの前に待てるよう、window に置く。
+ */
+type WindowWithStartup = typeof window & { __routeAutoInputStartup?: Promise<void> };
+
 /** ロック画面を通過してから、いつもどおりアプリ本体を描画・読み込みする。 */
 function startApp(): void {
   render();
-  void reloadPatients();
-  void loadSettingsInfo();
-  void loadRouteContext();
-  void deleteHistoryBefore(keepFromDate(new Date()))
-    .catch(() => undefined)
-    .then(() => {
-      if (!isStaleGeneration()) {
-        return loadHistory();
-      }
-      return undefined;
-    });
+  const startup = Promise.allSettled([
+    reloadPatients(),
+    loadSettingsInfo(),
+    loadRouteContext(),
+    deleteHistoryBefore(keepFromDate(new Date())).catch(() => undefined).then(() => loadHistory()),
+  ]).then(() => undefined);
+  (window as WindowWithStartup).__routeAutoInputStartup = startup;
+  void startup;
 }
 
 /**
