@@ -1088,6 +1088,79 @@ describe('バックアップのお知らせ', () => {
     el<HTMLButtonElement>('[data-testid="notice-later"]')!.click();
     expect(el('[data-testid="backup-notice"]')).toBeNull();
   });
+
+  it('設定の読み込みが終わる前は、昨日バックアップ済みでも「まだバックアップがありません」を出さない', async () => {
+    const dbModule = await import('../src/db');
+    const { savePatient, setMeta, closeDbForTest } = dbModule;
+    const { createPatient } = await import('../src/patient');
+    for (let i = 1; i <= 5; i += 1) {
+      await savePatient(createPatient(`場所${i}`, `東京都${i}`));
+    }
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    await setMeta('lastBackupAt', yesterday);
+    // main.tsが自分で接続を開き直せるよう、いったん閉じておく。
+    await closeDbForTest();
+
+    // reloadPatients(listPatients) と loadSettingsInfo(getMeta) は並行に走る。
+    // getMetaをテスト側で保留にして、一覧が先に描画される状況を確実に作る
+    // (リークするタイマーを避けるため、確定的に自分でresolveする)。
+    let resolveMeta: (value: string | undefined) => void = () => {};
+    const pendingMeta = new Promise<string | undefined>((resolve) => {
+      resolveMeta = resolve;
+    });
+    vi.spyOn(dbModule, 'getMeta').mockImplementation(((key: string) =>
+      key === 'lastBackupAt' ? pendingMeta : Promise.resolve(undefined)) as typeof dbModule.getMeta);
+
+    await import('../src/main');
+    // reloadPatientsは先に終わって一覧が5件描画されるが、loadSettingsInfoはまだ
+    // 完了していない(getMetaが保留中の)状態で、誤ったお知らせが出ていないか確認する。
+    await waitFor(() => expect(rows()).toHaveLength(5));
+    dismissInstallNotice();
+    expect(el('[data-testid="backup-notice"]')).toBeNull();
+
+    // 設定の読み込みを完了させ、正しい最終バックアップ日時が反映された後も出ないことを確認する。
+    resolveMeta(yesterday);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(el('[data-testid="backup-notice"]')).toBeNull();
+  });
+
+  it('最後のバックアップから31日たっていれば、お知らせに日数が出る', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const { setMeta, closeDbForTest } = await import('../src/db');
+    for (let i = 1; i <= 5; i += 1) {
+      await savePatient(createPatient(`場所${i}`, `東京都${i}`));
+    }
+    const monthAgo = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    await setMeta('lastBackupAt', monthAgo);
+    await closeDbForTest();
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(5));
+    dismissInstallNotice();
+    await waitFor(() => expect(el('[data-testid="backup-notice"]')).not.toBeNull());
+    expect(el('[data-testid="backup-notice"]')?.textContent).toContain('31日');
+  });
+});
+
+describe('ホーム画面への追加ボタンは使い終わると消える', () => {
+  it('「ホーム画面に追加」を押すとpromptが呼ばれ、案内が「やり方を見る」に変わる', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+
+    const prompt = vi.fn().mockResolvedValue(undefined);
+    const event = new Event('beforeinstallprompt');
+    Object.assign(event, { prompt });
+    window.dispatchEvent(event);
+
+    await waitFor(() => expect(el('[data-testid="notice-install"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="notice-install"]')!.click();
+
+    expect(prompt).toHaveBeenCalledOnce();
+    await waitFor(() => expect(el('[data-testid="notice-install"]')).toBeNull());
+    expect(el('[data-testid="notice-install-steps"]')).not.toBeNull();
+    expect(() => el<HTMLButtonElement>('[data-testid="notice-install-steps"]')!.click()).not.toThrow();
+  });
 });
 
 describe('保存して続けて登録・同じ人の知らせ', () => {

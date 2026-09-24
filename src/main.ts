@@ -146,6 +146,9 @@ let dialogReturnId: string | null = null;
 
 // 設定画面に出す情報(最後のバックアップ日時・データの保存状態・表示の設定)。
 let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting() };
+// loadSettingsInfo() が一度でも終わったか。終わる前はlastBackupAtがnullのままなので、
+// バックアップのお知らせ(「まだバックアップがありません」)を誤って出さないためのガード。
+let settingsLoaded = false;
 
 // バックアップのお知らせで「あとで」を押した日時を覚えておくキー。
 const BACKUP_LATER_KEY = 'route-auto-input:backup-later';
@@ -189,8 +192,11 @@ function currentNotice(): Notice | null {
               testid: 'notice-install',
               primary: true,
               onClick: () => {
-                void install.prompt();
                 deferredInstallPrompt = null;
+                void install.prompt().catch(() => {
+                  // 使い終わった、または断られた。案内は次の描画で「やり方を見る」に戻る。
+                });
+                render();
               },
             }
           : {
@@ -211,6 +217,7 @@ function currentNotice(): Notice | null {
     };
   }
   if (
+    settingsLoaded &&
     shouldRemindBackup({
       patientCount: state.patients.length,
       lastBackupAt: settingsInfo.lastBackupAt,
@@ -257,9 +264,16 @@ function requestProtectionOnce(): void {
  * この情報(lastBackupAt)で出す/出さないを決めるため、どの画面でも読み直したら再描画する。
  */
 async function loadSettingsInfo(): Promise<void> {
-  const [lastBackupAt, persisted] = await Promise.all([getMeta('lastBackupAt'), isStoragePersisted()]);
-  settingsInfo = { ...settingsInfo, lastBackupAt: lastBackupAt ?? null, persisted };
-  render();
+  try {
+    const [lastBackupAt, persisted] = await Promise.all([getMeta('lastBackupAt'), isStoragePersisted()]);
+    settingsInfo = { ...settingsInfo, lastBackupAt: lastBackupAt ?? null, persisted };
+  } catch {
+    // 読み込みに失敗しても、アプリを止めない。今のsettingsInfoをそのまま使う
+    // (お知らせはsettingsLoadedがtrueになった時点でlastBackupAt: nullとして出る)。
+  } finally {
+    settingsLoaded = true;
+    render();
+  }
 }
 
 function setState(next: AppState): void {
