@@ -3,15 +3,24 @@ import type { Office, RouteEnds } from './routePlan';
 import type { Patient } from './types';
 
 const DB_NAME = 'route-auto-input';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'patients';
 const META_STORE = 'meta';
+const HISTORY_STORE = 'history';
 
 /** 設定値のキーと型。 */
 export type MetaValues = {
   lastBackupAt: string;
   office: Office;
   routeEnds: RouteEnds;
+};
+
+/** 訪問の履歴。日付ごとに、選んだ人の順番と訪問済み時刻を保存する。 */
+export type HistoryEntry = {
+  date: string /* YYYY-MM-DD */;
+  ids: string[];
+  routeEnds: RouteEnds;
+  visited: Record<string, string /* ISO */>;
 };
 
 interface RouteAutoInputDB extends DBSchema {
@@ -21,6 +30,7 @@ interface RouteAutoInputDB extends DBSchema {
     indexes: { createdAt: string };
   };
   meta: { key: string; value: unknown };
+  history: { key: string; value: HistoryEntry };
 }
 
 let connection: Promise<IDBPDatabase<RouteAutoInputDB>> | null = null;
@@ -34,6 +44,9 @@ function getDb(): Promise<IDBPDatabase<RouteAutoInputDB>> {
       }
       if (oldVersion < 2) {
         db.createObjectStore(META_STORE);
+      }
+      if (oldVersion < 3) {
+        db.createObjectStore(HISTORY_STORE, { keyPath: 'date' });
       }
     },
   });
@@ -114,4 +127,37 @@ export async function mergePatients(patients: readonly Patient[]): Promise<void>
     await tx.store.put(patient);
   }
   await tx.done;
+}
+
+export async function getHistory(date: string): Promise<HistoryEntry | undefined> {
+  const db = await getDb();
+  return db.get(HISTORY_STORE, date);
+}
+
+export async function putHistory(entry: HistoryEntry): Promise<void> {
+  const db = await getDb();
+  await db.put(HISTORY_STORE, entry);
+}
+
+/** 新しい日付が先に来る。 */
+export async function listHistory(): Promise<HistoryEntry[]> {
+  const db = await getDb();
+  return (await db.getAll(HISTORY_STORE)).reverse();
+}
+
+/** 指定の日付より前を消し、消した件数を返す。 */
+export async function deleteHistoryBefore(date: string): Promise<number> {
+  const db = await getDb();
+  const keys = await db.getAllKeys(HISTORY_STORE, IDBKeyRange.upperBound(date, true));
+  const tx = db.transaction(HISTORY_STORE, 'readwrite');
+  for (const key of keys) {
+    await tx.store.delete(key);
+  }
+  await tx.done;
+  return keys.length;
+}
+
+export async function clearHistory(): Promise<void> {
+  const db = await getDb();
+  await db.clear(HISTORY_STORE);
 }

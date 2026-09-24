@@ -2,16 +2,22 @@ import 'fake-indexeddb/auto';
 import { deleteDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  clearHistory,
   closeDbForTest,
+  deleteHistoryBefore,
   deleteMeta,
   deletePatient,
   deletePatients,
+  getHistory,
   getMeta,
+  listHistory,
   listPatients,
   mergePatients,
+  putHistory,
   replaceAllPatients,
   savePatient,
   setMeta,
+  type HistoryEntry,
 } from '../src/db';
 import { createPatient, updatePatientFields } from '../src/patient';
 
@@ -113,5 +119,26 @@ describe('meta: 事業所と出発・帰着', () => {
   it('出発・帰着の選び方を保存できる', async () => {
     await setMeta('routeEnds', { start: 'office', end: 'last' });
     expect(await getMeta('routeEnds')).toEqual({ start: 'office', end: 'last' });
+  });
+});
+
+const h = (date: string): HistoryEntry => ({ date, ids: ['a'], routeEnds: { start: 'first', end: 'last' }, visited: {} });
+
+describe('history', () => {
+  it('日付をキーに保存・上書きし、新しい順に一覧できる', async () => {
+    await putHistory(h('2026-09-20'));
+    await putHistory(h('2026-09-22'));
+    await putHistory({ ...h('2026-09-22'), ids: ['b'] });
+    expect((await listHistory()).map((e) => e.date)).toEqual(['2026-09-22', '2026-09-20']);
+    expect((await getHistory('2026-09-22'))?.ids).toEqual(['b']);
+  });
+  it('指定の日付より前を消し、件数を返す', async () => {
+    await putHistory(h('2026-07-01'));
+    await putHistory(h('2026-08-15'));
+    await putHistory(h('2026-09-22'));
+    expect(await deleteHistoryBefore('2026-07-31')).toBe(1);
+    expect((await listHistory()).map((e) => e.date)).toEqual(['2026-09-22', '2026-08-15']);
+    await clearHistory();
+    expect(await listHistory()).toEqual([]);
   });
 });
