@@ -2062,11 +2062,12 @@ git commit -m "feat: 保存して続けて登録できるようにし、同じ�
 **Files:**
 - Modify: `README.md`、`docs/superpowers/plans/2026-09-24-stage1-style-and-basics.md`(この節のチェック)
 
-- [ ] **Step 1: ビルドして重さを確かめる**
+- [x] **Step 1: ビルドして重さを確かめる**
 
 Run: `npm run build` → `dist/assets/index-*.js` の大きさを見る。目安 120KB 以内(段階1では 60KB 前後のはず)。
+→ `dist/assets/index-Ba0t9q5z.js` は 56.47KB(gzip 16.85KB)で目安内。
 
-- [ ] **Step 2: 開発サーバーで通しの動作を見る**
+- [ ] **Step 2: 開発サーバーで通しの動作を見る**(スキップ:controllerがブラウザ確認済み)
 
 `preview_start`(`route-auto-input-dev`)で、次を確認してスクリーンショットを残す:
 - 明るい/暗い(`resize_window` の `colorScheme`)の両方で、一覧・登録・訪問順・設定
@@ -2076,11 +2077,11 @@ Run: `npm run build` → `dist/assets/index-*.js` の大きさを見る。目安
 - 訪問順の「⋯」→ 先頭へ/最後へ、11件以上での区切り
 - 続けて登録、同じ住所の知らせ、電話リンク
 
-- [ ] **Step 3: README を更新する**
+- [x] **Step 3: README を更新する**
 
 「主な機能」に、表示の切り替え(ダークモード)、データの保存状態、バックアップのお知らせ、ホーム画面の案内、すべて/選択中、30件、電話番号、続けて登録、同じ人の知らせ を追記。
 
-- [ ] **Step 4: 実機で確かめる項目(公開後に利用者が行う)**
+- [x] **Step 4: 実機で確かめる項目(公開後に利用者が行う)**
 
 以下を README の「試運転で確かめること」として書く:
 - iPhone Safari(タブ): 案内が出る → 共有 → ホーム画面に追加 → ホーム画面から開くと案内が出ない
