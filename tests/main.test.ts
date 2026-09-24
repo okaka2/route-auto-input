@@ -21,6 +21,11 @@ const el = <T extends HTMLElement = HTMLElement>(selector: string): T | null =>
 
 const rows = () => document.querySelectorAll('[data-testid="patient-row"]');
 
+/** 一覧の上に出るお知らせ(ホーム画面の案内など)を閉じ、目的のお知らせが見える状態にする。 */
+function dismissInstallNotice(): void {
+  el<HTMLButtonElement>('[data-testid="notice-install-dismiss"]')?.click();
+}
+
 beforeEach(async () => {
   document.body.innerHTML = '<div id="app"></div>';
   vi.resetModules();
@@ -1067,7 +1072,7 @@ describe('バックアップのお知らせ', () => {
     await import('../src/main');
     await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
     // ホーム画面への追加の案内が優先して出るので、先に閉じておく。
-    el<HTMLButtonElement>('[data-testid="notice-install-dismiss"]')!.click();
+    dismissInstallNotice();
     for (let i = 1; i <= 5; i += 1) {
       el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
       el<HTMLInputElement>('[data-testid="name-input"]')!.value = `場所${i}`;
