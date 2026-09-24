@@ -32,16 +32,16 @@ describe('validateSelection', () => {
     expect(validateSelection(1)).toEqual({ ok: true });
   });
 
-  it('10人なら通る', () => {
-    expect(validateSelection(10)).toEqual({ ok: true });
+  it('上限人数なら通る', () => {
+    expect(validateSelection(MAX_SELECTION)).toEqual({ ok: true });
   });
 
   it('0人なら通らない', () => {
     expect(validateSelection(0).ok).toBe(false);
   });
 
-  it('11人なら通らない', () => {
-    expect(validateSelection(11).ok).toBe(false);
+  it('上限を超えると通らない', () => {
+    expect(validateSelection(MAX_SELECTION + 1).ok).toBe(false);
   });
 });
 

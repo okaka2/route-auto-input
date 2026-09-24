@@ -1,3 +1,4 @@
+import { MAX_STOPS_PER_ROUTE } from '../config';
 import { selectedPatients } from '../state';
 import type { AppState, Patient } from '../types';
 import { findDuplicateAddresses } from '../validation';
@@ -55,6 +56,14 @@ export function renderRouteOrder(state: AppState, handlers: RouteOrderHandlers):
   const list = document.createElement('ol');
   list.className = 'stop-timeline';
   stops.forEach((patient, index) => {
+    if (index > 0 && index % MAX_STOPS_PER_ROUTE === 0) {
+      const divider = document.createElement('li');
+      divider.className = 'route-divider';
+      divider.dataset.testid = 'route-divider';
+      divider.setAttribute('aria-label', `ここからルート${index / MAX_STOPS_PER_ROUTE + 1}`);
+      divider.textContent = `── ここからルート${index / MAX_STOPS_PER_ROUTE + 1} ──`;
+      list.append(divider);
+    }
     list.append(renderStopRow(patient, index, stops.length, handlers));
   });
   container.append(list);

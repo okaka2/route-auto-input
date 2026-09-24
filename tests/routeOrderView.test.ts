@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { MAX_STOPS_PER_ROUTE } from '../src/config';
 import { createPatient } from '../src/patient';
 import { createInitialState } from '../src/state';
 import { renderRouteOrder, type RouteOrderHandlers } from '../src/views/routeOrderView';
@@ -178,6 +179,32 @@ describe('renderRouteOrder: 操作', () => {
     expect(button.classList.contains('primary')).toBe(true);
     button.click();
     expect(spies.onOpenMap).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('renderRouteOrder: ルートの区切り', () => {
+  function makePatients(count: number): Patient[] {
+    return Array.from({ length: count }, (_, i) =>
+      createPatient(`場所${i + 1}`, `東京都${i + 1}-1`),
+    );
+  }
+
+  it('1ルートの上限を超えると、区切りの行「── ここからルート2 ──」を出す', () => {
+    const patients = makePatients(MAX_STOPS_PER_ROUTE + 2);
+    const state = { ...createInitialState(patients), selectedIds: patients.map((p) => p.id) };
+    const element = renderRouteOrder(state, handlers());
+    const dividers = [...element.querySelectorAll('[data-testid="route-divider"]')];
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0]!.textContent).toBe('── ここからルート2 ──');
+    // 区切りは、上限件目の行の直後にある
+    const items = [...element.querySelectorAll<HTMLElement>('.stop-timeline > li')];
+    expect(items[MAX_STOPS_PER_ROUTE]!.dataset.testid).toBe('route-divider');
+  });
+
+  it('上限以内なら区切りは出ない', () => {
+    const patients = makePatients(3);
+    const state = { ...createInitialState(patients), selectedIds: patients.map((p) => p.id) };
+    expect(renderRouteOrder(state, handlers()).querySelector('[data-testid="route-divider"]')).toBeNull();
   });
 });
 
