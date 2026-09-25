@@ -1898,8 +1898,11 @@ describe('写真', () => {
     expect(await listPhotos(patient.id)).toHaveLength(1);
     expect(el<HTMLInputElement>('[data-testid="photo-input"]')!.value).toBe('');
 
+    // フォームを離れると、formPhotosのobject URLが片付く(setState一箇所のrevoke)。
+    const revokeCallsBeforeLeavingForm = vi.mocked(URL.revokeObjectURL).mock.calls.length;
     el<HTMLButtonElement>('[data-testid="cancel-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls.length).toBeGreaterThan(revokeCallsBeforeLeavingForm);
 
     el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
     el<HTMLButtonElement>('[data-testid="dialog-delete"]')!.click();
@@ -1945,12 +1948,75 @@ describe('写真', () => {
 
     await waitFor(() => expect(el('[data-testid="photo-count"]')).not.toBeNull());
     expect(el('[data-testid="photo-count"]')?.textContent).toBe('写真 3');
+    expect(el('[data-testid="photo-count"]')?.getAttribute('aria-label')).toBe('山田 太郎の写真(3枚)');
     el<HTMLButtonElement>('[data-testid="photo-count"]')!.click();
 
     await waitFor(() => expect(el('[data-testid="photo-view"]')).not.toBeNull());
     expect(el('[data-testid="dialog"]')?.textContent).toContain('1 / 3');
+    // 端(先頭)なので「前」は押せず、代わりに押せる最初のボタン(「次」)にフォーカスが移る。
+    expect(el<HTMLButtonElement>('[data-testid="photo-prev"]')?.disabled).toBe(true);
+    expect(document.activeElement).toBe(el('[data-testid="photo-next"]'));
 
+    // 「次」を末尾まで押すと、直前までフォーカスしていた「次」ボタン自体が disabled になる。
+    // その場合は「見つからなかった」ものとして扱い、押せる最初のボタンへフォーカスが回る。
+    el<HTMLButtonElement>('[data-testid="photo-next"]')!.click();
+    el<HTMLButtonElement>('[data-testid="photo-next"]')!.click();
+    expect(el('[data-testid="dialog"]')?.textContent).toContain('3 / 3');
+    expect(el<HTMLButtonElement>('[data-testid="photo-next"]')?.disabled).toBe(true);
+    expect(document.activeElement).not.toBe(el('[data-testid="photo-next"]'));
+    expect((document.activeElement as HTMLButtonElement).disabled).toBe(false);
+
+    // 閉じると、写真のダイアログが持っていたobject URLが片付く(setState一箇所のrevoke)。
+    const revokeCallsBeforeClosingDialog = vi.mocked(URL.revokeObjectURL).mock.calls.length;
     el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
     expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls.length).toBeGreaterThan(revokeCallsBeforeClosingDialog);
+  });
+
+  it('写真の追加に失敗しても、知らない形のエラーは生のメッセージを出さず汎用メッセージにする', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const { resizeImage } = await import('../src/imageResize');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-edit"]')!.click();
+    await waitFor(() => expect(el('[data-testid="photo-input"]')).not.toBeNull());
+
+    // 生の(英語/技術的な)メッセージを持つ失敗を1回だけ起こす。
+    vi.mocked(resizeImage).mockRejectedValueOnce(new DOMException('Failed to execute createImageBitmap'));
+    const file = new File(['x'], 'photo.jpg', { type: 'image/jpeg' });
+    const input = el<HTMLInputElement>('[data-testid="photo-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change'));
+
+    await waitFor(() => expect(el('.message')).not.toBeNull());
+    expect(el('.message')?.textContent).toBe('写真を追加できませんでした。');
+    expect(el('.message')?.textContent).not.toContain('createImageBitmap');
+  });
+
+  it('訪問先の削除で写真の削除(deletePhotosOf)が失敗しても、削除自体は成功として扱う', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    vi.spyOn(db, 'deletePhotosOf').mockRejectedValueOnce(new Error('boom'));
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-delete"]')!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-confirm-delete"]')!.click();
+
+    await waitFor(() => expect(rows()).toHaveLength(0));
+    expect(el('.message')?.textContent).toContain('削除しました');
   });
 });

@@ -530,13 +530,15 @@ function setState(next: AppState): void {
   if (previousScreen.name === 'form' && !stillSameForm) {
     replaceFormPhotos([]);
   }
-  // 写真のダイアログを閉じる/別の訪問先へ切り替わるとき、そのobject URLを片付ける。
+  // 写真のダイアログを閉じる/urlsが作り直されたとき、そのobject URLを片付ける。
+  // 同じ訪問先でも開き直せばurlsは新しい配列になるので、patientIdではなく配列そのもの
+  // (参照)で「まだ同じ表示か」を見分ける(前/次でindexだけ変える再描画はurlsを使い回す)。
   const stillSamePhotosDialog =
     previousDialog !== null &&
     previousDialog.kind === 'photos' &&
     next.dialog !== null &&
     next.dialog.kind === 'photos' &&
-    next.dialog.patientId === previousDialog.patientId;
+    next.dialog.urls === previousDialog.urls;
   if (previousDialog !== null && previousDialog.kind === 'photos' && !stillSamePhotosDialog) {
     for (const url of previousDialog.urls) {
       URL.revokeObjectURL(url);
@@ -712,7 +714,12 @@ async function handleDelete(id: string): Promise<void> {
   setState(closeDialog(state));
   try {
     await deletePatient(id);
-    await deletePhotosOf([id]);
+    try {
+      await deletePhotosOf([id]);
+    } catch {
+      // 写真を消せなくても、訪問先自体の削除は済んでいるので、これ全体を失敗として扱わない
+      // (孤立した写真は残るが、消えたはずのデータとして扱われるよりまし)。
+    }
     await loadPhotoCounts();
     await reloadPatients({ kind: 'info', text: '削除しました。' });
   } catch {
@@ -752,7 +759,11 @@ async function handleConfirmDeleteSelected(): Promise<void> {
   setState(closeDialog(state));
   try {
     await deletePatients(ids);
-    await deletePhotosOf(ids);
+    try {
+      await deletePhotosOf(ids);
+    } catch {
+      // 写真を消せなくても、訪問先自体の削除は済んでいるので、これ全体を失敗として扱わない。
+    }
     await loadPhotoCounts();
     await reloadPatients({ kind: 'info', text: `${ids.length}件を削除しました。` });
   } catch {
@@ -997,6 +1008,11 @@ async function loadFormPhotos(patientId: string): Promise<void> {
   render();
 }
 
+// addPhotoFromFileで、そのまま利用者に見せてよいとわかっているメッセージだけを通す。
+// それ以外(DOMExceptionやimport(チャンク読み込み)の失敗など、英語や技術的な内容を
+// 含みうるもの)は、汎用のメッセージに丸める。
+const KNOWN_PHOTO_ERROR_MESSAGES = new Set(['写真を読み込めませんでした。', '写真は1件につき3枚までです。']);
+
 /** フォームの「写真を追加」。縮小してからDBへ追加し、フォームの写真と地図の件数バッジを読み直す。 */
 async function addPhotoFromFile(file: File): Promise<void> {
   const screen = state.screen;
@@ -1007,11 +1023,18 @@ async function addPhotoFromFile(file: File): Promise<void> {
   try {
     const { resizeImage } = await import('./imageResize');
     const blob = await resizeImage(file);
+    // 縮小している間に、この訪問先自体が削除されているかもしれない。
+    if (!state.patients.some((patient) => patient.id === patientId)) {
+      return;
+    }
     await addPhoto({ id: crypto.randomUUID(), patientId, blob, createdAt: new Date().toISOString() });
     await loadFormPhotos(patientId);
     await loadPhotoCounts();
   } catch (error) {
-    const message = error instanceof Error ? error.message : '写真を追加できませんでした。';
+    const message =
+      error instanceof Error && KNOWN_PHOTO_ERROR_MESSAGES.has(error.message)
+        ? error.message
+        : '写真を追加できませんでした。';
     setState(withMessage(state, { kind: 'error', text: message }));
   }
 }
@@ -1037,11 +1060,20 @@ async function openPhotos(patientId: string): Promise<void> {
   dialogReturnId = patientId;
   try {
     const photos = await listPhotos(patientId);
-    if (photos.length === 0) {
+    const urls = photos.map((photo) => URL.createObjectURL(photo.blob));
+    // 読み込んでいる間に、地図の画面を離れた/別のダイアログが開いたかもしれない。
+    // そのときは、せっかく作ったobject URLをここで片付けて、何も表示しない。
+    if (state.screen.name !== 'map' || state.dialog !== null) {
+      for (const url of urls) {
+        URL.revokeObjectURL(url);
+      }
       dialogReturnId = null;
       return;
     }
-    const urls = photos.map((photo) => URL.createObjectURL(photo.blob));
+    if (urls.length === 0) {
+      dialogReturnId = null;
+      return;
+    }
     setState({ ...state, dialog: { kind: 'photos', patientId, urls, index: 0 } });
   } catch {
     dialogReturnId = null;
@@ -1503,7 +1535,11 @@ function render(): void {
       const selector =
         rowId === undefined ? `[data-testid="${testid}"]` : `[data-testid="${testid}"][data-id="${rowId}"]`;
       const restored = dialog.querySelector<HTMLElement>(selector);
-      if (restored) {
+      // 直前にフォーカスしていたのと同じtestidの要素が、再描画後は押せなく(disabled に)
+      // なっていることがある(写真の前/次を端まで押した場合など)。その場合は
+      // 「見つからなかった」ものとして扱い、下の既定のフォーカス(最初の押せるボタン)へ回す。
+      const restoredIsDisabled = restored instanceof HTMLButtonElement && restored.disabled;
+      if (restored && !restoredIsDisabled) {
         restored.focus();
         if (restored instanceof HTMLInputElement && restored.type === 'text' && caret !== null) {
           restored.setSelectionRange(caret, caret);
@@ -1511,7 +1547,7 @@ function render(): void {
         return;
       }
     }
-    dialog.querySelector<HTMLElement>('button')?.focus();
+    dialog.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
     return;
   }
   if (hadDialog && dialogReturnId !== null) {

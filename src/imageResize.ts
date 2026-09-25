@@ -65,6 +65,10 @@ export async function resizeImage(file: Blob, deps: ResizeDeps = defaultDeps): P
       throw new Error('写真を読み込めませんでした。');
     }
     return blob;
+  } catch {
+    // createCanvas/drawImage/toBlobがどんな形で失敗しても(DOMExceptionなど)、
+    // 利用者に見せるメッセージは1つに揃える。
+    throw new Error('写真を読み込めませんでした。');
   } finally {
     decoded.close?.();
   }

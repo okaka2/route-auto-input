@@ -1228,6 +1228,8 @@ input:focus-visible + .check {
 .photo-item { display: flex; flex-direction: column; gap: 0.25rem; width: 6rem; }
 .photo-item img { width: 6rem; height: 6rem; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--border); }
 .photo-add { display: inline-flex; align-items: center; justify-content: center; min-height: var(--tap-min); padding: 0 1rem; border: 1px solid var(--primary); border-radius: var(--radius); color: var(--primary); cursor: pointer; }
+/* 中のfile inputはvisually-hiddenで見た目に出ないので、キーボード操作時の枠はラベル側に出す。 */
+.photo-add:focus-within { outline: 3px solid var(--primary); outline-offset: 2px; }
 .photo-view img { display: block; max-width: 100%; max-height: 60vh; margin: 0 auto var(--gap); border-radius: var(--radius); }
 .photo-nav { display: flex; align-items: center; justify-content: center; gap: 0.75rem; margin-bottom: var(--gap); }
 .photo-count { min-height: var(--tap-min); padding: 0 0.75rem; white-space: nowrap; }

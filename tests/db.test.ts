@@ -175,11 +175,14 @@ const photo = (patientId: string, createdAt: string, id = `photo-${patientId}-${
 });
 
 describe('写真', () => {
-  it('追加した写真を一覧できる(登録した順=古い順)', async () => {
-    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z'));
-    await addPhoto(photo('p1', '2026-09-22T00:00:00.000Z'));
-    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z'));
+  it('追加した写真を一覧できる(登録した順=古い順。idの並びとは無関係)', async () => {
+    // idはUUIDなので、並び順がidの辞書順(z, a, m)になっていたら誤り。
+    // createdAtの順(09-20→09-21→09-22)で出ることを確かめる。
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'z'));
+    await addPhoto(photo('p1', '2026-09-22T00:00:00.000Z', 'a'));
+    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z', 'm'));
     const listed = await listPhotos('p1');
+    expect(listed.map((p) => p.id)).toEqual(['z', 'm', 'a']);
     expect(listed.map((p) => p.createdAt)).toEqual([
       '2026-09-20T00:00:00.000Z',
       '2026-09-21T00:00:00.000Z',
@@ -292,11 +295,19 @@ describe('v3→v4の移行', () => {
     const legacyPatient = createPatient('山田', '東京都');
     await legacyDb.put('patients', legacyPatient);
     await legacyDb.put('meta', '2026-09-20T00:00:00.000Z', 'lastBackupAt');
+    const legacyHistory: HistoryEntry = {
+      date: '2026-09-20',
+      ids: [legacyPatient.id],
+      routeEnds: { start: 'first', end: 'last' },
+      visited: {},
+    };
+    await legacyDb.put('history', legacyHistory);
     legacyDb.close();
 
     // ここからアプリ(v4)のdb.tsを使う。
     expect(await listPatients()).toEqual([legacyPatient]);
     expect(await getMeta('lastBackupAt')).toBe('2026-09-20T00:00:00.000Z');
+    expect(await getHistory('2026-09-20')).toEqual(legacyHistory);
     expect(await listPhotos(legacyPatient.id)).toEqual([]);
     await addPhoto(photo(legacyPatient.id, '2026-09-21T00:00:00.000Z', 'new-photo'));
     expect(await listPhotos(legacyPatient.id)).toHaveLength(1);

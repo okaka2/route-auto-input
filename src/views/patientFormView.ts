@@ -1,4 +1,4 @@
-import { MAX_PHOTOS_PER_PATIENT } from '../db';
+import { MAX_PHOTOS_PER_PATIENT } from '../config';
 import { DEFAULT_MAP_PROVIDER } from '../mapProviders';
 import type { Message, ParkingType, Patient, PatientFormDraft } from '../types';
 import { NOTE_HEADINGS, PARKING_OPTIONS } from '../visitInfo';

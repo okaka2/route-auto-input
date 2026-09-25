@@ -274,6 +274,7 @@ function renderStops(
       photos.dataset.testid = 'photo-count';
       photos.dataset.id = patient.id;
       photos.textContent = `写真 ${photoCount}`;
+      photos.setAttribute('aria-label', `${patient.name}の写真(${photoCount}枚)`);
       photos.addEventListener('click', () => handlers.onOpenPhotos(patient.id));
       item.append(photos);
     }

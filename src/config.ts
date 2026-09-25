@@ -11,3 +11,6 @@ export const MAX_STOPS_PER_ROUTE = 10;
 
 /** 一度に選択できる患者の上限。 */
 export const MAX_SELECTION = 30;
+
+/** 訪問先1件につき登録できる写真の枚数。 */
+export const MAX_PHOTOS_PER_PATIENT = 3;

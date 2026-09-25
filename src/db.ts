@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { MAX_PHOTOS_PER_PATIENT } from './config';
 import type { Office, RouteEnds } from './routePlan';
 import type { Patient, Photo, Spot } from './types';
 
@@ -10,8 +11,7 @@ const HISTORY_STORE = 'history';
 const PHOTOS_STORE = 'photos';
 const SPOTS_STORE = 'spots';
 
-/** 訪問先1件につき登録できる写真の枚数。 */
-export const MAX_PHOTOS_PER_PATIENT = 3;
+export { MAX_PHOTOS_PER_PATIENT };
 
 /** 設定値のキーと型。 */
 export type MetaValues = {
@@ -191,10 +191,15 @@ export async function clearHistory(): Promise<void> {
   await db.clear(HISTORY_STORE);
 }
 
-/** その訪問先の写真を、登録した順(古い順)で返す。 */
+/**
+ * その訪問先の写真を、登録した順(古い順)で返す。
+ * getAllFromIndexはindexの値(patientId)→主キー(id、ランダムなUUID)の順で並ぶだけなので、
+ * ここでcreatedAtで並べ直す(同じcreatedAtならidで安定させる)。
+ */
 export async function listPhotos(patientId: string): Promise<Photo[]> {
   const db = await getDb();
-  return db.getAllFromIndex(PHOTOS_STORE, 'patientId', patientId);
+  const photos = await db.getAllFromIndex(PHOTOS_STORE, 'patientId', patientId);
+  return photos.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
 }
 
 /** 訪問先ごとの写真の枚数(1枚も無い訪問先は含まれない)。 */
