@@ -1,4 +1,4 @@
-import type { GeoLocation, Patient } from './types';
+import type { GeoLocation, Parking, ParkingType, Patient } from './types';
 
 export function createPatient(
   name: string,
@@ -25,6 +25,32 @@ export function withLocation(patient: Patient, location: GeoLocation | null, now
     ...rest,
     ...(location ? { location } : {}),
     updatedAt: now.toISOString(),
+  };
+}
+
+/**
+ * 駐車情報とメモを付け替える(他の項目・更新日時は変えない)。
+ * parkingType が '' なら parking を外す。'street_permit' 以外の駐車場では permitExpires を持たない。
+ * note は trim して、空なら持たない。
+ */
+export function withVisitInfo(
+  patient: Patient,
+  info: { parkingType: ParkingType | ''; permitExpires: string; note: string },
+): Patient {
+  const { parking: _oldParking, note: _oldNote, ...rest } = patient;
+  const trimmedNote = info.note.trim();
+  const trimmedPermit = info.permitExpires.trim();
+  const parking: Parking | null =
+    info.parkingType === ''
+      ? null
+      : {
+          type: info.parkingType,
+          ...(info.parkingType === 'street_permit' && trimmedPermit !== '' ? { permitExpires: trimmedPermit } : {}),
+        };
+  return {
+    ...rest,
+    ...(parking ? { parking } : {}),
+    ...(trimmedNote ? { note: trimmedNote } : {}),
   };
 }
 

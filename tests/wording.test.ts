@@ -16,6 +16,7 @@ import { googleMapsProvider } from '../src/mapProviders';
 import type { HistoryEntry } from '../src/db';
 import { renderDialog } from '../src/views/dialogs';
 import { renderHistory } from '../src/views/historyView';
+import { renderNotice } from '../src/views/notice';
 import { renderPatientForm } from '../src/views/patientFormView';
 import { renderPatientList } from '../src/views/patientListView';
 import { renderRouteMap } from '../src/views/routeMapView';
@@ -132,7 +133,14 @@ describe('画面の文言(禁止語が出ない)', () => {
           ...base,
           dialog: {
             kind: 'similar',
-            input: { name: patients[0]!.name, address: patients[0]!.address, phone: '' },
+            input: {
+              name: patients[0]!.name,
+              address: patients[0]!.address,
+              phone: '',
+              parkingType: '' as const,
+              permitExpires: '',
+              note: '',
+            },
             matchIds: [patients[0]!.id],
             continueAfter: false,
           },
@@ -149,11 +157,32 @@ describe('画面の文言(禁止語が出ない)', () => {
     expectClean('編集', renderPatientForm(patient, null, null, handlers).outerHTML);
     expectClean(
       '下書き',
-      renderPatientForm(null, { name: 'a', address: 'b', phone: '' }, null, handlers).outerHTML,
+      renderPatientForm(
+        null,
+        { name: 'a', address: 'b', phone: '', parkingType: '', permitExpires: '', note: '' },
+        null,
+        handlers,
+      ).outerHTML,
     );
     expectClean(
       'メッセージ',
       renderPatientForm(null, null, { kind: 'error', text: 'x' }, handlers).outerHTML,
+    );
+    expectClean(
+      '駐車情報とメモを入れた状態',
+      renderPatientForm(
+        null,
+        {
+          name: 'a',
+          address: 'b',
+          phone: '',
+          parkingType: 'street_permit',
+          permitExpires: '2027-03-31',
+          note: '駐車場: 北側\n入口: 裏口',
+        },
+        null,
+        handlers,
+      ).outerHTML,
     );
   });
 
@@ -202,6 +231,11 @@ describe('画面の文言(禁止語が出ない)', () => {
       ['分割', selected(places(12)), new Map<number, string>()],
       ['開いた後', selected(places(12)), new Map<number, string>([[0, at]])],
       ['位置あり', selected([withLocation]), new Map<number, string>()],
+      [
+        '駐車情報とメモあり',
+        selected([{ ...places(1)[0]!, parking: { type: 'street_permit' as const, permitExpires: '2027-03-31' }, note: '駐車場: 北側\n入口: 裏口' }]),
+        new Map<number, string>(),
+      ],
     ] as const) {
       for (const [ctxLabel, context] of [
         ['事業所なし', noOfficeContext],
@@ -228,6 +262,17 @@ describe('画面の文言(禁止語が出ない)', () => {
     expectClean(
       '選択バー',
       renderSelectionBar(3, { onNext: noop, onDeleteSelected: noop, onShowSelected: noop })!.outerHTML,
+    );
+  });
+
+  it('許可証の期限のお知らせ', () => {
+    expectClean(
+      '許可証の期限のお知らせ',
+      renderNotice({
+        testid: 'permit-notice',
+        text: '許可証の期限が近い訪問先: 2件。期限を確かめてください。',
+        actions: [{ label: '閉じる', testid: 'notice-permit-dismiss', onClick: noop }],
+      }).outerHTML,
     );
   });
 

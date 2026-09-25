@@ -1,17 +1,18 @@
 import { DEFAULT_MAP_PROVIDER } from '../mapProviders';
-import type { Message, Patient } from '../types';
+import type { Message, ParkingType, Patient, PatientFormDraft } from '../types';
+import { NOTE_HEADINGS, PARKING_OPTIONS } from '../visitInfo';
 import { renderMessage } from './common';
 
-export type PatientFormDraft = { name: string; address: string; phone: string };
+export type { PatientFormDraft } from '../types';
 
 export type PatientFormHandlers = {
-  onSave(name: string, address: string, phone: string): void;
-  onSaveAndContinue(name: string, address: string, phone: string): void;
-  onCancel(name: string, address: string, phone: string): void;
+  onSave(values: PatientFormDraft): void;
+  onSaveAndContinue(values: PatientFormDraft): void;
+  onCancel(values: PatientFormDraft): void;
 };
 
 /**
- * 訪問先の登録・編集フォーム。入力項目は名前・住所・電話番号(任意)。
+ * 訪問先の登録・編集フォーム。入力項目は名前・住所・電話番号(任意)・駐車情報・メモ。
  * 住所は地図へ渡すために欠かせないので、保存できるのは、名前と住所がそろっているときだけ(検証は呼び出し側)。
  *
  * `draft` は保存に失敗した直後の入力値(または複製元の値)。渡された場合は `patient` の値より
@@ -42,18 +43,57 @@ export function renderPatientForm(
   phoneInput.type = 'tel';
   phoneInput.inputMode = 'tel';
 
+  const parkingType = draft?.parkingType ?? patient?.parking?.type ?? '';
+  const permitExpires = draft?.permitExpires ?? patient?.parking?.permitExpires ?? '';
+  const note = draft?.note ?? patient?.note ?? '';
+
+  const parkingSelect = document.createElement('select');
+  parkingSelect.dataset.testid = 'parking-select';
+  parkingSelect.className = 'form-select';
+  for (const option of PARKING_OPTIONS) {
+    const optionElement = document.createElement('option');
+    optionElement.value = option.value;
+    optionElement.textContent = option.label;
+    parkingSelect.append(optionElement);
+  }
+  parkingSelect.value = parkingType;
+
+  const permitExpiresInput = document.createElement('input');
+  permitExpiresInput.type = 'date';
+  permitExpiresInput.dataset.testid = 'permit-expires-input';
+  permitExpiresInput.value = permitExpires;
+
+  const permitField = field('許可証の期限', permitExpiresInput, false);
+  permitField.hidden = parkingSelect.value !== 'street_permit';
+  parkingSelect.addEventListener('change', () => {
+    permitField.hidden = parkingSelect.value !== 'street_permit';
+  });
+
+  const noteInput = document.createElement('textarea');
+  noteInput.rows = 4;
+  noteInput.dataset.testid = 'note-input';
+  noteInput.placeholder = '例) 駐車場: 北側のコインパーキング';
+  noteInput.value = note;
+
   // 見出しの行: 左に「キャンセル」、中央に見出し、右に「保存」。
   const header = document.createElement('header');
   header.className = 'form-header';
+
+  const currentValues = (): PatientFormDraft => ({
+    name: nameInput.value,
+    address: addressInput.value,
+    phone: phoneInput.value,
+    parkingType: parkingSelect.value as ParkingType | '',
+    permitExpires: permitExpiresInput.value,
+    note: noteInput.value,
+  });
 
   const cancel = document.createElement('button');
   cancel.type = 'button';
   cancel.className = 'header-link cancel';
   cancel.dataset.testid = 'cancel-button';
   cancel.textContent = 'キャンセル';
-  cancel.addEventListener('click', () =>
-    handlers.onCancel(nameInput.value, addressInput.value, phoneInput.value),
-  );
+  cancel.addEventListener('click', () => handlers.onCancel(currentValues()));
 
   const title = document.createElement('h1');
   title.className = 'screen-title';
@@ -64,9 +104,7 @@ export function renderPatientForm(
   save.className = 'header-link save';
   save.dataset.testid = 'save-button';
   save.textContent = '保存';
-  save.addEventListener('click', () =>
-    handlers.onSave(nameInput.value, addressInput.value, phoneInput.value),
-  );
+  save.addEventListener('click', () => handlers.onSave(currentValues()));
 
   header.append(cancel, title, save);
   container.append(header);
@@ -82,20 +120,75 @@ export function renderPatientForm(
     renderMapCheck(addressInput),
   );
 
+  container.append(renderVisitInfoSection(parkingSelect, permitField, noteInput));
+
   if (patient === null) {
     const actions = document.createElement('div');
     actions.className = 'form-actions';
-    const save = button('form-save-button', '保存', 'primary', () =>
-      handlers.onSave(nameInput.value, addressInput.value, phoneInput.value),
-    );
+    const save = button('form-save-button', '保存', 'primary', () => handlers.onSave(currentValues()));
     const cont = button('save-continue-button', '保存して続けて登録', '', () =>
-      handlers.onSaveAndContinue(nameInput.value, addressInput.value, phoneInput.value),
+      handlers.onSaveAndContinue(currentValues()),
     );
     actions.append(save, cont);
     container.append(actions);
   }
 
   return container;
+}
+
+/** 「訪問のための情報」: 駐車の種類・(路上のときだけ)許可証の期限・メモ。 */
+function renderVisitInfoSection(
+  parkingSelect: HTMLSelectElement,
+  permitField: HTMLLabelElement,
+  noteInput: HTMLTextAreaElement,
+): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'visit-info';
+
+  const heading = document.createElement('h2');
+  heading.textContent = '訪問のための情報';
+  section.append(heading);
+
+  section.append(field('駐車', parkingSelect, false));
+  section.append(permitField);
+  section.append(renderNoteField(noteInput));
+
+  return section;
+}
+
+/** メモの入力欄。見出しボタン(駐車場・入口・インターホン・鍵・注意)を textarea の上に出す。 */
+function renderNoteField(noteInput: HTMLTextAreaElement): HTMLLabelElement {
+  const label = document.createElement('label');
+  label.className = 'field';
+
+  const caption = document.createElement('span');
+  caption.className = 'field-label';
+  caption.textContent = 'メモ';
+
+  const headings = document.createElement('div');
+  headings.className = 'note-headings';
+  for (const heading of NOTE_HEADINGS) {
+    const headingButton = document.createElement('button');
+    headingButton.type = 'button';
+    headingButton.className = 'note-heading';
+    headingButton.dataset.testid = `note-heading-${heading}`;
+    headingButton.textContent = heading;
+    headingButton.addEventListener('click', () => appendNoteHeading(noteInput, heading));
+    headings.append(headingButton);
+  }
+
+  label.append(caption, headings, noteInput);
+  return label;
+}
+
+/** メモの末尾に「見出し: 」を足す(空でなく改行で終わっていなければ改行を足す)。末尾へカーソルを移す。 */
+function appendNoteHeading(noteInput: HTMLTextAreaElement, heading: string): void {
+  const current = noteInput.value;
+  const needsNewline = current !== '' && !current.endsWith('\n');
+  noteInput.value = `${current}${needsNewline ? '\n' : ''}${heading}: `;
+  noteInput.focus();
+  const end = noteInput.value.length;
+  noteInput.setSelectionRange(end, end);
 }
 
 function button(testid: string, text: string, className: string, onClick: () => void): HTMLButtonElement {
@@ -124,7 +217,7 @@ function textInput(testid: string, value: string, placeholder: string, required:
 }
 
 /** ラベル(名前と、必須なら「必須」の表示)で入力欄を包む。 */
-function field(labelText: string, input: HTMLInputElement, required: boolean): HTMLLabelElement {
+function field(labelText: string, input: HTMLElement, required: boolean): HTMLLabelElement {
   const label = document.createElement('label');
   label.className = 'field';
 

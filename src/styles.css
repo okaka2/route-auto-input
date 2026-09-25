@@ -144,7 +144,9 @@ button.block {
 input[type='text'],
 input[type='search'],
 input[type='password'],
-input[type='tel'] {
+input[type='tel'],
+input[type='date'],
+textarea {
   width: 100%;
   min-height: var(--tap-min);
   padding: 0 0.75rem;
@@ -153,6 +155,14 @@ input[type='tel'] {
   background: var(--surface);
   color: var(--text);
   font-size: 1rem;
+}
+
+textarea {
+  min-height: 6rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  resize: vertical;
+  font-family: inherit;
 }
 
 /* キーボードで操作する人のために、フォーカスの枠は必ず出す。 */
@@ -708,9 +718,36 @@ button.select-all {
   min-height: var(--tap-min);
 }
 
-.route-stop-name {
+.route-stop-main {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.route-stop-name {
   overflow-wrap: anywhere;
+}
+
+.route-stop-info {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.parking-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  padding: 0 0.25rem;
+  border-radius: 0.25rem;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 0.875rem;
+  font-weight: 700;
 }
 
 .location-pin {
@@ -760,7 +797,8 @@ button.select-all {
   gap: 0.25rem;
 }
 
-.ends-field select {
+.ends-field select,
+.form-select {
   min-height: var(--tap-min);
   padding: 0 0.5rem;
   border: 1px solid var(--border-strong);
@@ -768,6 +806,10 @@ button.select-all {
   background: var(--surface);
   color: var(--text);
   font-size: 1rem;
+}
+
+.form-select {
+  width: 100%;
 }
 
 .stop-timeline {
@@ -1126,6 +1168,34 @@ input:focus-visible + .check {
   color: var(--primary);
   font-size: 0.875rem;
   font-weight: 600;
+}
+
+.visit-info {
+  margin-top: var(--gap);
+  padding-top: var(--gap);
+  border-top: 1px solid var(--border);
+}
+
+.visit-info h2 {
+  margin: 0 0 var(--gap);
+  font-size: 1.125rem;
+}
+
+.note-headings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.note-heading {
+  min-height: var(--tap-min);
+  padding: 0 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.875rem;
 }
 
 .notice {

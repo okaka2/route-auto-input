@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createPatient, updatePatientFields, withLocation } from '../src/patient';
+import { createPatient, updatePatientFields, withLocation, withVisitInfo } from '../src/patient';
 import type { GeoLocation } from '../src/types';
 
 describe('createPatient', () => {
@@ -65,6 +65,55 @@ describe('withLocation', () => {
     expect(updated.address).toBe('東京都');
     expect(updated.id).toBe(patient.id);
     expect(updated.createdAt).toBe(patient.createdAt);
+  });
+});
+
+describe('withVisitInfo', () => {
+  it('駐車の種類とメモを付けられる', () => {
+    const patient = createPatient('山田', '東京都');
+    const updated = withVisitInfo(patient, { parkingType: 'coin', permitExpires: '', note: '北側の月極' });
+    expect(updated.parking).toEqual({ type: 'coin' });
+    expect(updated.note).toBe('北側の月極');
+  });
+
+  it('parkingType が空なら parking を外す', () => {
+    const patient = { ...createPatient('山田', '東京都'), parking: { type: 'coin' as const } };
+    const updated = withVisitInfo(patient, { parkingType: '', permitExpires: '', note: '' });
+    expect('parking' in updated).toBe(false);
+  });
+
+  it('street_permit 以外は permitExpires を持たない', () => {
+    const patient = createPatient('山田', '東京都');
+    const updated = withVisitInfo(patient, { parkingType: 'coin', permitExpires: '2027-01-01', note: '' });
+    expect(updated.parking).toEqual({ type: 'coin' });
+    expect('permitExpires' in (updated.parking ?? {})).toBe(false);
+  });
+
+  it('street_permit は permitExpires を持つ(trimする)', () => {
+    const patient = createPatient('山田', '東京都');
+    const updated = withVisitInfo(patient, { parkingType: 'street_permit', permitExpires: ' 2027-01-01 ', note: '' });
+    expect(updated.parking).toEqual({ type: 'street_permit', permitExpires: '2027-01-01' });
+  });
+
+  it('note は trim して、空白だけなら外す', () => {
+    const patient = { ...createPatient('山田', '東京都'), note: '前のメモ' };
+    const updated = withVisitInfo(patient, { parkingType: '', permitExpires: '', note: '  ' });
+    expect('note' in updated).toBe(false);
+  });
+
+  it('note を trim して持つ', () => {
+    const patient = createPatient('山田', '東京都');
+    const updated = withVisitInfo(patient, { parkingType: '', permitExpires: '', note: '  駐車場: 北側  ' });
+    expect(updated.note).toBe('駐車場: 北側');
+  });
+
+  it('他の項目(電話番号・更新日時など)は変わらない', () => {
+    const now = new Date('2026-09-01T00:00:00.000Z');
+    const patient = createPatient('山田', '東京都', now, '090-1234-5678');
+    const updated = withVisitInfo(patient, { parkingType: 'onsite', permitExpires: '', note: '' });
+    expect(updated.phone).toBe('090-1234-5678');
+    expect(updated.updatedAt).toBe(now.toISOString());
+    expect(updated.id).toBe(patient.id);
   });
 });
 

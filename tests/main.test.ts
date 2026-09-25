@@ -1260,6 +1260,56 @@ describe('保存して続けて登録・同じ人の知らせ', () => {
   });
 });
 
+describe('駐車情報とメモ', () => {
+  it('駐車「コインパーキング」とメモを入れて保存すると、地図のカードに出る', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    dismissInstallNotice();
+    el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+    el<HTMLInputElement>('[data-testid="name-input"]')!.value = '山田 太郎';
+    el<HTMLInputElement>('[data-testid="address-input"]')!.value = '東京都千代田区1-1';
+    const parkingSelect = el<HTMLSelectElement>('[data-testid="parking-select"]')!;
+    parkingSelect.value = 'coin';
+    parkingSelect.dispatchEvent(new Event('change'));
+    el<HTMLTextAreaElement>('[data-testid="note-input"]')!.value = '駐車場: 北側のコインパーキング';
+    el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLInputElement>('input[data-id]')!.click();
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    const historyRecorded = await armHistoryRecordWait();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await historyRecorded();
+
+    await waitFor(() => expect(el('[data-testid="route-stop-info"]')).not.toBeNull());
+    const badge = el('[data-testid="parking-badge"]')!;
+    expect(badge.textContent).toBe('P');
+    expect(el('[data-testid="route-stop-info"]')?.textContent).toContain('コインP');
+    expect(el('[data-testid="route-stop-info"]')?.textContent).toContain('駐車場: 北側のコインパーキング');
+  });
+
+  it('許可証の期限が近い訪問先があると、お知らせが出て「閉じる」で消える', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const soon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const patient = {
+      ...createPatient('山田 太郎', '東京都千代田区1-1'),
+      parking: { type: 'street_permit' as const, permitExpires: soon },
+    };
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    await waitFor(() => expect(el('[data-testid="permit-notice"]')).not.toBeNull());
+    expect(el('[data-testid="permit-notice"]')?.textContent).toContain('許可証の期限が近い訪問先: 1件');
+    el<HTMLButtonElement>('[data-testid="notice-permit-dismiss"]')!.click();
+    expect(el('[data-testid="permit-notice"]')).toBeNull();
+  });
+});
+
 describe('出発・帰着の選択', () => {
   it('事業所から出発を選ぶと、地図のURLの origin が事業所の住所になる', async () => {
     const { savePatient, setMeta, closeDbForTest } = await import('../src/db');

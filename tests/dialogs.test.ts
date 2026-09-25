@@ -267,7 +267,7 @@ describe('renderDialog: 同じ人の知らせ', () => {
       ...createInitialState([existing]),
       dialog: {
         kind: 'similar' as const,
-        input: { name: '山田太郎', address: '大阪府', phone: '' },
+        input: { name: '山田太郎', address: '大阪府', phone: '', parkingType: '' as const, permitExpires: '', note: '' },
         matchIds: [existing.id],
         continueAfter: false,
       },

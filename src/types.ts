@@ -22,6 +22,16 @@ export type Patient = {
   note?: string;
 };
 
+/** 登録・編集フォームの入力値。 */
+export type PatientFormDraft = {
+  name: string;
+  address: string;
+  phone: string;
+  parkingType: ParkingType | '';
+  permitExpires: string;
+  note: string;
+};
+
 export type Screen =
   | { name: 'list' }
   | { name: 'form'; patientId: string | null }
@@ -58,7 +68,7 @@ export type Dialog =
   | { kind: 'stopMenu'; id: string }
   | {
       kind: 'similar';
-      input: { name: string; address: string; phone: string };
+      input: PatientFormDraft;
       matchIds: string[];
       continueAfter: boolean;
     }

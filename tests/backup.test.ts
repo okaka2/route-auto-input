@@ -71,6 +71,78 @@ describe('parseBackup', () => {
     expect(parseBackup(serializeBackup(patients))).toEqual(patients);
   });
 
+  it('駐車情報とメモも、あれば往復して残る', () => {
+    const patients = [
+      { ...createPatient('山田 太郎', '東京都千代田区1-1'), parking: { type: 'coin' as const }, note: '北側の月極' },
+      {
+        ...createPatient('鈴木 花子', '大阪市北区2-2'),
+        parking: { type: 'street_permit' as const, permitExpires: '2027-03-31' },
+      },
+    ];
+    expect(parseBackup(serializeBackup(patients))).toEqual(patients);
+  });
+
+  it('parking.type が選択肢にない/壊れていれば parking を無視する', () => {
+    const text = JSON.stringify({
+      version: BACKUP_VERSION,
+      exportedAt: '',
+      patients: [
+        {
+          id: 'a',
+          name: '山田太郎',
+          address: '東京都千代田区1-1',
+          createdAt: 't1',
+          updatedAt: 't2',
+          parking: { type: 'その他' },
+        },
+        {
+          id: 'b',
+          name: '鈴木花子',
+          address: '大阪市北区2-2',
+          createdAt: 't1',
+          updatedAt: 't2',
+          parking: 'coin',
+        },
+      ],
+    });
+    const result = parseBackup(text);
+    expect('parking' in result[0]!).toBe(false);
+    expect('parking' in result[1]!).toBe(false);
+  });
+
+  it('permitExpires が YYYY-MM-DD でなければ無視する(parking自体は残す)', () => {
+    const text = JSON.stringify({
+      version: BACKUP_VERSION,
+      exportedAt: '',
+      patients: [
+        {
+          id: 'a',
+          name: '山田太郎',
+          address: '東京都千代田区1-1',
+          createdAt: 't1',
+          updatedAt: 't2',
+          parking: { type: 'street_permit', permitExpires: '2027/03/31' },
+        },
+      ],
+    });
+    const result = parseBackup(text);
+    expect(result[0]!.parking).toEqual({ type: 'street_permit' });
+  });
+
+  it('note が空文字や不正な型なら持たない', () => {
+    const text = JSON.stringify({
+      version: BACKUP_VERSION,
+      exportedAt: '',
+      patients: [
+        { id: 'a', name: '山田太郎', address: '東京都千代田区1-1', createdAt: 't1', updatedAt: 't2', note: '' },
+        { id: 'b', name: '鈴木花子', address: '大阪市北区2-2', createdAt: 't1', updatedAt: 't2', note: 123 },
+      ],
+    });
+    const result = parseBackup(text);
+    expect('note' in result[0]!).toBe(false);
+    expect('note' in result[1]!).toBe(false);
+  });
+
   it('phone が無い古いデータも読み込める', () => {
     const text = JSON.stringify({
       version: BACKUP_VERSION,

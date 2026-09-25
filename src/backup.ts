@@ -1,4 +1,10 @@
-import type { Patient } from './types';
+import type { Parking, ParkingType, Patient } from './types';
+import { PARKING_OPTIONS } from './visitInfo';
+
+const PARKING_TYPES: ParkingType[] = PARKING_OPTIONS.map((option) => option.value).filter(
+  (value): value is ParkingType => value !== '',
+);
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const BACKUP_VERSION = 1;
 
@@ -55,6 +61,7 @@ function toPatient(item: unknown, index: number): Patient {
     }
   }
 
+  const parking = toParking(record.parking);
   return {
     id: record.id as string,
     name: record.name as string,
@@ -62,5 +69,24 @@ function toPatient(item: unknown, index: number): Patient {
     createdAt: record.createdAt as string,
     updatedAt: record.updatedAt as string,
     ...(typeof record.phone === 'string' && record.phone !== '' ? { phone: record.phone } : {}),
+    ...(parking ? { parking } : {}),
+    ...(typeof record.note === 'string' && record.note !== '' ? { note: record.note } : {}),
   };
+}
+
+/** 壊れた・分からない値は無視して undefined にする。 */
+function toParking(value: unknown): Parking | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const type = record.type;
+  if (typeof type !== 'string' || !PARKING_TYPES.includes(type as ParkingType)) {
+    return undefined;
+  }
+  const permitExpires = record.permitExpires;
+  if (typeof permitExpires === 'string' && DATE_PATTERN.test(permitExpires)) {
+    return { type: type as ParkingType, permitExpires };
+  }
+  return { type: type as ParkingType };
 }

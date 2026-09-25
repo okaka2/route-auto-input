@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPatient } from '../src/patient';
+import type { PatientFormDraft } from '../src/types';
 import { renderPatientForm, type PatientFormHandlers } from '../src/views/patientFormView';
 
 const handlers = (): PatientFormHandlers => ({
@@ -13,6 +14,12 @@ const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: st
 const nameInput = (element: HTMLElement) => q<HTMLInputElement>(element, 'name-input');
 const addressInput = (element: HTMLElement) => q<HTMLInputElement>(element, 'address-input');
 const phoneInput = (element: HTMLElement) => q<HTMLInputElement>(element, 'phone-input');
+const parkingSelect = (element: HTMLElement) => q<HTMLSelectElement>(element, 'parking-select');
+const permitExpiresInput = (element: HTMLElement) => q<HTMLInputElement>(element, 'permit-expires-input');
+const noteInput = (element: HTMLElement) => q<HTMLTextAreaElement>(element, 'note-input');
+const permitField = (element: HTMLElement) => permitExpiresInput(element).closest('label')! as HTMLLabelElement;
+
+const emptyDraft: PatientFormDraft = { name: '', address: '', phone: '', parkingType: '', permitExpires: '', note: '' };
 
 describe('renderPatientForm: 見出しと入力欄', () => {
   it('新規登録では、見出しが「訪問先を登録」で、入力欄が空になる', () => {
@@ -30,14 +37,14 @@ describe('renderPatientForm: 見出しと入力欄', () => {
     expect(addressInput(element).value).toBe('東京都千代田区1-1');
   });
 
-  it('入力欄は、名前・住所・電話番号の3つ', () => {
+  it('input要素は、名前・住所・電話番号・許可証の期限の4つ', () => {
     const element = renderPatientForm(null, null, null, handlers());
     const inputs = [...element.querySelectorAll('input')];
-    expect(inputs).toHaveLength(3);
     expect(inputs.map((input) => input.dataset.testid)).toEqual([
       'name-input',
       'address-input',
       'phone-input',
+      'permit-expires-input',
     ]);
   });
 
@@ -81,14 +88,16 @@ describe('renderPatientForm: 保存とキャンセル', () => {
     expect(q(element, 'save-button').textContent).toBe('保存');
   });
 
-  it('保存ボタンで、入力値が onSave に渡る', () => {
+  it('保存ボタンで、入力値のまとまりが onSave に渡る', () => {
     const spies = handlers();
     const element = renderPatientForm(null, null, null, spies);
     nameInput(element).value = '鈴木 花子';
     addressInput(element).value = '大阪市北区2-2';
     phoneInput(element).value = '03-1234-5678';
     q<HTMLButtonElement>(element, 'save-button').click();
-    expect(spies.onSave).toHaveBeenCalledWith('鈴木 花子', '大阪市北区2-2', '03-1234-5678');
+    expect(spies.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ name: '鈴木 花子', address: '大阪市北区2-2', phone: '03-1234-5678' }),
+    );
   });
 
   it('キャンセルボタンで onCancel が呼ばれる', () => {
@@ -104,7 +113,9 @@ describe('renderPatientForm: 保存とキャンセル', () => {
     nameInput(element).value = '山田';
     addressInput(element).value = '東京都';
     q<HTMLButtonElement>(element, 'save-continue-button').click();
-    expect(spies.onSaveAndContinue).toHaveBeenCalledWith('山田', '東京都', '');
+    expect(spies.onSaveAndContinue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: '山田', address: '東京都', phone: '' }),
+    );
     expect(
       renderPatientForm(createPatient('a', 'b'), null, null, handlers()).querySelector(
         '[data-testid="save-continue-button"]',
@@ -117,7 +128,9 @@ describe('renderPatientForm: 保存とキャンセル', () => {
     const element = renderPatientForm(null, null, null, spies);
     nameInput(element).value = '途中';
     q<HTMLButtonElement>(element, 'cancel-button').click();
-    expect(spies.onCancel).toHaveBeenCalledWith('途中', '', '');
+    expect(spies.onCancel).toHaveBeenCalledWith(
+      expect.objectContaining({ name: '途中', address: '', phone: '' }),
+    );
   });
 });
 
@@ -160,7 +173,7 @@ describe('renderPatientForm: メッセージと下書き', () => {
   });
 
   it('draft があれば、新規登録でも patient より優先して表示する(入力内容を残す)', () => {
-    const draft = { name: '入力途中の名前', address: '入力途中の住所', phone: '090-0000-0000' };
+    const draft: PatientFormDraft = { ...emptyDraft, name: '入力途中の名前', address: '入力途中の住所', phone: '090-0000-0000' };
     const element = renderPatientForm(null, draft, null, handlers());
     expect(nameInput(element).value).toBe('入力途中の名前');
     expect(addressInput(element).value).toBe('入力途中の住所');
@@ -169,11 +182,117 @@ describe('renderPatientForm: メッセージと下書き', () => {
 
   it('draft があれば、編集中の既存値より優先して表示する', () => {
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
-    const draft = { name: '編集途中の名前', address: '', phone: '' };
+    const draft: PatientFormDraft = { ...emptyDraft, name: '編集途中の名前' };
     const element = renderPatientForm(patient, draft, null, handlers());
     expect(nameInput(element).value).toBe('編集途中の名前');
     expect(addressInput(element).value).toBe('');
     // 見出しは draft ではなく patient の有無で決まる
     expect(element.querySelector('h1')?.textContent).toBe('訪問先を編集');
+  });
+});
+
+describe('renderPatientForm: 訪問のための情報(駐車・メモ)', () => {
+  it('見出し「訪問のための情報」を出す', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    expect(element.querySelector('.visit-info h2')?.textContent).toBe('訪問のための情報');
+  });
+
+  it('駐車の選択肢に、未設定・敷地内OK・コインパーキング・路上(許可証あり)・管理会社に許可済み・不明を持つ', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    const options = [...parkingSelect(element).options].map((option) => option.textContent);
+    expect(options).toEqual(['未設定', '敷地内OK', 'コインパーキング', '路上(許可証あり)', '管理会社に許可済み', '不明']);
+  });
+
+  it('既定は未設定で、許可証の期限は隠れている', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    expect(parkingSelect(element).value).toBe('');
+    expect(permitField(element).hidden).toBe(true);
+  });
+
+  it('駐車を「路上(許可証あり)」にすると、許可証の期限の欄が現れる', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    parkingSelect(element).value = 'street_permit';
+    parkingSelect(element).dispatchEvent(new Event('change'));
+    expect(permitField(element).hidden).toBe(false);
+    expect(permitExpiresInput(element).type).toBe('date');
+  });
+
+  it('別の駐車の種類に変えても、許可証の期限に入力した値は保たれる(隠れるだけ)', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    parkingSelect(element).value = 'street_permit';
+    parkingSelect(element).dispatchEvent(new Event('change'));
+    permitExpiresInput(element).value = '2027-03-31';
+    parkingSelect(element).value = 'coin';
+    parkingSelect(element).dispatchEvent(new Event('change'));
+    expect(permitField(element).hidden).toBe(true);
+    expect(permitExpiresInput(element).value).toBe('2027-03-31');
+  });
+
+  it('編集中の患者に路上(許可証あり)が登録されていれば、最初から期限の欄が見える', () => {
+    const patient = { ...createPatient('山田', '東京都'), parking: { type: 'street_permit' as const, permitExpires: '2027-03-31' } };
+    const element = renderPatientForm(patient, null, null, handlers());
+    expect(permitField(element).hidden).toBe(false);
+    expect(permitExpiresInput(element).value).toBe('2027-03-31');
+  });
+
+  it('メモは textarea で、プレースホルダーを持つ', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    expect(noteInput(element).rows).toBe(4);
+    expect(noteInput(element).placeholder).toContain('駐車場');
+  });
+
+  it('メモの上に見出しボタン(駐車場・入口・インターホン・鍵・注意)がある', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    const headings = ['駐車場', '入口', 'インターホン', '鍵', '注意'];
+    for (const heading of headings) {
+      expect(q<HTMLButtonElement>(element, `note-heading-${heading}`).textContent).toBe(heading);
+    }
+  });
+
+  it('見出しボタンを押すと、メモの末尾に「見出し: 」が足され、textareaにフォーカスが移る', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    document.body.append(element);
+    q<HTMLButtonElement>(element, 'note-heading-駐車場').click();
+    expect(noteInput(element).value).toBe('駐車場: ');
+    expect(document.activeElement).toBe(noteInput(element));
+    element.remove();
+  });
+
+  it('すでに入力がある場合、改行を足してから見出しを加える(末尾がすでに改行ならそのまま)', () => {
+    const draft: PatientFormDraft = { ...emptyDraft, note: '入口: 正面' };
+    const element = renderPatientForm(null, draft, null, handlers());
+    q<HTMLButtonElement>(element, 'note-heading-駐車場').click();
+    expect(noteInput(element).value).toBe('入口: 正面\n駐車場: ');
+
+    const draft2: PatientFormDraft = { ...emptyDraft, note: '入口: 正面\n' };
+    const element2 = renderPatientForm(null, draft2, null, handlers());
+    q<HTMLButtonElement>(element2, 'note-heading-駐車場').click();
+    expect(noteInput(element2).value).toBe('入口: 正面\n駐車場: ');
+  });
+
+  it('駐車の選択とメモも onSave に渡る', () => {
+    const spies = handlers();
+    const element = renderPatientForm(null, null, null, spies);
+    nameInput(element).value = '山田';
+    addressInput(element).value = '東京都';
+    parkingSelect(element).value = 'street_permit';
+    parkingSelect(element).dispatchEvent(new Event('change'));
+    permitExpiresInput(element).value = '2027-03-31';
+    noteInput(element).value = '駐車場: 北側';
+    q<HTMLButtonElement>(element, 'save-button').click();
+    expect(spies.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parkingType: 'street_permit',
+        permitExpires: '2027-03-31',
+        note: '駐車場: 北側',
+      }),
+    );
+  });
+
+  it('編集中の既存の駐車情報・メモが入力欄に入る', () => {
+    const patient = { ...createPatient('山田', '東京都'), parking: { type: 'coin' as const }, note: '北側の月極' };
+    const element = renderPatientForm(patient, null, null, handlers());
+    expect(parkingSelect(element).value).toBe('coin');
+    expect(noteInput(element).value).toBe('北側の月極');
   });
 });

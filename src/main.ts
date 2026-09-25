@@ -25,7 +25,7 @@ import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
 import { checkPassword, isUnlocked, renderPasswordGate, unlock } from './passwordGate';
 import { findSimilar } from './normalize';
-import { createPatient, updatePatientFields, withLocation } from './patient';
+import { createPatient, updatePatientFields, withLocation, withVisitInfo } from './patient';
 import { isStandaloneDisplay } from './platform';
 import { isStoragePersisted, requestPersistentStorage } from './protection';
 import { daysBetween, shouldRemindBackup } from './backupReminder';
@@ -56,11 +56,12 @@ import {
   withPatients,
   withScreen,
 } from './state';
-import type { AppState, GeoLocation, Message, Patient, SortOrder } from './types';
+import type { AppState, GeoLocation, Message, Patient, PatientFormDraft, SortOrder } from './types';
+import { permitsExpiringSoon } from './visitInfo';
 import { validatePatientInput, validateSelection } from './validation';
 import { renderDialog } from './views/dialogs';
 import { renderHistory } from './views/historyView';
-import { renderPatientForm, type PatientFormDraft } from './views/patientFormView';
+import { renderPatientForm } from './views/patientFormView';
 import { renderPatientList } from './views/patientListView';
 import { renderRouteOrder } from './views/routeOrderView';
 import { renderRouteMap } from './views/routeMapView';
@@ -179,6 +180,9 @@ let settingsLoaded = false;
 const BACKUP_LATER_KEY = 'route-auto-input:backup-later';
 // ホーム画面への追加の案内で「閉じる」を押した日時を覚えておくキー。
 const INSTALL_DISMISS_KEY = 'route-auto-input:install-dismissed';
+// 許可証の期限のお知らせで「閉じる」を押した日時を覚えておくキー。
+const PERMIT_DISMISS_KEY = 'route-auto-input:permit-dismissed';
+const PERMIT_DISMISS_DAYS = 7;
 // データ保護のお願い(Storage API)は、一度成功したら繰り返し頼まない。
 let persistRequested = false;
 
@@ -195,6 +199,14 @@ function writeLocal(key: string, value: string): void {
   } catch {
     // 使えない環境では諦める。
   }
+}
+
+/** 「閉じる」を押してから PERMIT_DISMISS_DAYS 日以内かどうか。 */
+function isRecentlyDismissed(dismissedAt: string | null, now: Date): boolean {
+  if (dismissedAt === null) {
+    return false;
+  }
+  return now.getTime() - new Date(dismissedAt).getTime() < PERMIT_DISMISS_DAYS * 86_400_000;
 }
 
 /** 一覧の上に出すお知らせ。Task 4 でホーム画面の案内を先頭に足す。 */
@@ -235,6 +247,23 @@ function currentNotice(): Notice | null {
           testid: 'notice-install-dismiss',
           onClick: () => {
             writeLocal(INSTALL_DISMISS_KEY, new Date().toISOString());
+            render();
+          },
+        },
+      ],
+    };
+  }
+  const expiringCount = permitsExpiringSoon(state.patients, new Date());
+  if (expiringCount > 0 && !isRecentlyDismissed(readLocal(PERMIT_DISMISS_KEY), new Date())) {
+    return {
+      testid: 'permit-notice',
+      text: `許可証の期限が近い訪問先: ${expiringCount}件。期限を確かめてください。`,
+      actions: [
+        {
+          label: '閉じる',
+          testid: 'notice-permit-dismiss',
+          onClick: () => {
+            writeLocal(PERMIT_DISMISS_KEY, new Date().toISOString());
             render();
           },
         },
@@ -518,7 +547,7 @@ function currentEditingPatient(): Patient | null {
   return state.patients.find((patient) => patient.id === id) ?? null;
 }
 
-type FormInput = { name: string; address: string; phone: string };
+type FormInput = PatientFormDraft;
 
 /** 保存の入口。検証 → 同じ人の確認 → 保存。 */
 async function handleSaveRequest(input: FormInput, continueAfter: boolean): Promise<void> {
@@ -548,8 +577,8 @@ async function commitSave(input: FormInput, continueAfter: boolean): Promise<voi
     const existing = currentEditingPatient();
     const patient =
       existing === null
-        ? createPatient(input.name, input.address, new Date(), input.phone)
-        : updatePatientFields(existing, input.name, input.address, new Date(), input.phone);
+        ? withVisitInfo(createPatient(input.name, input.address, new Date(), input.phone), input)
+        : withVisitInfo(updatePatientFields(existing, input.name, input.address, new Date(), input.phone), input);
     if (existing !== null && state.selectedIds.includes(existing.id)) {
       // 選択中(=ルートに入っている)訪問先の編集。住所が変わったかもしれないので、
       // そのルートについて開いた印は古くなる前に消す。
@@ -559,7 +588,7 @@ async function commitSave(input: FormInput, continueAfter: boolean): Promise<voi
     requestProtectionOnce();
     if (continueAfter && existing === null) {
       continueCount += 1;
-      formDraft = { name: '', address: '', phone: '' };
+      formDraft = { name: '', address: '', phone: '', parkingType: '', permitExpires: '', note: '' };
       setState({
         ...withScreen(state, { name: 'form', patientId: null }),
         message: { kind: 'info', text: `${patient.name}様を登録しました(続けて${continueCount}人目)` },
@@ -585,8 +614,18 @@ function handleFormCancel(input: FormInput): void {
   const original = currentEditingPatient();
   const dirty =
     original === null
-      ? input.name.trim() !== '' || input.address.trim() !== '' || input.phone.trim() !== ''
-      : input.name !== original.name || input.address !== original.address || input.phone !== (original.phone ?? '');
+      ? input.name.trim() !== '' ||
+        input.address.trim() !== '' ||
+        input.phone.trim() !== '' ||
+        input.parkingType !== '' ||
+        input.permitExpires.trim() !== '' ||
+        input.note.trim() !== ''
+      : input.name !== original.name ||
+        input.address !== original.address ||
+        input.phone !== (original.phone ?? '') ||
+        input.parkingType !== (original.parking?.type ?? '') ||
+        input.permitExpires !== (original.parking?.permitExpires ?? '') ||
+        input.note !== (original.note ?? '');
   if (dirty && !window.confirm('入力中の内容を捨てますか?')) {
     return;
   }
@@ -878,7 +917,14 @@ function handleDuplicate(id: string): void {
     return;
   }
   dialogReturnId = null;
-  formDraft = { name: source.name, address: source.address, phone: source.phone ?? '' };
+  formDraft = {
+    name: source.name,
+    address: source.address,
+    phone: source.phone ?? '',
+    parkingType: source.parking?.type ?? '',
+    permitExpires: source.parking?.permitExpires ?? '',
+    note: source.note ?? '',
+  };
   setState(withScreen(state, { name: 'form', patientId: null }));
 }
 
@@ -1083,14 +1129,14 @@ function renderScreen(): HTMLElement {
       }, currentNotice(), lastWeekShortcut());
     case 'form':
       return renderPatientForm(currentEditingPatient(), formDraft, state.message, {
-        onSave: (name, address, phone) => {
-          void handleSaveRequest({ name, address, phone }, false);
+        onSave: (values) => {
+          void handleSaveRequest(values, false);
         },
-        onSaveAndContinue: (name, address, phone) => {
-          void handleSaveRequest({ name, address, phone }, true);
+        onSaveAndContinue: (values) => {
+          void handleSaveRequest(values, true);
         },
-        onCancel: (name, address, phone) => {
-          handleFormCancel({ name, address, phone });
+        onCancel: (values) => {
+          handleFormCancel(values);
         },
       });
     case 'order':

@@ -336,6 +336,58 @@ describe('renderRouteMap: 訪問済み', () => {
   });
 });
 
+describe('renderRouteMap: 駐車情報とメモ', () => {
+  it('駐車情報があれば route-stop-info にバッジを出す', () => {
+    const withParking = { ...createPatient('場所1', '東京都1-1'), parking: { type: 'coin' as const } };
+    const state = { ...createInitialState([withParking]), selectedIds: [withParking.id] };
+    const element = render(state);
+    const info = element.querySelector<HTMLElement>('[data-testid="route-stop-info"]')!;
+    expect(info).not.toBeNull();
+    const badge = info.querySelector<HTMLElement>('[data-testid="parking-badge"]')!;
+    expect(badge.textContent).toBe('P');
+    expect(badge.classList.contains('parking-badge')).toBe(true);
+    expect(info.textContent).toBe('P コインP');
+  });
+
+  it('メモがあれば要約を「 / 」に続けて出す', () => {
+    const withNote = {
+      ...createPatient('場所1', '東京都1-1'),
+      parking: { type: 'coin' as const },
+      note: '駐車場: 北側',
+    };
+    const state = { ...createInitialState([withNote]), selectedIds: [withNote.id] };
+    const element = render(state);
+    const info = element.querySelector('[data-testid="route-stop-info"]')!;
+    expect(info.textContent).toBe('P コインP / 駐車場: 北側');
+  });
+
+  it('メモだけあれば、バッジなしで要約だけ出す', () => {
+    const withNote = { ...createPatient('場所1', '東京都1-1'), note: '駐車場: 北側' };
+    const state = { ...createInitialState([withNote]), selectedIds: [withNote.id] };
+    const element = render(state);
+    const info = element.querySelector('[data-testid="route-stop-info"]')!;
+    expect(info.querySelector('[data-testid="parking-badge"]')).toBeNull();
+    expect(info.textContent).toBe('駐車場: 北側');
+  });
+
+  it('メモが長ければ40文字で切って「…」を付ける', () => {
+    const longNote = 'あ'.repeat(50);
+    const withNote = { ...createPatient('場所1', '東京都1-1'), note: longNote };
+    const state = { ...createInitialState([withNote]), selectedIds: [withNote.id] };
+    const element = render(state);
+    const info = element.querySelector('[data-testid="route-stop-info"]')!;
+    expect(info.textContent).toBe(`${'あ'.repeat(40)}…`);
+  });
+
+  it('駐車情報が敷地内OK・不明・未登録なら、駐車のバッジは出ない(不明はバッジ自体が無い)', () => {
+    const unknown = { ...createPatient('場所1', '東京都1-1'), parking: { type: 'unknown' as const } };
+    const none = createPatient('場所2', '東京都2-1');
+    const state = { ...createInitialState([unknown, none]), selectedIds: [unknown.id, none.id] };
+    const element = render(state);
+    expect(element.querySelectorAll('[data-testid="route-stop-info"]')).toHaveLength(0);
+  });
+});
+
 describe('renderRouteMap: 出発・帰着', () => {
   it('出発・帰着の指定を、1本目と最後のカードに出す', () => {
     const state = selectedState(12);

@@ -4,7 +4,10 @@ import type { MapProvider } from '../mapProviders';
 import { buildRoutePlans, stopsPerRoute, type RoutePlan, type RouteContext } from '../routePlan';
 import { selectedPatients } from '../state';
 import type { AppState, Patient } from '../types';
+import { noteSummary, parkingBadge } from '../visitInfo';
 import { renderMessage, renderScreenHeader } from './common';
+
+const NOTE_SUMMARY_MAX_LENGTH = 40;
 
 export type RouteMapHandlers = {
   onOpenRoute(routeIndex: number): void;
@@ -231,10 +234,17 @@ function renderStops(route: readonly Patient[], visited: ReadonlyMap<string, str
   list.dataset.testid = 'route-stops';
   for (const patient of route) {
     const item = document.createElement('li');
+    const main = document.createElement('div');
+    main.className = 'route-stop-main';
     const name = document.createElement('span');
     name.className = 'route-stop-name';
     name.textContent = patient.name;
-    item.append(name);
+    main.append(name);
+    const info = renderStopInfo(patient);
+    if (info) {
+      main.append(info);
+    }
+    item.append(main);
     if (patient.phone) {
       const phone = document.createElement('a');
       phone.className = 'phone-link';
@@ -269,4 +279,29 @@ function renderStops(route: readonly Patient[], visited: ReadonlyMap<string, str
     list.append(item);
   }
   return list;
+}
+
+/** 名前の下に出す、駐車のバッジとメモの要約。どちらも無ければ null。 */
+function renderStopInfo(patient: Patient): HTMLElement | null {
+  const badge = parkingBadge(patient.parking);
+  const summary = noteSummary(patient.note);
+  if (!badge && summary === '') {
+    return null;
+  }
+  const info = document.createElement('p');
+  info.className = 'route-stop-info';
+  info.dataset.testid = 'route-stop-info';
+  if (badge) {
+    const badgeElement = document.createElement('span');
+    badgeElement.className = 'parking-badge';
+    badgeElement.dataset.testid = 'parking-badge';
+    badgeElement.textContent = badge.icon;
+    info.append(badgeElement, document.createTextNode(` ${badge.text}`));
+  }
+  if (summary !== '') {
+    const truncated =
+      summary.length > NOTE_SUMMARY_MAX_LENGTH ? `${summary.slice(0, NOTE_SUMMARY_MAX_LENGTH)}…` : summary;
+    info.append(document.createTextNode(badge ? ` / ${truncated}` : truncated));
+  }
+  return info;
 }
