@@ -1460,3 +1460,89 @@ describe('訪問済みと時刻・履歴のコピー・古い履歴の削除', (
     await waitFor(async () => expect(await db.listHistory()).toEqual([]));
   });
 });
+
+describe('位置の登録', () => {
+  function fakeGeolocation() {
+    let success: PositionCallback = () => {};
+    const geolocation = {
+      watchPosition: vi.fn((s: PositionCallback) => {
+        success = s;
+        return 1;
+      }),
+      clearWatch: vi.fn(),
+      getCurrentPosition: vi.fn(),
+    } as unknown as Geolocation;
+    const emit = (lat: number, lng: number, accuracy: number) =>
+      success({ coords: { latitude: lat, longitude: lng, accuracy } } as GeolocationPosition);
+    return { geolocation, emit };
+  }
+
+  afterEach(() => {
+    delete (navigator as { geolocation?: Geolocation }).geolocation;
+  });
+
+  it('今いる場所で登録: 精度15mで自動的に測り終え、保存するとDBのsourceがgpsになる。元に戻すと消える', async () => {
+    const { geolocation, emit } = fakeGeolocation();
+    Object.defineProperty(navigator, 'geolocation', { value: geolocation, configurable: true });
+
+    const { savePatient, listPatients } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    await waitFor(() => expect(el('[data-testid="dialog-location"]')).not.toBeNull());
+    expect(el('[data-testid="dialog-location"]')?.textContent).toBe('位置を登録');
+    el<HTMLButtonElement>('[data-testid="dialog-location"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-measure-button"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="location-measure-button"]')!.click();
+    await waitFor(() => expect(geolocation.watchPosition).toHaveBeenCalledTimes(1));
+
+    emit(35.1, 139.1, 15);
+    await waitFor(() => expect(el<HTMLButtonElement>('[data-testid="location-save-button"]')?.disabled).toBe(false));
+    expect(el('body')?.textContent).toContain('誤差 ±15m');
+
+    el<HTMLButtonElement>('[data-testid="location-save-button"]')!.click();
+    await waitFor(async () => {
+      const saved = (await listPatients()).find((p) => p.id === patient.id);
+      expect(saved?.location).toEqual({ lat: 35.1, lng: 139.1, accuracy: 15, recordedAt: expect.any(String), source: 'gps' });
+    });
+    await waitFor(() => expect(el('[data-testid="location-undo-button"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="location-undo-button"]')!.click();
+    await waitFor(async () => {
+      const reverted = (await listPatients()).find((p) => p.id === patient.id);
+      expect(reverted && 'location' in reverted).toBe(false);
+    });
+  });
+
+  it('貼り付けでも登録できる(source: paste)', async () => {
+    const { savePatient, listPatients } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('鈴木 花子', '大阪府大阪市1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-location"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-paste-input"]')).not.toBeNull());
+
+    const input = el<HTMLInputElement>('[data-testid="location-paste-input"]')!;
+    input.value = '35.1, 139.1';
+    input.dispatchEvent(new Event('input'));
+    el<HTMLButtonElement>('[data-testid="location-paste-save"]')!.click();
+
+    await waitFor(async () => {
+      const saved = (await listPatients()).find((p) => p.id === patient.id);
+      expect(saved?.location).toEqual({ lat: 35.1, lng: 139.1, accuracy: null, recordedAt: expect.any(String), source: 'paste' });
+    });
+  });
+});

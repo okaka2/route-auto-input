@@ -437,6 +437,24 @@ describe('一覧の上部の並び', () => {
   });
 });
 
+describe('renderPatientList: 位置の未登録表示', () => {
+  it('位置が無い行には no-location タグを出す', () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const element = renderPatientList(createInitialState([patient]), noopHandlers());
+    const tag = q(element, 'no-location');
+    expect(tag.textContent).toBe('位置 未登録');
+  });
+
+  it('位置がある行には no-location タグを出さない', () => {
+    const patient = {
+      ...createPatient('山田 太郎', '東京都千代田区1-1'),
+      location: { lat: 35, lng: 139, accuracy: 12, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' as const },
+    };
+    const element = renderPatientList(createInitialState([patient]), noopHandlers());
+    expect(element.querySelector('[data-testid="no-location"]')).toBeNull();
+  });
+});
+
 describe('renderPatientList: 電話番号', () => {
   it('電話番号がある行には、tel: リンクがある', () => {
     const patient = createPatient('山田 太郎', '東京都千代田区1-1', new Date(), '03-1234-5678');

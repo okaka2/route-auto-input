@@ -352,6 +352,14 @@ function renderRow(patient: Patient, state: AppState, handlers: PatientListHandl
   address.textContent = patient.address;
   text.append(name, address);
 
+  if (!patient.location) {
+    const noLocation = document.createElement('span');
+    noLocation.className = 'place-tag';
+    noLocation.dataset.testid = 'no-location';
+    noLocation.textContent = '位置 未登録';
+    text.append(noLocation);
+  }
+
   main.append(checkbox, check, text);
 
   row.append(main);

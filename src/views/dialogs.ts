@@ -1,6 +1,7 @@
 import { installSteps } from '../installHint';
 import { installPlatform } from '../platform';
 import type { AppState, Dialog, Patient } from '../types';
+import { renderLocationDialog } from './locationDialog';
 
 export type DialogHandlers = {
   onEdit(id: string): void;
@@ -19,6 +20,20 @@ export type DialogHandlers = {
   onSaveAnyway(): void;
   /** 同じ人の知らせ: 登録済みの訪問先を開く。 */
   onOpenExisting(id: string): void;
+  /** 一覧の「⋯」: 位置の登録・確認ダイアログを開く。 */
+  onOpenLocation(id: string): void;
+  /** 位置の登録: 今いる場所の測定を始める/やり直す。 */
+  onStartMeasuring(): void;
+  /** 位置の登録: 測った位置で登録する。 */
+  onSaveMeasured(): void;
+  /** 位置の登録: 貼り付け欄の入力。 */
+  onPasteChange(text: string): void;
+  /** 位置の登録: 貼り付けた位置で登録する。 */
+  onSavePasted(): void;
+  /** 位置の登録: 登録済みの位置を消す。 */
+  onRemove(): void;
+  /** 位置の登録: 保存した直後に元へ戻す。 */
+  onUndo(): void;
   onClose(): void;
 };
 
@@ -55,6 +70,8 @@ export function renderDialog(state: AppState, handlers: DialogHandlers): HTMLEle
       content = renderMenu(patient, handlers);
     } else if (dialog.kind === 'stopMenu') {
       content = renderStopMenu(patient, handlers);
+    } else if (dialog.kind === 'location') {
+      content = renderLocationDialog(patient, dialog, handlers);
     } else {
       content = renderConfirmDelete(patient, handlers);
     }
@@ -94,6 +111,11 @@ function renderMenu(patient: Patient, handlers: DialogHandlers): HTMLElement[] {
   const actions: { testid: string; label: string; className?: string; onClick: () => void }[] = [
     { testid: 'dialog-edit', label: '編集', onClick: () => handlers.onEdit(patient.id) },
     { testid: 'dialog-duplicate', label: '複製して登録', onClick: () => handlers.onDuplicate(patient.id) },
+    {
+      testid: 'dialog-location',
+      label: patient.location ? '位置を確かめる・やり直す' : '位置を登録',
+      onClick: () => handlers.onOpenLocation(patient.id),
+    },
     {
       testid: 'dialog-delete',
       label: '削除',

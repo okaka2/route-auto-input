@@ -18,14 +18,14 @@ import {
   type HistoryEntry,
 } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
-import { pointOf } from './geoPoint';
+import { isShortMapsUrl, parseLocationText, pointOf } from './geoPoint';
 import { dateKey, formatHistoryDate, formatVisits, keepFromDate, lastWeekSameWeekday, restoreSelection } from './history';
 import { shouldShowInstallHint } from './installHint';
 import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
 import { checkPassword, isUnlocked, renderPasswordGate, unlock } from './passwordGate';
 import { findSimilar } from './normalize';
-import { createPatient, updatePatientFields } from './patient';
+import { createPatient, updatePatientFields, withLocation } from './patient';
 import { isStandaloneDisplay } from './platform';
 import { isStoragePersisted, requestPersistentStorage } from './protection';
 import { daysBetween, shouldRemindBackup } from './backupReminder';
@@ -56,7 +56,7 @@ import {
   withPatients,
   withScreen,
 } from './state';
-import type { AppState, Message, Patient, SortOrder } from './types';
+import type { AppState, GeoLocation, Message, Patient, SortOrder } from './types';
 import { validatePatientInput, validateSelection } from './validation';
 import { renderDialog } from './views/dialogs';
 import { renderHistory } from './views/historyView';
@@ -152,6 +152,10 @@ let deletingSelected = false;
 
 // 「⋯」から開いたダイアログを、編集・複製・削除以外で閉じたとき、フォーカスを戻す行のid。
 let dialogReturnId: string | null = null;
+
+// 位置を測っている最中なら、止めるための関数。測っていなければ null。
+// 止める場所はsetState一箇所にまとめる(下記参照)。
+let stopMeasuring: (() => void) | null = null;
 
 // 設定画面に出す情報(最後のバックアップ日時・データの保存状態・表示の設定・事業所)。
 let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting(), office: null };
@@ -442,8 +446,25 @@ async function handleClearOffice(): Promise<void> {
   }
 }
 
+/**
+ * 位置を測っている最中に、ダイアログが閉じる/画面が変わる/別の訪問先へ切り替わる
+ * (いずれも次のdialogが「同じidのlocationダイアログ」でなくなる)なら、ここ一箇所で止める。
+ */
 function setState(next: AppState): void {
+  const previousDialog = state.dialog;
   state = next;
+  if (stopMeasuring !== null) {
+    const stillSameLocation =
+      previousDialog !== null &&
+      previousDialog.kind === 'location' &&
+      next.dialog !== null &&
+      next.dialog.kind === 'location' &&
+      next.dialog.id === previousDialog.id;
+    if (!stillSameLocation) {
+      stopMeasuring();
+      stopMeasuring = null;
+    }
+  }
   render();
 }
 
@@ -638,6 +659,173 @@ function openMenu(id: string): void {
 
 function closeAnyDialog(): void {
   setState(closeDialog(state));
+}
+
+/** 「⋯」または地図のカードの「位置」ボタンから、位置の登録ダイアログを開く。 */
+function openLocation(id: string): void {
+  dialogReturnId = id;
+  setState({
+    ...state,
+    dialog: {
+      kind: 'location',
+      id,
+      phase: 'idle',
+      best: null,
+      error: null,
+      pasteText: '',
+      pasteError: null,
+      previous: null,
+    },
+  });
+}
+
+/** 今いる場所の測定を始める(「今いる場所で登録」「もう一度測る」)。既存の測定は先に止める。 */
+async function startLocationMeasure(): Promise<void> {
+  stopMeasuring?.();
+  stopMeasuring = null;
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'location') {
+    return;
+  }
+  const targetId = dialog.id;
+  const { startMeasuring } = await import('./geo');
+  // importの読み込み中にダイアログが閉じた/別の訪問先へ変わったかもしれないので、確かめてから始める。
+  const current = state.dialog;
+  if (current?.kind !== 'location' || current.id !== targetId) {
+    return;
+  }
+  setState({ ...state, dialog: { ...current, phase: 'measuring', best: null, error: null } });
+  stopMeasuring = startMeasuring(navigator.geolocation, (update) => {
+    const d = state.dialog;
+    if (d?.kind !== 'location' || d.id !== targetId) {
+      return;
+    }
+    if (update.kind === 'reading') {
+      setState({ ...state, dialog: { ...d, phase: 'measuring', best: update.best, error: null } });
+    } else if (update.kind === 'done') {
+      if (update.best === null) {
+        setState({
+          ...state,
+          dialog: {
+            ...d,
+            phase: 'error',
+            best: null,
+            error: '位置を取得できませんでした。車の外や屋外で、もう一度試してください。',
+          },
+        });
+      } else {
+        setState({ ...state, dialog: { ...d, phase: 'measured', best: update.best, error: null } });
+      }
+    } else {
+      setState({ ...state, dialog: { ...d, phase: 'error', best: null, error: update.message } });
+    }
+  });
+}
+
+/** 測った/貼り付けた位置を保存する共通処理。保存後、ダイアログを saved にする。 */
+async function saveLocation(location: GeoLocation): Promise<void> {
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'location') {
+    return;
+  }
+  const patient = state.patients.find((item) => item.id === dialog.id);
+  if (!patient) {
+    closeAnyDialog();
+    return;
+  }
+  const previous = patient.location ?? null;
+  try {
+    await savePatient(withLocation(patient, location));
+    requestProtectionOnce();
+    openedRoutes.clear();
+    await reloadPatients();
+    const current = state.dialog;
+    if (current?.kind === 'location' && current.id === dialog.id) {
+      setState({ ...state, dialog: { ...current, phase: 'saved', previous } });
+    }
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: '位置を保存できませんでした。' }));
+  }
+}
+
+/** 測った位置(dialog.best)で登録する。 */
+function saveMeasuredLocation(): void {
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'location' || dialog.best === null) {
+    return;
+  }
+  void saveLocation({ ...dialog.best, recordedAt: new Date().toISOString(), source: 'gps' });
+}
+
+/** 貼り付け欄の入力を読み取り、登録する。読めなければ pasteError を出す。 */
+function savePastedLocation(): void {
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'location') {
+    return;
+  }
+  const point = parseLocationText(dialog.pasteText);
+  if (point === null) {
+    const message = isShortMapsUrl(dialog.pasteText)
+      ? '短いURLは読めません。Googleマップで地点を長押しして、出てきた座標をコピーして貼り付けてください。'
+      : '座標またはGoogleマップのURLを読み取れませんでした。';
+    setState({ ...state, dialog: { ...dialog, pasteError: message } });
+    return;
+  }
+  void saveLocation({ lat: point.lat, lng: point.lng, accuracy: null, recordedAt: new Date().toISOString(), source: 'paste' });
+}
+
+/** 貼り付け欄への入力のたび呼ばれる。値を保ち、直前のエラー表示は消す。 */
+function changePasteText(text: string): void {
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'location') {
+    return;
+  }
+  setState({ ...state, dialog: { ...dialog, pasteText: text, pasteError: null } });
+}
+
+/** saved のときの「元に戻す」。保存前の位置(previous、無ければ外す)に戻して閉じる。 */
+async function undoLocation(): Promise<void> {
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'location') {
+    return;
+  }
+  const patient = state.patients.find((item) => item.id === dialog.id);
+  if (!patient) {
+    closeAnyDialog();
+    return;
+  }
+  try {
+    await savePatient(withLocation(patient, dialog.previous));
+    openedRoutes.clear();
+    setState(closeDialog(state));
+    await reloadPatients();
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: '元に戻せませんでした。' }));
+  }
+}
+
+/** 登録済みの位置を消す(「位置を消す」)。確認してから外す。 */
+async function removeLocation(): Promise<void> {
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'location') {
+    return;
+  }
+  if (!window.confirm('この訪問先の位置を消しますか?')) {
+    return;
+  }
+  const patient = state.patients.find((item) => item.id === dialog.id);
+  if (!patient) {
+    closeAnyDialog();
+    return;
+  }
+  try {
+    await savePatient(withLocation(patient, null));
+    openedRoutes.clear();
+    setState(closeDialog(state));
+    await reloadPatients();
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: '位置を消せませんでした。' }));
+  }
 }
 
 function handleEdit(id: string): void {
@@ -907,6 +1095,7 @@ function renderScreen(): HTMLElement {
         onToggleVisited: (id) => {
           void toggleVisited(id);
         },
+        onOpenLocation: openLocation,
       });
     case 'settings':
       return renderSettings(state, settingsInfo, {
@@ -1007,6 +1196,19 @@ function renderApp(): HTMLElement {
       continueCount = 0;
       formDraft = null;
       setState(withScreen(state, { name: 'form', patientId: id }));
+    },
+    onOpenLocation: openLocation,
+    onStartMeasuring: () => {
+      void startLocationMeasure();
+    },
+    onSaveMeasured: saveMeasuredLocation,
+    onPasteChange: changePasteText,
+    onSavePasted: savePastedLocation,
+    onRemove: () => {
+      void removeLocation();
+    },
+    onUndo: () => {
+      void undoLocation();
     },
     onClose: closeAnyDialog,
   });

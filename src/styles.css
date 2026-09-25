@@ -584,6 +584,32 @@ button.select-all {
   min-height: var(--tap-primary);
 }
 
+/* ===== 位置の登録ダイアログ ===== */
+.location-status {
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+}
+
+.location-status.good {
+  color: var(--success);
+}
+
+.location-status.poor {
+  color: var(--danger);
+}
+
+.location-paste {
+  margin: 0.75rem 0;
+}
+
+.location-paste summary {
+  min-height: var(--tap-min);
+  display: flex;
+  align-items: center;
+  color: var(--primary);
+  cursor: pointer;
+}
+
 /* ===== 地図を開く画面(ルートのカード) ===== */
 .summary-card p {
   margin: 0;
@@ -685,6 +711,11 @@ button.select-all {
 .route-stop-name {
   flex: 1;
   overflow-wrap: anywhere;
+}
+
+.location-pin {
+  min-height: var(--tap-min);
+  padding: 0 0.75rem;
 }
 
 .visited-toggle {
@@ -1002,6 +1033,16 @@ input:focus-visible + .check {
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.place-tag {
+  display: inline-block;
+  margin-top: 0.125rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.875rem;
 }
 
 .more {

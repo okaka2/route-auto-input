@@ -1,4 +1,4 @@
-import type { Patient } from './types';
+import type { GeoLocation, Patient } from './types';
 
 export function createPatient(
   name: string,
@@ -15,6 +15,16 @@ export function createPatient(
     createdAt: timestamp,
     updatedAt: timestamp,
     ...(trimmedPhone ? { phone: trimmedPhone } : {}),
+  };
+}
+
+/** 位置を付ける/外す(nullで外す)。他の項目は変えず、更新日時だけ進める。 */
+export function withLocation(patient: Patient, location: GeoLocation | null, now: Date = new Date()): Patient {
+  const { location: _old, ...rest } = patient;
+  return {
+    ...rest,
+    ...(location ? { location } : {}),
+    updatedAt: now.toISOString(),
   };
 }
 

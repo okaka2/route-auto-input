@@ -10,7 +10,7 @@ import {
   setSearchQuery,
   toggleSelection,
 } from '../src/state';
-import type { AppState, Patient } from '../src/types';
+import type { AppState, LocationDialog, Patient } from '../src/types';
 import { validatePatientInput, validateSelection } from '../src/validation';
 import { googleMapsProvider } from '../src/mapProviders';
 import type { HistoryEntry } from '../src/db';
@@ -58,6 +58,13 @@ const dialogHandlers = {
   onMoveToBottom: noop,
   onSaveAnyway: noop,
   onOpenExisting: noop,
+  onOpenLocation: noop,
+  onStartMeasuring: noop,
+  onSaveMeasured: noop,
+  onPasteChange: noop,
+  onSavePasted: noop,
+  onRemove: noop,
+  onUndo: noop,
   onClose: noop,
 };
 
@@ -84,6 +91,12 @@ describe('画面の文言(禁止語が出ない)', () => {
       setSearchQuery(createInitialState(places(3)), '場所'),
       atLimit,
       { ...createInitialState(places(1)), message: { kind: 'error', text: 'x' } },
+      createInitialState([
+        {
+          ...places(1)[0]!,
+          location: { lat: 35, lng: 139, accuracy: 12, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' as const },
+        },
+      ]),
     ];
     states.forEach((state, index) => {
       expectClean(`一覧#${index}`, renderPatientList(state, listHandlers).outerHTML);
@@ -168,13 +181,26 @@ describe('画面の文言(禁止語が出ない)', () => {
   });
 
   it('地図: 0件・1本・分割・開いた後(事業所あり/なし)', () => {
-    const handlers = { onOpenRoute: noop, onBack: noop, onChooseStops: noop, onShare: noop, onCopyLink: noop, onToggleVisited: noop };
+    const handlers = {
+      onOpenRoute: noop,
+      onBack: noop,
+      onChooseStops: noop,
+      onShare: noop,
+      onCopyLink: noop,
+      onToggleVisited: noop,
+      onOpenLocation: noop,
+    };
     const at = new Date(2026, 8, 21, 14, 32).toISOString();
+    const withLocation = {
+      ...places(1)[0]!,
+      location: { lat: 35, lng: 139, accuracy: 12, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' as const },
+    };
     for (const [label, state, opened] of [
       ['0件', createInitialState([]), new Map<number, string>()],
       ['1本', selected(places(3)), new Map<number, string>()],
       ['分割', selected(places(12)), new Map<number, string>()],
       ['開いた後', selected(places(12)), new Map<number, string>([[0, at]])],
+      ['位置あり', selected([withLocation]), new Map<number, string>()],
     ] as const) {
       for (const [ctxLabel, context] of [
         ['事業所なし', noOfficeContext],
@@ -226,6 +252,75 @@ describe('画面の文言(禁止語が出ない)', () => {
     expectClean('履歴(記録なし)', renderHistory(noneState, [], historyHandlers).outerHTML);
     expectClean('履歴(閉じている)', renderHistory(closedState, [entry], historyHandlers).outerHTML);
     expectClean('履歴(開いている)', renderHistory(openState, [entry], historyHandlers).outerHTML);
+  });
+
+  it('位置の登録ダイアログ: 全phase、未登録/登録済み', () => {
+    const unregistered = places(1)[0]!;
+    const registered = {
+      ...places(1)[0]!,
+      location: { lat: 35, lng: 139, accuracy: 12, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' as const },
+    };
+    const base = (phase: LocationDialog): AppState => ({
+      ...createInitialState([unregistered, registered]),
+      dialog: phase,
+    });
+    const phases: LocationDialog[] = [
+      { kind: 'location', id: unregistered.id, phase: 'idle', best: null, error: null, pasteText: '', pasteError: null, previous: null },
+      { kind: 'location', id: registered.id, phase: 'idle', best: null, error: null, pasteText: '', pasteError: null, previous: null },
+      {
+        kind: 'location',
+        id: unregistered.id,
+        phase: 'measuring',
+        best: { lat: 35, lng: 139, accuracy: 12 },
+        error: null,
+        pasteText: '',
+        pasteError: null,
+        previous: null,
+      },
+      {
+        kind: 'location',
+        id: unregistered.id,
+        phase: 'measuring',
+        best: { lat: 35, lng: 139, accuracy: 60 },
+        error: null,
+        pasteText: '',
+        pasteError: null,
+        previous: null,
+      },
+      {
+        kind: 'location',
+        id: registered.id,
+        phase: 'measured',
+        best: { lat: 35, lng: 139, accuracy: 12 },
+        error: null,
+        pasteText: '',
+        pasteError: null,
+        previous: null,
+      },
+      {
+        kind: 'location',
+        id: unregistered.id,
+        phase: 'error',
+        best: null,
+        error: '位置を取得できませんでした。車の外や屋外で、もう一度試してください。',
+        pasteText: '',
+        pasteError: '座標またはGoogleマップのURLを読み取れませんでした。',
+        previous: null,
+      },
+      {
+        kind: 'location',
+        id: registered.id,
+        phase: 'saved',
+        best: null,
+        error: null,
+        pasteText: '',
+        pasteError: null,
+        previous: null,
+      },
+    ];
+    phases.forEach((phase, index) => {
+      expectClean(`位置の登録#${index}`, renderDialog(base(phase), dialogHandlers)!.outerHTML);
+    });
   });
 
   it('検証メッセージ', () => {

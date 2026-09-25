@@ -20,6 +20,13 @@ const handlers = (): DialogHandlers => ({
   onMoveToBottom: vi.fn(),
   onSaveAnyway: vi.fn(),
   onOpenExisting: vi.fn(),
+  onOpenLocation: vi.fn(),
+  onStartMeasuring: vi.fn(),
+  onSaveMeasured: vi.fn(),
+  onPasteChange: vi.fn(),
+  onSavePasted: vi.fn(),
+  onRemove: vi.fn(),
+  onUndo: vi.fn(),
   onClose: vi.fn(),
 });
 
@@ -50,13 +57,13 @@ describe('renderDialog: 「⋯」メニュー', () => {
     expect(open().querySelector('#dialog-title')?.textContent).toBe('山田 太郎');
   });
 
-  it('編集・複製して登録・削除・キャンセルの4つのボタンを、この順に出す', () => {
+  it('編集・複製して登録・位置を登録・削除・キャンセルの5つのボタンを、この順に出す', () => {
     const element = open();
-    const labels = ['dialog-edit', 'dialog-duplicate', 'dialog-delete', 'dialog-cancel'].map(
+    const labels = ['dialog-edit', 'dialog-duplicate', 'dialog-location', 'dialog-delete', 'dialog-cancel'].map(
       (testid) => button(element, testid).textContent,
     );
-    expect(labels).toEqual(['編集', '複製して登録', '削除', 'キャンセル']);
-    expect([...element.querySelectorAll('button')]).toHaveLength(4);
+    expect(labels).toEqual(['編集', '複製して登録', '位置を登録', '削除', 'キャンセル']);
+    expect([...element.querySelectorAll('button')]).toHaveLength(5);
   });
 
   it('削除ボタンは赤(danger)で表示する', () => {
@@ -86,6 +93,21 @@ describe('renderDialog: 「⋯」メニュー', () => {
     const spies = handlers();
     button(open(spies), 'dialog-cancel').click();
     expect(spies.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('位置が未登録なら「位置を登録」、押すと onOpenLocation が id つきで呼ばれる', () => {
+    const spies = handlers();
+    const element = open(spies);
+    expect(button(element, 'dialog-location').textContent).toBe('位置を登録');
+    button(element, 'dialog-location').click();
+    expect(spies.onOpenLocation).toHaveBeenCalledWith(patient.id);
+  });
+
+  it('位置が登録済みなら「位置を確かめる・やり直す」', () => {
+    const withLocation = { ...patient, location: { lat: 35, lng: 139, accuracy: 12, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' as const } };
+    const state = createInitialState([withLocation]);
+    const element = renderDialog(openRowMenu(state, withLocation.id), handlers())!;
+    expect(button(element, 'dialog-location').textContent).toBe('位置を確かめる・やり直す');
   });
 });
 
@@ -259,6 +281,44 @@ describe('renderDialog: 同じ人の知らせ', () => {
     expect(spies.onOpenExisting).toHaveBeenCalledWith(existing.id);
     element.querySelector<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
     expect(spies.onClose).toHaveBeenCalled();
+  });
+});
+
+describe('renderDialog: 位置の登録ダイアログ', () => {
+  it('location ダイアログが描かれ、見出しは名前つき', () => {
+    const state = {
+      ...base(),
+      dialog: {
+        kind: 'location' as const,
+        id: patient.id,
+        phase: 'idle' as const,
+        best: null,
+        error: null,
+        pasteText: '',
+        pasteError: null,
+        previous: null,
+      },
+    };
+    const element = renderDialog(state, handlers())!;
+    expect(element.querySelector('#dialog-title')?.textContent).toBe('山田 太郎の位置');
+    expect(element.querySelector('[data-testid="location-measure-button"]')).not.toBeNull();
+  });
+
+  it('対象の訪問先が見つからなければ null', () => {
+    const state = {
+      ...base(),
+      dialog: {
+        kind: 'location' as const,
+        id: 'unknown-id',
+        phase: 'idle' as const,
+        best: null,
+        error: null,
+        pasteText: '',
+        pasteError: null,
+        previous: null,
+      },
+    };
+    expect(renderDialog(state, handlers())).toBeNull();
   });
 });
 

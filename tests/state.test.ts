@@ -344,6 +344,40 @@ describe('ダイアログの状態', () => {
     openRowMenu(state, 'p1');
     expect(state.dialog).toBeNull();
   });
+
+  it('位置の登録ダイアログは、対象の訪問先が残っていれば開いたまま', () => {
+    const patients = makePatients(2);
+    const locationDialog = {
+      kind: 'location' as const,
+      id: patients[0]!.id,
+      phase: 'idle' as const,
+      best: null,
+      error: null,
+      pasteText: '',
+      pasteError: null,
+      previous: null,
+    };
+    const opened = { ...createInitialState(patients), dialog: locationDialog };
+    const next = withPatients(opened, patients);
+    expect(next.dialog).toEqual(locationDialog);
+  });
+
+  it('位置の登録ダイアログは、対象の訪問先がなくなれば閉じる', () => {
+    const patients = makePatients(2);
+    const locationDialog = {
+      kind: 'location' as const,
+      id: patients[0]!.id,
+      phase: 'idle' as const,
+      best: null,
+      error: null,
+      pasteText: '',
+      pasteError: null,
+      previous: null,
+    };
+    const opened = { ...createInitialState(patients), dialog: locationDialog };
+    const next = withPatients(opened, [patients[1]!]);
+    expect(next.dialog).toBeNull();
+  });
 });
 
 describe('hasSelection', () => {

@@ -15,6 +15,7 @@ const handlers = (): RouteMapHandlers => ({
   onShare: vi.fn(),
   onCopyLink: vi.fn(),
   onToggleVisited: vi.fn(),
+  onOpenLocation: vi.fn(),
 });
 
 const ctx = (): RouteContext => defaultContext;
@@ -280,6 +281,41 @@ describe('renderRouteMap: 電話番号', () => {
   it('誰も電話番号を持たないカードには、電話リンクが出ない', () => {
     const element = render(stateWithSelection(2));
     expect(element.querySelector('[data-testid="phone-link"]')).toBeNull();
+  });
+});
+
+describe('renderRouteMap: 位置の未登録', () => {
+  it('位置が無い訪問先だけに location-pin を出し、押すと onOpenLocation(id)', () => {
+    const withLoc = createPatient('場所1', '東京都1-1');
+    withLoc.location = { lat: 35, lng: 139, accuracy: 12, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' };
+    const withoutLoc = createPatient('場所2', '東京都2-2');
+    const state = { ...createInitialState([withLoc, withoutLoc]), selectedIds: [withLoc.id, withoutLoc.id] };
+    const spies = handlers();
+    const element = render(state, new Map(), spies);
+    const pins = element.querySelectorAll<HTMLButtonElement>('[data-testid="location-pin"]');
+    expect(pins).toHaveLength(1);
+    expect(pins[0]!.dataset.id).toBe(withoutLoc.id);
+    expect(pins[0]!.getAttribute('aria-label')).toBe('場所2の位置を登録');
+    pins[0]!.click();
+    expect(spies.onOpenLocation).toHaveBeenCalledWith(withoutLoc.id);
+  });
+
+  it('位置が無い人がいれば route-missing-location に件数を出す', () => {
+    const withoutLoc1 = createPatient('場所1', '東京都1-1');
+    const withoutLoc2 = createPatient('場所2', '東京都2-2');
+    const state = { ...createInitialState([withoutLoc1, withoutLoc2]), selectedIds: [withoutLoc1.id, withoutLoc2.id] };
+    const element = render(state);
+    expect(cards(element)[0]!.querySelector('[data-testid="route-missing-location"]')?.textContent).toBe(
+      '位置が未登録: 2件',
+    );
+  });
+
+  it('全員に位置があれば route-missing-location は出ない', () => {
+    const withLoc = createPatient('場所1', '東京都1-1');
+    withLoc.location = { lat: 35, lng: 139, accuracy: 12, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' };
+    const state = { ...createInitialState([withLoc]), selectedIds: [withLoc.id] };
+    const element = render(state);
+    expect(cards(element)[0]!.querySelector('[data-testid="route-missing-location"]')).toBeNull();
   });
 });
 

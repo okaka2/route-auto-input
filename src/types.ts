@@ -35,6 +35,18 @@ export type Message = { kind: 'error' | 'info'; text: string };
 /** 一覧の並び順。登録順(既定)・名前(あいうえお順)・住所(あいうえお順)。 */
 export type SortOrder = 'registered' | 'name' | 'address';
 
+/** 位置の登録ダイアログ。measuring/measured で今いる場所を測り、貼り付けでも登録できる。 */
+export type LocationDialog = {
+  kind: 'location';
+  id: string; // 訪問先
+  phase: 'idle' | 'measuring' | 'measured' | 'saved' | 'error';
+  best: { lat: number; lng: number; accuracy: number } | null;
+  error: string | null;
+  pasteText: string;
+  pasteError: string | null;
+  previous: GeoLocation | null; // 元に戻す用(saved のとき)
+};
+
 /** 開いているダイアログ。1件向けは対象の訪問先のidを、複数選択の一括削除は件数を持たない(state.selectedIdsを見る)。 */
 export type Dialog =
   | { kind: 'rowMenu'; id: string }
@@ -47,7 +59,8 @@ export type Dialog =
       input: { name: string; address: string; phone: string };
       matchIds: string[];
       continueAfter: boolean;
-    };
+    }
+  | LocationDialog;
 
 export type AppState = {
   screen: Screen;

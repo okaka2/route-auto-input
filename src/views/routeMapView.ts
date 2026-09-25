@@ -16,6 +16,8 @@ export type RouteMapHandlers = {
   onCopyLink(): void;
   /** 訪問先の「済」ボタン。押すたびに訪問済み/未訪問を切り替える。 */
   onToggleVisited(id: string): void;
+  /** 位置が未登録の訪問先の行の「位置」ボタン。位置の登録ダイアログを開く。 */
+  onOpenLocation(id: string): void;
 };
 
 /** done: 開いた / next: 次に開く(最初の未開封) / later: それ以降 */
@@ -178,6 +180,15 @@ function renderRouteCard(
 
   card.append(renderStops(route, visited, handlers));
 
+  const missingLocationCount = route.filter((patient) => !patient.location).length;
+  if (missingLocationCount > 0) {
+    const missing = document.createElement('p');
+    missing.className = 'hint';
+    missing.dataset.testid = 'route-missing-location';
+    missing.textContent = `位置が未登録: ${missingLocationCount}件`;
+    card.append(missing);
+  }
+
   if (cardState === 'done') {
     const status = document.createElement('p');
     status.className = 'route-status';
@@ -232,6 +243,17 @@ function renderStops(route: readonly Patient[], visited: ReadonlyMap<string, str
       phone.setAttribute('aria-label', `${patient.name}に電話`);
       phone.textContent = '☎';
       item.append(phone);
+    }
+    if (!patient.location) {
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = 'location-pin';
+      pin.dataset.testid = 'location-pin';
+      pin.dataset.id = patient.id;
+      pin.setAttribute('aria-label', `${patient.name}の位置を登録`);
+      pin.textContent = '位置';
+      pin.addEventListener('click', () => handlers.onOpenLocation(patient.id));
+      item.append(pin);
     }
     const at = visited.get(patient.id);
     const toggle = document.createElement('button');
