@@ -51,6 +51,9 @@ function keepDialog(
     const matchIds = dialog.matchIds.filter((id) => existingIds.has(id));
     return matchIds.length > 0 ? { ...dialog, matchIds } : null;
   }
+  if (dialog.kind === 'photos') {
+    return existingIds.has(dialog.patientId) ? dialog : null;
+  }
   return existingIds.has(dialog.id) ? dialog : null;
 }
 

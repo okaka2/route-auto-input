@@ -1,3 +1,4 @@
+import { MAX_PHOTOS_PER_PATIENT } from '../db';
 import { DEFAULT_MAP_PROVIDER } from '../mapProviders';
 import type { Message, ParkingType, Patient, PatientFormDraft } from '../types';
 import { NOTE_HEADINGS, PARKING_OPTIONS } from '../visitInfo';
@@ -5,10 +6,15 @@ import { renderMessage } from './common';
 
 export type { PatientFormDraft } from '../types';
 
+/** 表示済みの写真。object URL(revokeは呼び出し側の役目)。 */
+export type FormPhoto = { id: string; url: string };
+
 export type PatientFormHandlers = {
   onSave(values: PatientFormDraft): void;
   onSaveAndContinue(values: PatientFormDraft): void;
   onCancel(values: PatientFormDraft): void;
+  onAddPhoto(file: File): void;
+  onDeletePhoto(id: string): void;
 };
 
 /**
@@ -23,6 +29,7 @@ export function renderPatientForm(
   draft: PatientFormDraft | null,
   message: Message | null,
   handlers: PatientFormHandlers,
+  photos: readonly FormPhoto[] = [],
 ): HTMLElement {
   const container = document.createElement('div');
   container.className = 'screen';
@@ -120,7 +127,7 @@ export function renderPatientForm(
     renderMapCheck(addressInput),
   );
 
-  container.append(renderVisitInfoSection(parkingSelect, permitField, noteInput));
+  container.append(renderVisitInfoSection(parkingSelect, permitField, noteInput, patient, photos, handlers));
 
   if (patient === null) {
     const actions = document.createElement('div');
@@ -136,11 +143,14 @@ export function renderPatientForm(
   return container;
 }
 
-/** 「訪問のための情報」: 駐車の種類・(路上のときだけ)許可証の期限・メモ。 */
+/** 「訪問のための情報」: 駐車の種類・(路上のときだけ)許可証の期限・メモ・写真。 */
 function renderVisitInfoSection(
   parkingSelect: HTMLSelectElement,
   permitField: HTMLLabelElement,
   noteInput: HTMLTextAreaElement,
+  patient: Patient | null,
+  photos: readonly FormPhoto[],
+  handlers: PatientFormHandlers,
 ): HTMLElement {
   const section = document.createElement('section');
   section.className = 'visit-info';
@@ -152,8 +162,94 @@ function renderVisitInfoSection(
   section.append(field('駐車', parkingSelect, false));
   section.append(permitField);
   section.append(renderNoteField(noteInput));
+  section.append(renderPhotosField(patient, photos, handlers));
 
   return section;
+}
+
+/**
+ * 「写真(3枚まで)」。編集のときだけサムネイル・削除・追加を出す
+ * (新規登録では、まだ訪問先のidが無く写真を紐づけられないため、案内だけ)。
+ */
+function renderPhotosField(
+  patient: Patient | null,
+  photos: readonly FormPhoto[],
+  handlers: PatientFormHandlers,
+): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'field';
+
+  const caption = document.createElement('span');
+  caption.className = 'field-label';
+  caption.textContent = '写真(3枚まで)';
+  wrapper.append(caption);
+
+  if (patient === null) {
+    const note = document.createElement('p');
+    note.className = 'hint';
+    note.textContent = '保存したあと、編集から写真を追加できます。';
+    wrapper.append(note);
+    return wrapper;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'photo-list';
+  photos.forEach((photo, index) => list.append(renderPhotoItem(photo, index, handlers)));
+  if (photos.length < MAX_PHOTOS_PER_PATIENT) {
+    list.append(renderPhotoAdd(handlers));
+  }
+  wrapper.append(list);
+
+  const caution = document.createElement('p');
+  caution.className = 'hint';
+  caution.textContent = '表札や人が写らないようにしてください。';
+  wrapper.append(caution);
+
+  return wrapper;
+}
+
+function renderPhotoItem(photo: FormPhoto, index: number, handlers: PatientFormHandlers): HTMLElement {
+  const item = document.createElement('div');
+  item.className = 'photo-item';
+
+  const img = document.createElement('img');
+  img.src = photo.url;
+  img.alt = `写真${index + 1}`;
+  img.dataset.testid = 'photo-thumb';
+  item.append(img);
+
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.dataset.testid = 'photo-delete';
+  deleteButton.textContent = '削除';
+  deleteButton.addEventListener('click', () => handlers.onDeletePhoto(photo.id));
+  item.append(deleteButton);
+
+  return item;
+}
+
+/** 見た目は「写真を追加」ボタン。中身は撮影/選択できる file input(見た目には出さない)。 */
+function renderPhotoAdd(handlers: PatientFormHandlers): HTMLElement {
+  const label = document.createElement('label');
+  label.className = 'photo-add';
+  label.append(document.createTextNode('写真を追加'));
+
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.setAttribute('capture', 'environment');
+  input.className = 'visually-hidden';
+  input.dataset.testid = 'photo-input';
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (file) {
+      handlers.onAddPhoto(file);
+    }
+    input.value = '';
+  });
+  label.append(input);
+
+  return label;
 }
 
 /**

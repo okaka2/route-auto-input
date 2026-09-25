@@ -28,6 +28,7 @@ const handlers = (): DialogHandlers => ({
   onSavePasted: vi.fn(),
   onRemove: vi.fn(),
   onUndo: vi.fn(),
+  onPhotoIndex: vi.fn(),
   onClose: vi.fn(),
 });
 
@@ -322,6 +323,44 @@ describe('renderDialog: 位置の登録ダイアログ', () => {
       },
     };
     expect(renderDialog(state, handlers())).toBeNull();
+  });
+});
+
+describe('renderDialog: 写真のダイアログ', () => {
+  const open = (index: number, urls: string[] = ['blob:1', 'blob:2', 'blob:3'], spies = handlers()) =>
+    renderDialog(
+      { ...base(), dialog: { kind: 'photos' as const, patientId: patient.id, urls, index } },
+      spies,
+    )!;
+
+  it('urls[index] を photo-view に出す', () => {
+    const element = open(1);
+    expect(element.querySelector<HTMLImageElement>('[data-testid="photo-view"]')?.src).toBe('blob:2');
+  });
+
+  it('「N / M」の件数表示と、閉じるボタンを出す', () => {
+    const element = open(1);
+    expect(element.textContent).toContain('2 / 3');
+    expect(button(element, 'dialog-cancel').textContent).toBe('閉じる');
+    button(element, 'dialog-cancel').click();
+  });
+
+  it('前/次を押すと、隣のindexで onPhotoIndex が呼ばれる', () => {
+    const spies = handlers();
+    const element = open(1, undefined, spies);
+    button(element, 'photo-prev').click();
+    expect(spies.onPhotoIndex).toHaveBeenCalledWith(0);
+    button(element, 'photo-next').click();
+    expect(spies.onPhotoIndex).toHaveBeenCalledWith(2);
+  });
+
+  it('先頭では前が、末尾では次が押せない', () => {
+    const first = open(0);
+    expect(button(first, 'photo-prev').disabled).toBe(true);
+    expect(button(first, 'photo-next').disabled).toBe(false);
+    const last = open(2);
+    expect(button(last, 'photo-next').disabled).toBe(true);
+    expect(button(last, 'photo-prev').disabled).toBe(false);
   });
 });
 

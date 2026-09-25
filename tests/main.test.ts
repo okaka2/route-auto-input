@@ -11,6 +11,12 @@ import type { Patient } from '../src/types';
 // './openRoute'から読み込んでいるので、そのモジュールごと差し替える。
 vi.mock('../src/openRoute', () => ({ openUrl: vi.fn() }));
 
+// 実際の画像の縮小(createImageBitmap/canvas)はjsdomに無いので、結合テストでは
+// resizeImageの中身を差し替える。返す内容(縮小後のJPEG)だけ本物に近い形にしておく。
+vi.mock('../src/imageResize', () => ({
+  resizeImage: vi.fn(async () => new Blob(['x'], { type: 'image/jpeg' })),
+}));
+
 const SESSION_KEY = 'route-auto-input:session';
 
 async function waitFor(assertion: () => void): Promise<void> {
@@ -64,6 +70,12 @@ function dismissInstallNotice(): void {
 
 type WindowWithStartup = typeof window & { __routeAutoInputStartup?: Promise<void> };
 
+// jsdomにはURL.createObjectURL/revokeObjectURLが無いので、テスト用に差し替える。
+// カウンターで毎回違うURLを作る(同一URLだと、写真ごとの区別がテストできない)。
+const originalCreateObjectURL = URL.createObjectURL;
+const originalRevokeObjectURL = URL.revokeObjectURL;
+let objectUrlCounter = 0;
+
 beforeEach(async () => {
   document.body.innerHTML = '<div id="app"></div>';
   vi.resetModules();
@@ -77,6 +89,9 @@ beforeEach(async () => {
   // テストをまたいで残る。呼び出し回数を検証するテストのために、ここでクリアする。
   const { openUrl } = await import('../src/openRoute');
   vi.mocked(openUrl).mockClear();
+  objectUrlCounter = 0;
+  URL.createObjectURL = vi.fn(() => `blob:mock-${objectUrlCounter++}`);
+  URL.revokeObjectURL = vi.fn();
 });
 
 afterEach(async () => {
@@ -91,6 +106,8 @@ afterEach(async () => {
   // 閉じないと次のbeforeEachのdeleteDBがブロックされる。
   const db = await import('../src/db');
   await db.closeDbForTest();
+  URL.createObjectURL = originalCreateObjectURL;
+  URL.revokeObjectURL = originalRevokeObjectURL;
 });
 
 describe('入力内容の保持(#2)', () => {
@@ -1854,5 +1871,86 @@ describe('位置の登録', () => {
     // 入力欄の値も、打った内容のまま(作り直されていれば別のinput要素になっている)。
     expect(el<HTMLInputElement>('[data-testid="location-paste-input"]')).toBe(input);
     expect(input.value).toBe('35.1, 139.1');
+  });
+});
+
+describe('写真', () => {
+  it('編集フォームで写真を追加するとDBに保存されフォームにサムネイルが出て、訪問先を削除すると写真も消える', async () => {
+    const { savePatient, listPhotos } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-edit"]')!.click();
+    await waitFor(() => expect(el('[data-testid="photo-input"]')).not.toBeNull());
+
+    const file = new File(['x'], 'photo.jpg', { type: 'image/jpeg' });
+    const input = el<HTMLInputElement>('[data-testid="photo-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change'));
+
+    await waitFor(() => expect(el('[data-testid="photo-thumb"]')).not.toBeNull());
+    expect(await listPhotos(patient.id)).toHaveLength(1);
+    expect(el<HTMLInputElement>('[data-testid="photo-input"]')!.value).toBe('');
+
+    el<HTMLButtonElement>('[data-testid="cancel-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-delete"]')!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-confirm-delete"]')!.click();
+
+    await waitFor(() => expect(rows()).toHaveLength(0));
+    expect(await listPhotos(patient.id)).toEqual([]);
+  });
+
+  it('写真を3枚登録すると追加ボタンが消え、地図のカードに「写真 N」が出て押すと見られる', async () => {
+    const { savePatient, listPhotos } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-edit"]')!.click();
+    await waitFor(() => expect(el('[data-testid="photo-input"]')).not.toBeNull());
+
+    for (let i = 0; i < 3; i += 1) {
+      const file = new File(['x'], `photo${i}.jpg`, { type: 'image/jpeg' });
+      const input = el<HTMLInputElement>('[data-testid="photo-input"]')!;
+      Object.defineProperty(input, 'files', { value: [file], configurable: true });
+      input.dispatchEvent(new Event('change'));
+      await waitFor(() => expect(document.querySelectorAll('[data-testid="photo-thumb"]')).toHaveLength(i + 1));
+    }
+    expect(await listPhotos(patient.id)).toHaveLength(3);
+    expect(el('[data-testid="photo-input"]')).toBeNull();
+
+    el<HTMLButtonElement>('[data-testid="cancel-button"]')!.click();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLInputElement>(`input[data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    const historyRecorded = await armHistoryRecordWait();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await historyRecorded();
+
+    await waitFor(() => expect(el('[data-testid="photo-count"]')).not.toBeNull());
+    expect(el('[data-testid="photo-count"]')?.textContent).toBe('写真 3');
+    el<HTMLButtonElement>('[data-testid="photo-count"]')!.click();
+
+    await waitFor(() => expect(el('[data-testid="photo-view"]')).not.toBeNull());
+    expect(el('[data-testid="dialog"]')?.textContent).toContain('1 / 3');
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    expect(el('[data-testid="dialog"]')).toBeNull();
   });
 });

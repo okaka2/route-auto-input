@@ -67,6 +67,7 @@ const dialogHandlers = {
   onSavePasted: noop,
   onRemove: noop,
   onUndo: noop,
+  onPhotoIndex: noop,
   onClose: noop,
 };
 
@@ -151,10 +152,11 @@ describe('画面の文言(禁止語が出ない)', () => {
   });
 
   it('登録・編集フォーム: 新規・編集・下書き・メッセージ', () => {
-    const handlers = { onSave: noop, onSaveAndContinue: noop, onCancel: noop };
+    const handlers = { onSave: noop, onSaveAndContinue: noop, onCancel: noop, onAddPhoto: noop, onDeletePhoto: noop };
     const patient = createPatient('場所1', '東京都1-1');
     expectClean('新規', renderPatientForm(null, null, null, handlers).outerHTML);
     expectClean('編集', renderPatientForm(patient, null, null, handlers).outerHTML);
+    expectClean('編集(写真あり)', renderPatientForm(patient, null, null, handlers, [{ id: 'p1', url: 'blob:x' }]).outerHTML);
     expectClean(
       '下書き',
       renderPatientForm(
@@ -219,6 +221,7 @@ describe('画面の文言(禁止語が出ない)', () => {
       onCopyLink: noop,
       onToggleVisited: noop,
       onOpenLocation: noop,
+      onOpenPhotos: noop,
     };
     const at = new Date(2026, 8, 21, 14, 32).toISOString();
     const withLocation = {
@@ -243,7 +246,7 @@ describe('画面の文言(禁止語が出ない)', () => {
       ] as const) {
         expectClean(
           `地図(${label}・${ctxLabel})`,
-          renderRouteMap(state, opened, googleMapsProvider, context, new Map(), handlers).outerHTML,
+          renderRouteMap(state, opened, googleMapsProvider, context, new Map(), new Map(), handlers).outerHTML,
         );
       }
     }

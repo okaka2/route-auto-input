@@ -4,6 +4,13 @@ export type GeoLocation = { lat: number; lng: number; accuracy: number | null; r
 export type ParkingType = 'onsite' | 'coin' | 'street_permit' | 'management_ok' | 'unknown';
 export type Parking = { type: ParkingType; permitExpires?: string /* YYYY-MM-DD */ };
 
+/** 訪問先に紐づく写真。撮影場所などの情報はresizeImageで縮小するときに落とす。 */
+export type Photo = { id: string; patientId: string; blob: Blob; createdAt: string };
+
+/** 訪問先とは別に登録する、近くの地点(トイレ・休憩・店・駐車場など)。Task 6で使う。 */
+export type SpotKind = 'toilet' | 'rest' | 'store' | 'parking' | 'other';
+export type Spot = { id: string; kind: SpotKind; note: string; location: GeoLocation; createdAt: string };
+
 export type Patient = {
   id: string;
   name: string;
@@ -72,7 +79,8 @@ export type Dialog =
       matchIds: string[];
       continueAfter: boolean;
     }
-  | LocationDialog;
+  | LocationDialog
+  | { kind: 'photos'; patientId: string; urls: string[]; index: number };
 
 export type AppState = {
   screen: Screen;

@@ -1222,3 +1222,12 @@ input:focus-visible + .check {
 .list-new-row > button { flex: 1; }
 .list-shortcut-row { margin-top: 0.5rem; }
 .list-shortcut-row button { width: 100%; border-color: var(--primary); color: var(--primary); }
+
+/* ===== 写真(訪問のための情報・地図のカード・写真のダイアログ) ===== */
+.photo-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.photo-item { display: flex; flex-direction: column; gap: 0.25rem; width: 6rem; }
+.photo-item img { width: 6rem; height: 6rem; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--border); }
+.photo-add { display: inline-flex; align-items: center; justify-content: center; min-height: var(--tap-min); padding: 0 1rem; border: 1px solid var(--primary); border-radius: var(--radius); color: var(--primary); cursor: pointer; }
+.photo-view img { display: block; max-width: 100%; max-height: 60vh; margin: 0 auto var(--gap); border-radius: var(--radius); }
+.photo-nav { display: flex; align-items: center; justify-content: center; gap: 0.75rem; margin-bottom: var(--gap); }
+.photo-count { min-height: var(--tap-min); padding: 0 0.75rem; white-space: nowrap; }

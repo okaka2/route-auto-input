@@ -1,19 +1,32 @@
 import 'fake-indexeddb/auto';
-import { deleteDB } from 'idb';
+import { deleteDB, openDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  addPhoto,
   clearHistory,
   closeDbForTest,
+  countPhotosByPatient,
   deleteHistoryBefore,
   deleteMeta,
+  deleteOrphanPhotos,
   deletePatient,
   deletePatients,
+  deletePhoto,
+  deletePhotosOf,
+  deleteSpot,
   getHistory,
   getMeta,
+  listAllPhotos,
   listHistory,
   listPatients,
+  listPhotos,
+  listSpots,
+  MAX_PHOTOS_PER_PATIENT,
   mergePatients,
   putHistory,
+  putPhotos,
+  putSpot,
+  putSpots,
   replaceAllPatients,
   savePatient,
   setMeta,
@@ -21,6 +34,7 @@ import {
   type HistoryEntry,
 } from '../src/db';
 import { createPatient, updatePatientFields } from '../src/patient';
+import type { Photo, Spot } from '../src/types';
 
 // 接続を閉じてから消す。開いたままだと deleteDB がブロックされ、
 // 前のテストのデータが次のテストへ漏れる。
@@ -150,5 +164,141 @@ describe('history', () => {
     ]);
     const stored = await getHistory('2026-09-22');
     expect(stored?.visited).toEqual({ x: '10:00', y: '10:01' });
+  });
+});
+
+const photo = (patientId: string, createdAt: string, id = `photo-${patientId}-${createdAt}`): Photo => ({
+  id,
+  patientId,
+  blob: new Blob(['x'], { type: 'image/jpeg' }),
+  createdAt,
+});
+
+describe('写真', () => {
+  it('追加した写真を一覧できる(登録した順=古い順)', async () => {
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z'));
+    await addPhoto(photo('p1', '2026-09-22T00:00:00.000Z'));
+    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z'));
+    const listed = await listPhotos('p1');
+    expect(listed.map((p) => p.createdAt)).toEqual([
+      '2026-09-20T00:00:00.000Z',
+      '2026-09-21T00:00:00.000Z',
+      '2026-09-22T00:00:00.000Z',
+    ]);
+  });
+
+  it('別の訪問先の写真は含まれない', async () => {
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z'));
+    await addPhoto(photo('p2', '2026-09-20T00:00:00.000Z'));
+    expect(await listPhotos('p1')).toHaveLength(1);
+  });
+
+  it(`${MAX_PHOTOS_PER_PATIENT}枚までで、超えるとエラーになり書き込まれない`, async () => {
+    expect(MAX_PHOTOS_PER_PATIENT).toBe(3);
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
+    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z', 'b'));
+    await addPhoto(photo('p1', '2026-09-22T00:00:00.000Z', 'c'));
+    await expect(addPhoto(photo('p1', '2026-09-23T00:00:00.000Z', 'd'))).rejects.toThrow(
+      '写真は1件につき3枚までです。',
+    );
+    expect(await listPhotos('p1')).toHaveLength(3);
+  });
+
+  it('削除できる', async () => {
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
+    await deletePhoto('a');
+    expect(await listPhotos('p1')).toEqual([]);
+  });
+
+  it('訪問先ごとの件数をMapで返す(1枚も無い訪問先は含まれない)', async () => {
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
+    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z', 'b'));
+    await addPhoto(photo('p2', '2026-09-20T00:00:00.000Z', 'c'));
+    const counts = await countPhotosByPatient();
+    expect(counts).toEqual(new Map([['p1', 2], ['p2', 1]]));
+  });
+
+  it('deletePhotosOfで、指定した訪問先ぶんだけ削除する', async () => {
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
+    await addPhoto(photo('p2', '2026-09-20T00:00:00.000Z', 'b'));
+    await addPhoto(photo('p3', '2026-09-20T00:00:00.000Z', 'c'));
+    await deletePhotosOf(['p1', 'p2']);
+    expect(await listPhotos('p1')).toEqual([]);
+    expect(await listPhotos('p2')).toEqual([]);
+    expect(await listPhotos('p3')).toHaveLength(1);
+  });
+
+  it('listAllPhotosは全件、putPhotosは上書きで取り込む(バックアップ用)', async () => {
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
+    expect(await listAllPhotos()).toHaveLength(1);
+    const updated = { ...photo('p1', '2026-09-20T00:00:00.000Z', 'a'), createdAt: '2026-09-25T00:00:00.000Z' };
+    await putPhotos([updated, photo('p2', '2026-09-20T00:00:00.000Z', 'b')]);
+    const all = await listAllPhotos();
+    expect(all).toHaveLength(2);
+    expect(all.find((p) => p.id === 'a')?.createdAt).toBe('2026-09-25T00:00:00.000Z');
+  });
+
+  it('deleteOrphanPhotosで、名簿に無い訪問先の写真だけ消し、消した件数を返す', async () => {
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
+    await addPhoto(photo('gone', '2026-09-20T00:00:00.000Z', 'b'));
+    const removed = await deleteOrphanPhotos(new Set(['p1']));
+    expect(removed).toBe(1);
+    const remaining = await listAllPhotos();
+    expect(remaining.map((p) => p.id)).toEqual(['a']);
+    expect(remaining[0]?.patientId).toBe('p1');
+  });
+});
+
+const spot = (kind: Spot['kind'], id = `spot-${kind}`): Spot => ({
+  id,
+  kind,
+  note: 'メモ',
+  location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-09-20T00:00:00.000Z', source: 'gps' },
+  createdAt: '2026-09-20T00:00:00.000Z',
+});
+
+describe('地点(Spot)', () => {
+  it('追加・一覧・削除・上書きができる', async () => {
+    await putSpot(spot('toilet', 'a'));
+    await putSpot(spot('rest', 'b'));
+    expect(await listSpots()).toHaveLength(2);
+
+    await putSpot({ ...spot('toilet', 'a'), note: '更新後' });
+    const listed = await listSpots();
+    expect(listed.find((s) => s.id === 'a')?.note).toBe('更新後');
+
+    await deleteSpot('a');
+    expect((await listSpots()).map((s) => s.id)).toEqual(['b']);
+  });
+
+  it('putSpotsはまとめて上書きで取り込む(バックアップ用)', async () => {
+    await putSpots([spot('toilet', 'a'), spot('parking', 'c')]);
+    expect(await listSpots()).toHaveLength(2);
+  });
+});
+
+describe('v3→v4の移行', () => {
+  it('v3で保存したpatients/metaが、v4で読み直しても残り、写真のstoreも使えるようになる', async () => {
+    // v3までのstoreを、このアプリのDB定義を経由せず直接作る(v3当時の状態を模す)。
+    // beforeEachで接続を閉じ、DBを消してあるので、ここから新規にv3として開ける。
+    const legacyDb = await openDB('route-auto-input', 3, {
+      upgrade(db) {
+        const store = db.createObjectStore('patients', { keyPath: 'id' });
+        store.createIndex('createdAt', 'createdAt');
+        db.createObjectStore('meta');
+        db.createObjectStore('history', { keyPath: 'date' });
+      },
+    });
+    const legacyPatient = createPatient('山田', '東京都');
+    await legacyDb.put('patients', legacyPatient);
+    await legacyDb.put('meta', '2026-09-20T00:00:00.000Z', 'lastBackupAt');
+    legacyDb.close();
+
+    // ここからアプリ(v4)のdb.tsを使う。
+    expect(await listPatients()).toEqual([legacyPatient]);
+    expect(await getMeta('lastBackupAt')).toBe('2026-09-20T00:00:00.000Z');
+    expect(await listPhotos(legacyPatient.id)).toEqual([]);
+    await addPhoto(photo(legacyPatient.id, '2026-09-21T00:00:00.000Z', 'new-photo'));
+    expect(await listPhotos(legacyPatient.id)).toHaveLength(1);
   });
 });

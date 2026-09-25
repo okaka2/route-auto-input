@@ -2,14 +2,19 @@ import './styles.css';
 import { parseBackup, serializeBackup } from './backup';
 import { MAX_STOPS_PER_ROUTE } from './config';
 import {
+  addPhoto,
   clearHistory,
+  countPhotosByPatient,
   deleteHistoryBefore,
   deleteMeta,
   deletePatient,
   deletePatients,
+  deletePhoto,
+  deletePhotosOf,
   getMeta,
   listHistory,
   listPatients,
+  listPhotos,
   mergePatients,
   replaceAllPatients,
   savePatient,
@@ -143,6 +148,13 @@ const openedRoutes = new Map<number, string>(
 // 保存に失敗した直後の入力値。入力内容を画面に残すため(spec §8)、
 // openedRoutesと同様にAppStateの外で保持する。
 let formDraft: PatientFormDraft | null = null;
+
+// 訪問先ごとの写真の枚数。起動時と、写真の追加・削除・訪問先の削除のあとに読み直す。
+let photoCounts = new Map<string, number>();
+
+// 編集フォームに出す写真(object URLつき)。フォームを開くときlistPhotosから作り、
+// フォームを離れる/読み直すときに revoke する(片付けはsetState一箇所にまとめる。下記参照)。
+let formPhotos: { id: string; url: string }[] = [];
 
 // 保存/削除の二重実行防止(ボタンを連打してもDBへ二重に書き込まない)。
 let savingPatient = false;
@@ -351,6 +363,16 @@ async function loadHistory(): Promise<void> {
   render();
 }
 
+/** 訪問先ごとの写真の枚数をDBから読み直す。読めなくても、写真の件数バッジが出ないだけで止めない。 */
+async function loadPhotoCounts(): Promise<void> {
+  try {
+    photoCounts = await countPhotosByPatient();
+  } catch {
+    // 読めなくても、地図のカードの写真バッジが出ないだけ。
+  }
+  render();
+}
+
 /** 「地図を開く」を押したとき、その日の訪問先と順番を記録する(同じ日は上書き。済の記録は保つ)。 */
 async function recordTodayRoute(): Promise<void> {
   const ids = state.selectedIds;
@@ -487,6 +509,7 @@ async function handleClearOffice(): Promise<void> {
  */
 function setState(next: AppState): void {
   const previousDialog = state.dialog;
+  const previousScreen = state.screen;
   state = next;
   if (stopMeasuring !== null) {
     const stillSameLocation =
@@ -499,7 +522,35 @@ function setState(next: AppState): void {
       stopCurrentMeasuring();
     }
   }
+  // フォームを離れる/別の訪問先の編集へ切り替わるとき、フォームの写真のobject URLを片付ける。
+  const stillSameForm =
+    previousScreen.name === 'form' &&
+    next.screen.name === 'form' &&
+    next.screen.patientId === previousScreen.patientId;
+  if (previousScreen.name === 'form' && !stillSameForm) {
+    replaceFormPhotos([]);
+  }
+  // 写真のダイアログを閉じる/別の訪問先へ切り替わるとき、そのobject URLを片付ける。
+  const stillSamePhotosDialog =
+    previousDialog !== null &&
+    previousDialog.kind === 'photos' &&
+    next.dialog !== null &&
+    next.dialog.kind === 'photos' &&
+    next.dialog.patientId === previousDialog.patientId;
+  if (previousDialog !== null && previousDialog.kind === 'photos' && !stillSamePhotosDialog) {
+    for (const url of previousDialog.urls) {
+      URL.revokeObjectURL(url);
+    }
+  }
   render();
+}
+
+/** formPhotosを入れ替える。今持っているobject URLは、入れ替える前に必ず片付ける。 */
+function replaceFormPhotos(next: { id: string; url: string }[]): void {
+  for (const photo of formPhotos) {
+    URL.revokeObjectURL(photo.url);
+  }
+  formPhotos = next;
 }
 
 function syncSession(): void {
@@ -661,6 +712,8 @@ async function handleDelete(id: string): Promise<void> {
   setState(closeDialog(state));
   try {
     await deletePatient(id);
+    await deletePhotosOf([id]);
+    await loadPhotoCounts();
     await reloadPatients({ kind: 'info', text: '削除しました。' });
   } catch {
     setState(withMessage(state, { kind: 'error', text: 'データを削除できませんでした。' }));
@@ -699,6 +752,8 @@ async function handleConfirmDeleteSelected(): Promise<void> {
   setState(closeDialog(state));
   try {
     await deletePatients(ids);
+    await deletePhotosOf(ids);
+    await loadPhotoCounts();
     await reloadPatients({ kind: 'info', text: `${ids.length}件を削除しました。` });
   } catch {
     setState(withMessage(state, { kind: 'error', text: 'データを削除できませんでした。' }));
@@ -919,6 +974,91 @@ function handleEdit(id: string): void {
   dialogReturnId = null;
   formDraft = null;
   setState(withScreen(state, { name: 'form', patientId: id }));
+  void loadFormPhotos(id);
+}
+
+/** 編集フォームの写真を読み直す(listPhotos → object URL)。もう別の画面/別の訪問先に移っていたら、
+ * 作ったURLは使わずに片付ける(handleEditを連打した場合などの取り違え防止)。 */
+async function loadFormPhotos(patientId: string): Promise<void> {
+  let next: { id: string; url: string }[] = [];
+  try {
+    next = (await listPhotos(patientId)).map((photo) => ({ id: photo.id, url: URL.createObjectURL(photo.blob) }));
+  } catch {
+    next = [];
+  }
+  const screen = state.screen;
+  if (screen.name !== 'form' || screen.patientId !== patientId) {
+    for (const photo of next) {
+      URL.revokeObjectURL(photo.url);
+    }
+    return;
+  }
+  replaceFormPhotos(next);
+  render();
+}
+
+/** フォームの「写真を追加」。縮小してからDBへ追加し、フォームの写真と地図の件数バッジを読み直す。 */
+async function addPhotoFromFile(file: File): Promise<void> {
+  const screen = state.screen;
+  if (screen.name !== 'form' || screen.patientId === null) {
+    return;
+  }
+  const patientId = screen.patientId;
+  try {
+    const { resizeImage } = await import('./imageResize');
+    const blob = await resizeImage(file);
+    await addPhoto({ id: crypto.randomUUID(), patientId, blob, createdAt: new Date().toISOString() });
+    await loadFormPhotos(patientId);
+    await loadPhotoCounts();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '写真を追加できませんでした。';
+    setState(withMessage(state, { kind: 'error', text: message }));
+  }
+}
+
+/** フォームの写真の「削除」。 */
+async function deleteFormPhoto(id: string): Promise<void> {
+  const screen = state.screen;
+  if (screen.name !== 'form' || screen.patientId === null) {
+    return;
+  }
+  const patientId = screen.patientId;
+  try {
+    await deletePhoto(id);
+    await loadFormPhotos(patientId);
+    await loadPhotoCounts();
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: '写真を削除できませんでした。' }));
+  }
+}
+
+/** 地図のカードの「写真 N」。listPhotosから写真のダイアログを開く。閉じるときのrevokeはsetState一箇所にまとめる。 */
+async function openPhotos(patientId: string): Promise<void> {
+  dialogReturnId = patientId;
+  try {
+    const photos = await listPhotos(patientId);
+    if (photos.length === 0) {
+      dialogReturnId = null;
+      return;
+    }
+    const urls = photos.map((photo) => URL.createObjectURL(photo.blob));
+    setState({ ...state, dialog: { kind: 'photos', patientId, urls, index: 0 } });
+  } catch {
+    dialogReturnId = null;
+    setState(withMessage(state, { kind: 'error', text: '写真を読み込めませんでした。' }));
+  }
+}
+
+/** 写真のダイアログの「前」「次」。 */
+function setPhotoIndex(index: number): void {
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'photos') {
+    return;
+  }
+  if (index < 0 || index >= dialog.urls.length) {
+    return;
+  }
+  setState({ ...state, dialog: { ...dialog, index } });
 }
 
 /** 名前と住所を写した状態の、新規登録フォームを開く(保存すると別の訪問先になる)。 */
@@ -1140,17 +1280,29 @@ function renderScreen(): HTMLElement {
         },
       }, currentNotice(), lastWeekShortcut());
     case 'form':
-      return renderPatientForm(currentEditingPatient(), formDraft, state.message, {
-        onSave: (values) => {
-          void handleSaveRequest(values, false);
+      return renderPatientForm(
+        currentEditingPatient(),
+        formDraft,
+        state.message,
+        {
+          onSave: (values) => {
+            void handleSaveRequest(values, false);
+          },
+          onSaveAndContinue: (values) => {
+            void handleSaveRequest(values, true);
+          },
+          onCancel: (values) => {
+            handleFormCancel(values);
+          },
+          onAddPhoto: (file) => {
+            void addPhotoFromFile(file);
+          },
+          onDeletePhoto: (id) => {
+            void deleteFormPhoto(id);
+          },
         },
-        onSaveAndContinue: (values) => {
-          void handleSaveRequest(values, true);
-        },
-        onCancel: (values) => {
-          handleFormCancel(values);
-        },
-      });
+        formPhotos,
+      );
     case 'order':
       return renderRouteOrder(state, routeContext, {
         onMove: (id, direction) => {
@@ -1176,21 +1328,32 @@ function renderScreen(): HTMLElement {
         },
       });
     case 'map':
-      return renderRouteMap(state, new Map(openedRoutes), DEFAULT_MAP_PROVIDER, routeContext, todayVisited(), {
-        onOpenRoute: handleOpenRoute,
-        onBack: () => setState(withScreen(state, { name: 'order' })),
-        onChooseStops: () => setState(withScreen(state, { name: 'list' })),
-        onShare: () => {
-          void handleShareRoutes();
+      return renderRouteMap(
+        state,
+        new Map(openedRoutes),
+        DEFAULT_MAP_PROVIDER,
+        routeContext,
+        todayVisited(),
+        photoCounts,
+        {
+          onOpenRoute: handleOpenRoute,
+          onBack: () => setState(withScreen(state, { name: 'order' })),
+          onChooseStops: () => setState(withScreen(state, { name: 'list' })),
+          onShare: () => {
+            void handleShareRoutes();
+          },
+          onCopyLink: () => {
+            void handleCopyRouteLink();
+          },
+          onToggleVisited: (id) => {
+            void toggleVisited(id);
+          },
+          onOpenLocation: openLocation,
+          onOpenPhotos: (id) => {
+            void openPhotos(id);
+          },
         },
-        onCopyLink: () => {
-          void handleCopyRouteLink();
-        },
-        onToggleVisited: (id) => {
-          void toggleVisited(id);
-        },
-        onOpenLocation: openLocation,
-      });
+      );
     case 'settings':
       return renderSettings(state, settingsInfo, {
         onExport: () => {
@@ -1290,6 +1453,7 @@ function renderApp(): HTMLElement {
       continueCount = 0;
       formDraft = null;
       setState(withScreen(state, { name: 'form', patientId: id }));
+      void loadFormPhotos(id);
     },
     onOpenLocation: openLocation,
     onStartMeasuring: () => {
@@ -1305,6 +1469,7 @@ function renderApp(): HTMLElement {
     onUndo: () => {
       void undoLocation();
     },
+    onPhotoIndex: setPhotoIndex,
     onClose: closeAnyDialog,
   });
   if (dialog) {
@@ -1352,7 +1517,7 @@ function render(): void {
   if (hadDialog && dialogReturnId !== null) {
     root!
       .querySelector<HTMLElement>(
-        `[data-testid="row-menu"][data-id="${dialogReturnId}"], [data-testid="stop-menu"][data-id="${dialogReturnId}"], [data-testid="location-pin"][data-id="${dialogReturnId}"]`,
+        `[data-testid="row-menu"][data-id="${dialogReturnId}"], [data-testid="stop-menu"][data-id="${dialogReturnId}"], [data-testid="location-pin"][data-id="${dialogReturnId}"], [data-testid="photo-count"][data-id="${dialogReturnId}"]`,
       )
       ?.focus();
     dialogReturnId = null;
@@ -1390,6 +1555,7 @@ function startApp(): void {
     loadSettingsInfo(),
     loadRouteContext(),
     deleteHistoryBefore(keepFromDate(new Date())).catch(() => undefined).then(() => loadHistory()),
+    loadPhotoCounts(),
   ]).then(() => undefined);
   (window as WindowWithStartup).__routeAutoInputStartup = startup;
   void startup;

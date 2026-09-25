@@ -7,6 +7,8 @@ const handlers = (): PatientFormHandlers => ({
   onSave: vi.fn(),
   onSaveAndContinue: vi.fn(),
   onCancel: vi.fn(),
+  onAddPhoto: vi.fn(),
+  onDeletePhoto: vi.fn(),
 });
 
 const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: string): T =>
@@ -306,5 +308,60 @@ describe('renderPatientForm: 訪問のための情報(駐車・メモ)', () => {
     const element = renderPatientForm(patient, null, null, handlers());
     expect(parkingSelect(element).value).toBe('coin');
     expect(noteInput(element).value).toBe('北側の月極');
+  });
+});
+
+describe('renderPatientForm: 写真', () => {
+  const patient = createPatient('山田', '東京都');
+  const photos = [
+    { id: 'p1', url: 'blob:1' },
+    { id: 'p2', url: 'blob:2' },
+  ];
+
+  it('新規登録では、案内だけ出て、サムネイルや追加は出ない', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    expect(element.textContent).toContain('保存したあと、編集から写真を追加できます。');
+    expect(element.querySelector('[data-testid="photo-thumb"]')).toBeNull();
+    expect(element.querySelector('[data-testid="photo-input"]')).toBeNull();
+  });
+
+  it('編集では、サムネイルと削除ボタンを写真の数だけ出す', () => {
+    const element = renderPatientForm(patient, null, null, handlers(), photos);
+    const thumbs = [...element.querySelectorAll<HTMLImageElement>('[data-testid="photo-thumb"]')];
+    expect(thumbs.map((img) => img.src)).toEqual(['blob:1', 'blob:2']);
+    expect(thumbs.map((img) => img.alt)).toEqual(['写真1', '写真2']);
+    expect(element.querySelectorAll('[data-testid="photo-delete"]')).toHaveLength(2);
+  });
+
+  it('3枚未満なら追加ボタン(file input)を出す。押して選ぶと onAddPhoto(file)', () => {
+    const spies = handlers();
+    const element = renderPatientForm(patient, null, null, spies, photos);
+    const input = element.querySelector<HTMLInputElement>('[data-testid="photo-input"]')!;
+    expect(input).not.toBeNull();
+    expect(input.accept).toBe('image/*');
+    expect(input.getAttribute('capture')).toBe('environment');
+    const file = new File(['x'], 'photo.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change'));
+    expect(spies.onAddPhoto).toHaveBeenCalledWith(file);
+    expect(input.value).toBe('');
+  });
+
+  it('3枚あれば追加ボタンは出ない', () => {
+    const three = [...photos, { id: 'p3', url: 'blob:3' }];
+    const element = renderPatientForm(patient, null, null, handlers(), three);
+    expect(element.querySelector('[data-testid="photo-input"]')).toBeNull();
+  });
+
+  it('削除ボタンを押すと onDeletePhoto(id)', () => {
+    const spies = handlers();
+    const element = renderPatientForm(patient, null, null, spies, photos);
+    q<HTMLButtonElement>(element, 'photo-delete').click();
+    expect(spies.onDeletePhoto).toHaveBeenCalledWith('p1');
+  });
+
+  it('撮影時の注意を出す', () => {
+    const element = renderPatientForm(patient, null, null, handlers(), photos);
+    expect(element.textContent).toContain('表札や人が写らないようにしてください。');
   });
 });

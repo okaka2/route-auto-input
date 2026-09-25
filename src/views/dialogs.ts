@@ -36,6 +36,8 @@ export type DialogHandlers = {
   onRemove(): void;
   /** 位置の登録: 保存した直後に元へ戻す。 */
   onUndo(): void;
+  /** 写真のダイアログ: 前/次へ切り替える(表示中のindexを変える)。 */
+  onPhotoIndex(index: number): void;
   onClose(): void;
 };
 
@@ -63,6 +65,8 @@ export function renderDialog(state: AppState, handlers: DialogHandlers): HTMLEle
     content = renderConfirmDeleteSelected(state.selectedIds.length, handlers);
   } else if (dialog.kind === 'similar') {
     content = renderSimilar(state, dialog, handlers);
+  } else if (dialog.kind === 'photos') {
+    content = renderPhotos(dialog, handlers);
   } else {
     const patient = state.patients.find((item) => item.id === dialog.id);
     if (patient === undefined) {
@@ -228,6 +232,52 @@ function renderSimilar(
     actions.append(item);
   }
   return [title, list, actions];
+}
+
+/** 写真のダイアログ: 1枚を大きく表示し、前/次で切り替える。 */
+function renderPhotos(dialog: Extract<Dialog, { kind: 'photos' }>, handlers: DialogHandlers): HTMLElement[] {
+  const title = document.createElement('h2');
+  title.id = 'dialog-title';
+  title.className = 'sheet-title';
+  title.textContent = '写真';
+
+  const view = document.createElement('div');
+  view.className = 'photo-view';
+  const img = document.createElement('img');
+  img.src = dialog.urls[dialog.index] ?? '';
+  img.alt = `写真${dialog.index + 1}`;
+  img.dataset.testid = 'photo-view';
+  view.append(img);
+
+  const nav = document.createElement('div');
+  nav.className = 'photo-nav';
+
+  const prev = document.createElement('button');
+  prev.type = 'button';
+  prev.dataset.testid = 'photo-prev';
+  prev.textContent = '‹ 前';
+  prev.disabled = dialog.index <= 0;
+  prev.addEventListener('click', () => handlers.onPhotoIndex(dialog.index - 1));
+
+  const count = document.createElement('span');
+  count.className = 'photo-count-label';
+  count.dataset.testid = 'photo-count-label';
+  count.textContent = `${dialog.index + 1} / ${dialog.urls.length}`;
+
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.dataset.testid = 'photo-next';
+  next.textContent = '次 ›';
+  next.disabled = dialog.index >= dialog.urls.length - 1;
+  next.addEventListener('click', () => handlers.onPhotoIndex(dialog.index + 1));
+
+  nav.append(prev, count, next);
+
+  const buttons = document.createElement('div');
+  buttons.className = 'sheet-buttons';
+  buttons.append(actionButton('閉じる', 'dialog-cancel', () => handlers.onClose()));
+
+  return [title, view, nav, buttons];
 }
 
 function renderConfirmDeleteSelected(count: number, handlers: DialogHandlers): HTMLElement[] {

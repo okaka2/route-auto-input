@@ -16,6 +16,7 @@ const handlers = (): RouteMapHandlers => ({
   onCopyLink: vi.fn(),
   onToggleVisited: vi.fn(),
   onOpenLocation: vi.fn(),
+  onOpenPhotos: vi.fn(),
 });
 
 const ctx = (): RouteContext => defaultContext;
@@ -45,7 +46,8 @@ const render = (
   provider: MapProvider = googleMapsProvider,
   context: RouteContext = defaultContext,
   visited: ReadonlyMap<string, string> = new Map(),
-) => renderRouteMap(state, opened, provider, context, visited, spies);
+  photoCounts: ReadonlyMap<string, number> = new Map(),
+) => renderRouteMap(state, opened, provider, context, visited, photoCounts, spies);
 
 const cards = (element: HTMLElement) =>
   [...element.querySelectorAll<HTMLElement>('[data-testid="route-card"]')];
@@ -325,7 +327,7 @@ describe('renderRouteMap: 訪問済み', () => {
     const [a, b] = state.patients;
     const visited = new Map([[a!.id, new Date(2026, 8, 22, 9, 12).toISOString()]]);
     const spies = handlers();
-    const element = renderRouteMap(state, new Map(), googleMapsProvider, ctx(), visited, spies);
+    const element = renderRouteMap(state, new Map(), googleMapsProvider, ctx(), visited, new Map(), spies);
     const buttons = [...element.querySelectorAll<HTMLButtonElement>('[data-testid="visited-toggle"]')];
     expect(buttons).toHaveLength(2);
     expect(buttons[0]!.textContent).toBe('済 9:12');
@@ -333,6 +335,29 @@ describe('renderRouteMap: 訪問済み', () => {
     expect(buttons[1]!.textContent).toBe('済');
     buttons[1]!.click();
     expect(spies.onToggleVisited).toHaveBeenCalledWith(b!.id);
+  });
+});
+
+describe('renderRouteMap: 写真', () => {
+  it('写真がある訪問先だけに photo-count「写真 N」を出し、押すと onOpenPhotos(id)', () => {
+    const withPhotos = createPatient('場所1', '東京都1-1');
+    const withoutPhotos = createPatient('場所2', '東京都2-2');
+    const state = { ...createInitialState([withPhotos, withoutPhotos]), selectedIds: [withPhotos.id, withoutPhotos.id] };
+    const spies = handlers();
+    const element = render(state, new Map(), spies, googleMapsProvider, defaultContext, new Map(), new Map([[withPhotos.id, 2]]));
+    const buttons = [...element.querySelectorAll<HTMLButtonElement>('[data-testid="photo-count"]')];
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]!.dataset.id).toBe(withPhotos.id);
+    expect(buttons[0]!.textContent).toBe('写真 2');
+    buttons[0]!.click();
+    expect(spies.onOpenPhotos).toHaveBeenCalledWith(withPhotos.id);
+  });
+
+  it('件数が0なら photo-count は出ない', () => {
+    const patient = createPatient('場所1', '東京都1-1');
+    const state = { ...createInitialState([patient]), selectedIds: [patient.id] };
+    const element = render(state, new Map(), handlers(), googleMapsProvider, defaultContext, new Map(), new Map([[patient.id, 0]]));
+    expect(element.querySelector('[data-testid="photo-count"]')).toBeNull();
   });
 });
 
@@ -397,6 +422,7 @@ describe('renderRouteMap: 出発・帰着', () => {
       googleMapsProvider,
       { ends: { start: 'office', end: 'office' }, office },
       new Map(),
+      new Map(),
       handlers(),
     );
     const cards = [...element.querySelectorAll('[data-testid="route-card"]')];
@@ -411,6 +437,7 @@ describe('renderRouteMap: 出発・帰着', () => {
       googleMapsProvider,
       { ends: DEFAULT_ROUTE_ENDS, office: null },
       new Map(),
+      new Map(),
       handlers(),
     );
     expect(element.querySelector('[data-testid="route-ends"]')).toBeNull();
@@ -421,6 +448,7 @@ describe('renderRouteMap: 出発・帰着', () => {
       new Map(),
       googleMapsProvider,
       { ends: { start: 'office', end: 'office' }, office },
+      new Map(),
       new Map(),
       handlers(),
     );

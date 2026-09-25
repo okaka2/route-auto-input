@@ -1,12 +1,17 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { Office, RouteEnds } from './routePlan';
-import type { Patient } from './types';
+import type { Patient, Photo, Spot } from './types';
 
 const DB_NAME = 'route-auto-input';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE = 'patients';
 const META_STORE = 'meta';
 const HISTORY_STORE = 'history';
+const PHOTOS_STORE = 'photos';
+const SPOTS_STORE = 'spots';
+
+/** 訪問先1件につき登録できる写真の枚数。 */
+export const MAX_PHOTOS_PER_PATIENT = 3;
 
 /** 設定値のキーと型。 */
 export type MetaValues = {
@@ -31,6 +36,12 @@ interface RouteAutoInputDB extends DBSchema {
   };
   meta: { key: string; value: unknown };
   history: { key: string; value: HistoryEntry };
+  photos: {
+    key: string;
+    value: Photo;
+    indexes: { patientId: string };
+  };
+  spots: { key: string; value: Spot };
 }
 
 let connection: Promise<IDBPDatabase<RouteAutoInputDB>> | null = null;
@@ -47,6 +58,11 @@ function getDb(): Promise<IDBPDatabase<RouteAutoInputDB>> {
       }
       if (oldVersion < 3) {
         db.createObjectStore(HISTORY_STORE, { keyPath: 'date' });
+      }
+      if (oldVersion < 4) {
+        const photoStore = db.createObjectStore(PHOTOS_STORE, { keyPath: 'id' });
+        photoStore.createIndex('patientId', 'patientId');
+        db.createObjectStore(SPOTS_STORE, { keyPath: 'id' });
       }
     },
   });
@@ -173,4 +189,108 @@ export async function deleteHistoryBefore(date: string): Promise<number> {
 export async function clearHistory(): Promise<void> {
   const db = await getDb();
   await db.clear(HISTORY_STORE);
+}
+
+/** その訪問先の写真を、登録した順(古い順)で返す。 */
+export async function listPhotos(patientId: string): Promise<Photo[]> {
+  const db = await getDb();
+  return db.getAllFromIndex(PHOTOS_STORE, 'patientId', patientId);
+}
+
+/** 訪問先ごとの写真の枚数(1枚も無い訪問先は含まれない)。 */
+export async function countPhotosByPatient(): Promise<Map<string, number>> {
+  const db = await getDb();
+  const counts = new Map<string, number>();
+  for (const photo of await db.getAll(PHOTOS_STORE)) {
+    counts.set(photo.patientId, (counts.get(photo.patientId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** 写真を追加する。すでに上限(MAX_PHOTOS_PER_PATIENT)まであれば、書き込まずにエラーにする。 */
+export async function addPhoto(photo: Photo): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(PHOTOS_STORE, 'readwrite');
+  const count = await tx.store.index('patientId').count(photo.patientId);
+  if (count >= MAX_PHOTOS_PER_PATIENT) {
+    throw new Error('写真は1件につき3枚までです。');
+  }
+  await tx.store.put(photo);
+  await tx.done;
+}
+
+export async function deletePhoto(id: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(PHOTOS_STORE, id);
+}
+
+/** 訪問先を削除するときにあわせて呼ぶ。指定した訪問先ぶんの写真をすべて消す。 */
+export async function deletePhotosOf(patientIds: readonly string[]): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(PHOTOS_STORE, 'readwrite');
+  const index = tx.store.index('patientId');
+  for (const patientId of patientIds) {
+    for (const key of await index.getAllKeys(patientId)) {
+      await tx.store.delete(key);
+    }
+  }
+  await tx.done;
+}
+
+/** バックアップの書き出し用。 */
+export async function listAllPhotos(): Promise<Photo[]> {
+  const db = await getDb();
+  return db.getAll(PHOTOS_STORE);
+}
+
+/** バックアップの読み込み用(同じidは上書き)。 */
+export async function putPhotos(photos: readonly Photo[]): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(PHOTOS_STORE, 'readwrite');
+  for (const photo of photos) {
+    await tx.store.put(photo);
+  }
+  await tx.done;
+}
+
+/** 名簿に無い訪問先を指す、孤立した写真を消す(バックアップの読み込み後の片付けなど)。消した件数を返す。 */
+export async function deleteOrphanPhotos(validPatientIds: ReadonlySet<string>): Promise<number> {
+  const db = await getDb();
+  const tx = db.transaction(PHOTOS_STORE, 'readwrite');
+  let cursor = await tx.store.openCursor();
+  let removed = 0;
+  while (cursor) {
+    if (!validPatientIds.has(cursor.value.patientId)) {
+      await cursor.delete();
+      removed += 1;
+    }
+    cursor = await cursor.continue();
+  }
+  await tx.done;
+  return removed;
+}
+
+export async function listSpots(): Promise<Spot[]> {
+  const db = await getDb();
+  return db.getAll(SPOTS_STORE);
+}
+
+export async function putSpot(spot: Spot): Promise<void> {
+  const db = await getDb();
+  await db.put(SPOTS_STORE, spot);
+}
+
+export async function deleteSpot(id: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(SPOTS_STORE, id);
+}
+
+/** バックアップの読み込み用(同じidは上書き)。 */
+export async function putSpots(spots: readonly Spot[]): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(SPOTS_STORE, 'readwrite');
+  for (const spot of spots) {
+    await tx.store.put(spot);
+  }
+  await tx.done;
 }

@@ -21,6 +21,8 @@ export type RouteMapHandlers = {
   onToggleVisited(id: string): void;
   /** 位置が未登録の訪問先の行の「位置」ボタン。位置の登録ダイアログを開く。 */
   onOpenLocation(id: string): void;
+  /** 写真がある訪問先の行の「写真 N」ボタン。写真のダイアログを開く。 */
+  onOpenPhotos(id: string): void;
 };
 
 /** done: 開いた / next: 次に開く(最初の未開封) / later: それ以降 */
@@ -33,6 +35,7 @@ type CardState = 'done' | 'next' | 'later';
  *
  * @param opened 開いたルートの番号 → 開いた日時(ISO 8601。不明なら '')
  * @param visited 訪問先の id → 訪問済みにした日時(ISO 8601)
+ * @param photoCounts 訪問先の id → 登録した写真の枚数(0枚、または未登録なら出さない)
  */
 export function renderRouteMap(
   state: AppState,
@@ -40,6 +43,7 @@ export function renderRouteMap(
   provider: MapProvider,
   context: RouteContext,
   visited: ReadonlyMap<string, string>,
+  photoCounts: ReadonlyMap<string, number>,
   handlers: RouteMapHandlers,
 ): HTMLElement {
   const container = document.createElement('div');
@@ -66,7 +70,9 @@ export function renderRouteMap(
   cards.className = 'route-cards';
   plans.forEach((plan, index) => {
     const cardState: CardState = opened.has(index) ? 'done' : index === nextIndex ? 'next' : 'later';
-    cards.append(renderRouteCard(plan, index, cardState, opened.get(index) ?? '', provider, visited, handlers));
+    cards.append(
+      renderRouteCard(plan, index, cardState, opened.get(index) ?? '', provider, visited, photoCounts, handlers),
+    );
   });
   container.append(cards, renderShare(handlers));
   return container;
@@ -147,6 +153,7 @@ function renderRouteCard(
   openedAt: string,
   provider: MapProvider,
   visited: ReadonlyMap<string, string>,
+  photoCounts: ReadonlyMap<string, number>,
   handlers: RouteMapHandlers,
 ): HTMLElement {
   const route = plan.stops;
@@ -181,7 +188,7 @@ function renderRouteCard(
     card.append(ends);
   }
 
-  card.append(renderStops(route, visited, handlers));
+  card.append(renderStops(route, visited, photoCounts, handlers));
 
   const missingLocationCount = route.filter((patient) => !patient.location).length;
   if (missingLocationCount > 0) {
@@ -227,8 +234,13 @@ function renderRouteCard(
   return card;
 }
 
-/** 訪問先ごとの行(名前・電話リンク・「済」ボタン)。 */
-function renderStops(route: readonly Patient[], visited: ReadonlyMap<string, string>, handlers: RouteMapHandlers): HTMLElement {
+/** 訪問先ごとの行(名前・電話リンク・写真・「済」ボタン)。 */
+function renderStops(
+  route: readonly Patient[],
+  visited: ReadonlyMap<string, string>,
+  photoCounts: ReadonlyMap<string, number>,
+  handlers: RouteMapHandlers,
+): HTMLElement {
   const list = document.createElement('ul');
   list.className = 'route-stops';
   list.dataset.testid = 'route-stops';
@@ -253,6 +265,17 @@ function renderStops(route: readonly Patient[], visited: ReadonlyMap<string, str
       phone.setAttribute('aria-label', `${patient.name}に電話`);
       phone.textContent = '☎';
       item.append(phone);
+    }
+    const photoCount = photoCounts.get(patient.id) ?? 0;
+    if (photoCount > 0) {
+      const photos = document.createElement('button');
+      photos.type = 'button';
+      photos.className = 'photo-count';
+      photos.dataset.testid = 'photo-count';
+      photos.dataset.id = patient.id;
+      photos.textContent = `写真 ${photoCount}`;
+      photos.addEventListener('click', () => handlers.onOpenPhotos(patient.id));
+      item.append(photos);
     }
     if (!patient.location) {
       const pin = document.createElement('button');
