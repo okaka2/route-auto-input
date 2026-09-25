@@ -1,3 +1,9 @@
+/** GPSで取得、または貼り付けたURL/テキストから読み取った位置。 */
+export type GeoLocation = { lat: number; lng: number; accuracy: number | null; recordedAt: string; source: 'gps' | 'paste' };
+
+export type ParkingType = 'onsite' | 'coin' | 'street_permit' | 'management_ok' | 'unknown';
+export type Parking = { type: ParkingType; permitExpires?: string /* YYYY-MM-DD */ };
+
 export type Patient = {
   id: string;
   name: string;
@@ -8,6 +14,12 @@ export type Patient = {
   updatedAt: string;
   /** 任意。無ければ持たない。 */
   phone?: string;
+  /** 任意。無ければ持たない。 */
+  location?: GeoLocation;
+  /** 任意。無ければ持たない。 */
+  parking?: Parking;
+  /** 任意。無ければ持たない。 */
+  note?: string;
 };
 
 export type Screen =

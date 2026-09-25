@@ -1,3 +1,4 @@
+import { pointOf } from './geoPoint';
 import { splitIntoRoutes } from './routeSplitter';
 
 export type Office = { name: string; address: string };
@@ -40,7 +41,7 @@ export type RoutePlan<T> = {
  * 訪問順の訪問先を、出発地・帰着地を含めてルートごとに組み立てる。
  * 1本目だけ出発地を付け、最後の1本だけ帰着地を付ける。途中は前のルートの最後の訪問先から続く。
  */
-export function buildRoutePlans<T extends { address: string }>(
+export function buildRoutePlans<T extends { address: string; location?: { lat: number; lng: number } }>(
   stops: readonly T[],
   ends: RouteEnds,
   office: Office | null,
@@ -51,7 +52,7 @@ export function buildRoutePlans<T extends { address: string }>(
   return routes.map((route, index) => {
     const first = index === 0;
     const last = index === routes.length - 1;
-    const addresses = route.map((stop) => stop.address);
+    const addresses = route.map((stop) => pointOf(stop));
     if (first && e.start === 'office' && office) {
       addresses.unshift(office.address);
     }

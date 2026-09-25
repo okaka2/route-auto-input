@@ -62,4 +62,12 @@ describe('buildRoutePlans', () => {
     expect(plan!.fromCurrentLocation).toBe(true);
     expect(plan!.addresses).toEqual(['住所1', '住所2', office.address]);
   });
+  it('位置のある訪問先は座標で、ない訪問先は住所で地図に渡す', () => {
+    const stopsWithLocation = [
+      { id: 'a', address: '住所1', location: { lat: 35.1, lng: 139.1 } },
+      { id: 'b', address: '住所2' },
+    ];
+    const [plan] = buildRoutePlans(stopsWithLocation, { start: 'first', end: 'last' }, null, 10);
+    expect(plan!.addresses).toEqual(['35.100000,139.100000', '住所2']);
+  });
 });

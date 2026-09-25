@@ -18,6 +18,7 @@ import {
   type HistoryEntry,
 } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
+import { pointOf } from './geoPoint';
 import { dateKey, formatHistoryDate, formatVisits, keepFromDate, lastWeekSameWeekday, restoreSelection } from './history';
 import { shouldShowInstallHint } from './installHint';
 import { DEFAULT_MAP_PROVIDER } from './mapProviders';
@@ -752,19 +753,19 @@ async function handleCopyRouteLink(): Promise<void> {
   }
 }
 
-/** 住所が送信先へ渡ることを確認し、許可されたら共有用のテキストを返す。取りやめなら null。 */
+/** 住所または位置が送信先へ渡ることを確認し、許可されたら共有用のテキストを返す。取りやめなら null。 */
 function confirmedShareText(): string | null {
-  const addresses = selectedPatients(state).map((patient) => patient.address);
-  if (addresses.length === 0) {
+  const points = selectedPatients(state).map(pointOf);
+  if (points.length === 0) {
     return null;
   }
   const question =
-    `訪問先の住所(${addresses.length}件)が、送った相手と、送るのに使うアプリ(LINEなど)に渡ります。` +
+    `訪問先の住所または位置(${points.length}件)が、送った相手と、送るのに使うアプリ(LINEなど)に渡ります。` +
     '名前は含まれません。共有しますか?';
   if (!window.confirm(question)) {
     return null;
   }
-  return buildShareText(addresses, MAX_STOPS_PER_ROUTE, DEFAULT_MAP_PROVIDER);
+  return buildShareText(points, MAX_STOPS_PER_ROUTE, DEFAULT_MAP_PROVIDER);
 }
 
 function showCopiedMessage(): void {
