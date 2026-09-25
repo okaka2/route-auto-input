@@ -181,9 +181,14 @@ let savingPatient = false;
 let continueCount = 0;
 const deletingPatientIds = new Set<string>();
 let deletingSelected = false;
+// お役立ち地点の保存の二重実行防止(「この位置で登録」の連打で二重に登録しない)。
+let savingSpot = false;
 
 // 「⋯」から開いたダイアログを、編集・複製・削除以外で閉じたとき、フォーカスを戻す行のid。
+// お役立ち地点の登録ダイアログを閉じたときは SPOT_RETURN_ID を入れ、地図の画面の
+// 「今いる場所をお役立ち地点に登録」ボタンへフォーカスを戻す。
 let dialogReturnId: string | null = null;
+const SPOT_RETURN_ID = '__spot-add';
 
 // 位置を測っている最中なら、止めるための関数。測っていなければ null。
 // 止める場所はsetState一箇所にまとめる(下記参照)。
@@ -196,7 +201,14 @@ function stopCurrentMeasuring(): void {
 }
 
 // 設定画面に出す情報(最後のバックアップ日時・データの保存状態・表示の設定・事業所)。
-let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting(), office: null, spots: [] };
+// spotsは含めない(この変数はDBから読み直すたびに更新される情報の置き場で、お役立ち地点は
+// 別に持っている`spots`が唯一の出所。設定画面へ渡す直前に{ ...settingsInfo, spots }で合わせる)。
+let settingsInfo: Omit<SettingsInfo, 'spots'> = {
+  lastBackupAt: null,
+  persisted: null,
+  theme: loadThemeSetting(),
+  office: null,
+};
 
 // 出発・帰着の選び方と事業所。起動時に loadRouteContext() で読み直す(Task 3 が使う)。
 let routeContext: RouteContext = { ends: DEFAULT_ROUTE_ENDS, office: null };
@@ -392,10 +404,10 @@ async function loadPhotoCounts(): Promise<void> {
   render();
 }
 
-/** お役立ち地点をDBから読み直す。起動時と、登録・削除のあとに呼ぶ。 */
+/** お役立ち地点をDBから読み直す。起動時と、登録・削除のあとに呼ぶ。新しい順(登録日時の降順)にそろえる。 */
 async function loadSpots(): Promise<void> {
   try {
-    spots = await listSpots();
+    spots = (await listSpots()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   } catch {
     spots = [];
   }
@@ -1029,7 +1041,7 @@ async function removeLocation(): Promise<void> {
 
 /** 地図の画面の「今いる場所をお役立ち地点に登録」。お役立ち地点の登録ダイアログを開く。 */
 function openSpotDialog(): void {
-  dialogReturnId = null;
+  dialogReturnId = SPOT_RETURN_ID;
   setState({
     ...state,
     dialog: { kind: 'spot', phase: 'idle', best: null, error: null, spotKind: SPOT_KINDS[0]!.value, note: '' },
@@ -1051,6 +1063,11 @@ async function saveSpot(): Promise<void> {
   if (dialog?.kind !== 'spot' || dialog.best === null) {
     return;
   }
+  if (savingSpot) {
+    // 保存中の二重タップ。何もしない(2件目のUUIDが発行されるのを防ぐ)。
+    return;
+  }
+  savingSpot = true;
   // 測定中に保存したら、そこで測定を止める(止めないと、この後の更新がsaved状態を上書きしてしまう)。
   stopCurrentMeasuring();
   const spot: Spot = {
@@ -1070,6 +1087,8 @@ async function saveSpot(): Promise<void> {
     }
   } catch {
     setState(withMessage(state, { kind: 'error', text: 'お役立ち地点を保存できませんでした。' }));
+  } finally {
+    savingSpot = false;
   }
 }
 
@@ -1662,6 +1681,12 @@ function render(): void {
       }
     }
     dialog.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
+    return;
+  }
+  if (hadDialog && dialogReturnId === SPOT_RETURN_ID) {
+    // 地図の画面の「今いる場所をお役立ち地点に登録」から開いた(特定の行に紐づかない)。
+    root!.querySelector<HTMLElement>('[data-testid="spot-add-button"]')?.focus();
+    dialogReturnId = null;
     return;
   }
   if (hadDialog && dialogReturnId !== null) {

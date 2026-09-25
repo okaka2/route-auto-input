@@ -1,5 +1,6 @@
 import { APP_NAME, APP_VERSION } from '../appInfo';
 import { formatLastBackup } from '../backupReminder';
+import { formatDateOnly } from '../format';
 import type { Office } from '../routePlan';
 import { spotLabel } from '../spots';
 import type { ThemeSetting } from '../theme';
@@ -55,15 +56,6 @@ export function renderSettings(
     renderAbout(),
   );
   return container;
-}
-
-/** 日時(ISO 8601)を「月/日」の形にする(端末のローカル時刻)。読めなければ空文字。 */
-function formatDateOnly(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 /** 「お役立ち地点」: 種類・メモ・登録日の一覧と、各行の削除。 */

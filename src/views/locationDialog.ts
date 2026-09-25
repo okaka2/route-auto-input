@@ -1,3 +1,4 @@
+import { formatDateOnly } from '../format';
 import { accuracyLevel, pointOf } from '../geoPoint';
 import { buildGoogleMapsUrl } from '../googleMapsUrl';
 import { SPOT_KINDS } from '../spots';
@@ -30,15 +31,6 @@ export type SpotDialogHandlers = {
   onSaveSpot(): void;
   onClose(): void;
 };
-
-/** 日時(ISO 8601)を「月/日」の形にする(端末のローカル時刻)。読めなければ空文字。 */
-function formatDateOnly(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return `${date.getMonth() + 1}/${date.getDate()}`;
-}
 
 /** 「誤差 ±Nm」。精度が分からない(貼り付けなど)ときは空文字。 */
 function accuracyPhrase(accuracy: number | null): string {

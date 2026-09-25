@@ -261,6 +261,11 @@ describe('画面の文言(禁止語が出ない)', () => {
           `地図(${label}・${ctxLabel})`,
           renderRouteMap(state, opened, googleMapsProvider, context, new Map(), new Map(), spots, handlers).outerHTML,
         );
+        // お役立ち地点が1件も無い(spots: [])ときの文言も調べる(見出しが「お役立ち地点」になる)。
+        expectClean(
+          `地図(${label}・${ctxLabel}・地点なし)`,
+          renderRouteMap(state, opened, googleMapsProvider, context, new Map(), new Map(), [], handlers).outerHTML,
+        );
       }
     }
   });

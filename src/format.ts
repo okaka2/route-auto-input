@@ -34,3 +34,18 @@ export function formatTime(iso: string): string {
 export function formatPhoneHref(phone: string): string {
   return `tel:${phone.replace(/[^\d+]/g, '')}`;
 }
+
+/**
+ * 日時(ISO 8601)を「月/日」の形にする(端末のローカル時刻)。
+ * 空文字や読めない日時のときは空文字を返す(例外は投げない)。
+ */
+export function formatDateOnly(iso: string): string {
+  if (iso === '') {
+    return '';
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}

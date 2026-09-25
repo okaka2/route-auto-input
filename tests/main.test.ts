@@ -58,6 +58,77 @@ async function armHistoryRecordWait(): Promise<() => Promise<void>> {
   return () => done;
 }
 
+/**
+ * 設定画面を開くと裏で始まる読み込み(main.tsのloadSettingsInfo。db.getMeta('lastBackupAt')と
+ * protection.isStoragePersistedの両方が終わってからrenderする)が終わるまで待てるようにする。
+ * 待たずにテストが終わると、次のテストのbeforeEach(deleteDB)と競合して
+ * toHaveLength(1)などが時々失敗することがあるため(armHistoryRecordWaitと同じ理由)。
+ * 片方だけ待つと、もう片方がその後にrenderを呼ぶタイミングまでは待てず、同じ問題が残る。
+ */
+async function armSettingsLoadWait(): Promise<() => Promise<void>> {
+  const db = await import('../src/db');
+  const protection = await import('../src/protection');
+
+  let resolveMeta: () => void = () => {};
+  const metaDone = new Promise<void>((resolve) => {
+    resolveMeta = resolve;
+  });
+  const originalGetMeta = db.getMeta;
+  // loadSettingsInfo が読む 'lastBackupAt' の呼び出しだけを捕まえる
+  // (起動時のloadRouteContextも別のキーでgetMetaを呼ぶため、キーで区別する)。
+  const metaSpy = vi.spyOn(db, 'getMeta').mockImplementation(async (key: Parameters<typeof db.getMeta>[0]) => {
+    if (key !== 'lastBackupAt') {
+      return originalGetMeta(key);
+    }
+    metaSpy.mockRestore();
+    const result = await originalGetMeta(key);
+    resolveMeta();
+    return result;
+  });
+
+  let resolvePersisted: () => void = () => {};
+  const persistedDone = new Promise<void>((resolve) => {
+    resolvePersisted = resolve;
+  });
+  const originalIsStoragePersisted = protection.isStoragePersisted;
+  const persistedSpy = vi.spyOn(protection, 'isStoragePersisted').mockImplementation(async () => {
+    persistedSpy.mockRestore();
+    const result = await originalIsStoragePersisted();
+    resolvePersisted();
+    return result;
+  });
+
+  return () => Promise.all([metaDone, persistedDone]).then(() => undefined);
+}
+
+/**
+ * 設定のお役立ち地点の「削除」(handleDeleteSpot: db.deleteSpot → db.listSpots → render)が
+ * 終わるまで待てるようにする(armHistoryRecordWaitと同じ理由・同じ仕組み)。
+ * 「まだありません」がDOMに出る前後で、この一連の書き込み・読み直しが完全に終わっている
+ * 保証が無いと、次のテストのbeforeEach(deleteDB)と競合することがある。
+ */
+async function armSpotDeleteWait(): Promise<() => Promise<void>> {
+  const db = await import('../src/db');
+  let resolveDone: () => void = () => {};
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
+  const originalDeleteSpot = db.deleteSpot;
+  const deleteSpy = vi.spyOn(db, 'deleteSpot').mockImplementation(async (id) => {
+    deleteSpy.mockRestore();
+    const result = await originalDeleteSpot(id);
+    const originalListSpots = db.listSpots;
+    const listSpy = vi.spyOn(db, 'listSpots').mockImplementation(async () => {
+      listSpy.mockRestore();
+      const listResult = await originalListSpots();
+      resolveDone();
+      return listResult;
+    });
+    return result;
+  });
+  return () => done;
+}
+
 const el = <T extends HTMLElement = HTMLElement>(selector: string): T | null =>
   document.querySelector<T>(selector);
 
@@ -2073,12 +2144,12 @@ describe('お役立ち地点の登録', () => {
     el<HTMLButtonElement>('[data-testid="spot-add-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="location-measure-button"]')).not.toBeNull());
 
-    // 種類とメモを、測る前に入力しておく(値が保たれるか確かめる)。
+    // 種類とメモを、測る前に入力しておく(値が保たれるか確かめる)。前後の空白は保存時に取り除かれる。
     const select = el<HTMLSelectElement>('[data-testid="spot-kind-select"]')!;
     select.value = 'toilet';
     select.dispatchEvent(new Event('change'));
     const note = el<HTMLInputElement>('[data-testid="spot-note-input"]')!;
-    note.value = 'きれいなトイレ';
+    note.value = '  きれいなトイレ  ';
     note.dispatchEvent(new Event('input'));
 
     el<HTMLButtonElement>('[data-testid="location-measure-button"]')!.click();
@@ -2086,17 +2157,24 @@ describe('お役立ち地点の登録', () => {
     emit(35.0001, 139.0001, 15);
     await waitFor(() => expect(el<HTMLButtonElement>('[data-testid="spot-save-button"]')?.disabled).toBe(false));
 
-    // 入力した種類・メモは、測定中の再描画をまたいで保たれている。
+    // 入力した種類・メモは、測定中の再描画をまたいで保たれている(メモはまだ前後の空白付き)。
     expect(el<HTMLSelectElement>('[data-testid="spot-kind-select"]')!.value).toBe('toilet');
-    expect(el<HTMLInputElement>('[data-testid="spot-note-input"]')!.value).toBe('きれいなトイレ');
+    expect(el<HTMLInputElement>('[data-testid="spot-note-input"]')!.value).toBe('  きれいなトイレ  ');
 
     el<HTMLButtonElement>('[data-testid="spot-save-button"]')!.click();
     await waitFor(async () => {
       const saved = await listSpots();
       expect(saved).toHaveLength(1);
-      expect(saved[0]).toMatchObject({ kind: 'toilet', note: 'きれいなトイレ' });
+      // 保存した内容: 種類・前後の空白を取り除いたメモ・測った精度・source: 'gps'。
+      expect(saved[0]).toMatchObject({
+        kind: 'toilet',
+        note: 'きれいなトイレ',
+        location: { lat: 35.0001, lng: 139.0001, accuracy: 15, source: 'gps' },
+      });
     });
     await waitFor(() => expect(el('body')?.textContent).toContain('登録しました'));
+    // 保存したら測定は止まっている。
+    await waitFor(() => expect(geolocation.clearWatch).toHaveBeenCalled());
 
     el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
     await waitFor(() => expect(el('[data-testid="dialog"]')).toBeNull());
@@ -2108,17 +2186,92 @@ describe('お役立ち地点の登録', () => {
     expect(el('[data-testid="nearby-spots"] li a')?.textContent).toContain('きれいなトイレ');
 
     // 設定にも出る(一覧の画面からしか開けないので、タブで一覧へ戻ってから開く)。
+    // 設定を開くと裏でloadSettingsInfoが始まるので、次のテストのbeforeEach(deleteDB)と
+    // 競合しないよう、テストを終える前にその読み込みが終わるのを待つ。
+    const settingsLoaded = await armSettingsLoadWait();
     el<HTMLButtonElement>('[data-testid="tab-list"]')!.click();
     await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
     await waitFor(() => expect(el('body')?.textContent).toContain('きれいなトイレ'));
     expect(el('body')?.textContent).toContain('登録)');
+    await settingsLoaded();
 
-    // 削除する(確認してから)。
+    // 削除する(確認してから)。次のテストのbeforeEach(deleteDB)と競合しないよう、
+    // 削除→読み直し→renderの一連が完全に終わるまで待ってからテストを終える。
+    const spotDeleted = await armSpotDeleteWait();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="spot-delete"]')!.click();
     expect(window.confirm).toHaveBeenCalledWith('この地点を消しますか?');
+    await spotDeleted();
     await waitFor(() => expect(el('body')?.textContent).toContain('まだありません'));
     await waitFor(async () => expect(await listSpots()).toEqual([]));
+  });
+
+  /** 訪問先を1人登録し、選んで地図を開く画面まで進み、お役立ち地点の登録ダイアログで測定を始めるところまで。 */
+  async function setupSpotMeasuring(): Promise<{
+    geolocation: Geolocation & { watchPosition: ReturnType<typeof vi.fn>; clearWatch: ReturnType<typeof vi.fn> };
+    emit: (lat: number, lng: number, accuracy: number) => void;
+  }> {
+    const { geolocation, emit } = fakeGeolocation();
+    Object.defineProperty(navigator, 'geolocation', { value: geolocation, configurable: true });
+
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = {
+      ...createPatient('山田 太郎', '東京都千代田区1-1'),
+      location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' as const },
+    };
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLInputElement>(`input[data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    const historyRecorded = await armHistoryRecordWait();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await historyRecorded();
+
+    await waitFor(() => expect(el('[data-testid="spot-add-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="spot-add-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-measure-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="location-measure-button"]')!.click();
+    await waitFor(() => expect(geolocation.watchPosition).toHaveBeenCalledTimes(1));
+
+    return {
+      geolocation: geolocation as unknown as Geolocation & {
+        watchPosition: ReturnType<typeof vi.fn>;
+        clearWatch: ReturnType<typeof vi.fn>;
+      },
+      emit,
+    };
+  }
+
+  it('測定中にダイアログを閉じると測定を止め(clearWatch)、「今いる場所をお役立ち地点に登録」へフォーカスが戻る', async () => {
+    const { geolocation } = await setupSpotMeasuring();
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    await waitFor(() => expect(geolocation.clearWatch).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(el('[data-testid="dialog"]')).toBeNull());
+    expect(document.activeElement).toBe(el('[data-testid="spot-add-button"]'));
+  });
+
+  it('「この位置で登録」を連打しても、1件しか登録しない', async () => {
+    const { geolocation, emit } = await setupSpotMeasuring();
+    emit(35.0001, 139.0001, 15);
+    await waitFor(() => expect(el<HTMLButtonElement>('[data-testid="spot-save-button"]')?.disabled).toBe(false));
+
+    const { listSpots } = await import('../src/db');
+    const saveButton = el<HTMLButtonElement>('[data-testid="spot-save-button"]')!;
+    // 1回目のクリックでDBへの書き込み(await putSpot)が始まった時点で二重実行防止の
+    // フラグが立つので、そのまま連打しても2回目は何もしない(1回目の完了を待つ必要は無い)。
+    saveButton.click();
+    saveButton.click();
+
+    await waitFor(async () => expect(await listSpots()).toHaveLength(1));
+    expect(geolocation.clearWatch).toHaveBeenCalled();
   });
 });

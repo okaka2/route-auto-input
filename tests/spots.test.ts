@@ -243,7 +243,7 @@ describe('地図を開く画面: 近くのお役立ち地点', () => {
     expect(q(el, 'spot-add-button')).not.toBeNull();
   });
 
-  it('地点はあるが近くに無ければ、節ごと出さない', () => {
+  it('地点はあるが近くに無ければ、見出し「お役立ち地点」で登録ボタンだけを出す(節は消さない)', () => {
     const stop = { ...createPatient('場所1', '東京都1-1'), location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-09-25T00:00:00.000Z', source: 'gps' as const } };
     const far: Spot = {
       id: 's1',
@@ -253,7 +253,10 @@ describe('地図を開く画面: 近くのお役立ち地点', () => {
       createdAt: '2026-09-25T00:00:00.000Z',
     };
     const el = renderRouteMap(selectedState([stop]), new Map(), googleMapsProvider, context, new Map(), new Map(), [far], routeMapHandlers());
-    expect(q(el, 'nearby-spots')).toBeNull();
+    const section = q(el, 'nearby-spots')!;
+    expect(section.querySelector('h2')?.textContent).toBe('お役立ち地点');
+    expect(section.querySelector('ul')).toBeNull();
+    expect(q(el, 'spot-add-button')).not.toBeNull();
   });
 
   it('メモが空なら「トイレ(約120m)」だけ(末尾の空白を付けない)', () => {

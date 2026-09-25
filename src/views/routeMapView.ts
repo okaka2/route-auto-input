@@ -83,29 +83,23 @@ export function renderRouteMap(
   });
   container.append(cards);
 
-  const nearby = renderNearbySpots(stops, spots, handlers);
-  if (nearby) {
-    container.append(nearby);
-  }
+  container.append(renderNearbySpots(stops, spots, handlers));
 
   container.append(renderShare(handlers));
   return container;
 }
 
 /**
- * カードの下、共有の上に出す「近くのお役立ち地点」。500m以内が1件も無く、かつ地点が
- * 1件も登録されていなければ節ごと出さない。地点が1件でも登録されていれば
- * (近くに無くても)見出しを「お役立ち地点」にして、登録ボタンだけは出す。
+ * カードの下、共有の上に出す「近くのお役立ち地点」。地点の登録は、このルート上に
+ * 近い地点が無くても(まだ1件も無くても)続けられないと困るので、節自体は常に出す。
+ * 近くに無ければ見出しを「お役立ち地点」にして、一覧は出さず登録ボタンだけにする。
  */
 function renderNearbySpots(
   stops: readonly Patient[],
   spots: readonly Spot[],
   handlers: RouteMapHandlers,
-): HTMLElement | null {
+): HTMLElement {
   const nearby = nearbySpots(spots, stops);
-  if (nearby.length === 0 && spots.length > 0) {
-    return null;
-  }
 
   const card = document.createElement('section');
   card.className = 'card nearby-spots';
@@ -123,7 +117,8 @@ function renderNearbySpots(
       link.target = '_blank';
       link.rel = 'noreferrer';
       link.href = buildGoogleMapsUrl([pointOf({ address: '', location: spot.location })]);
-      const rounded = Math.round(meters / 10) * 10;
+      // 10m単位に丸める。すぐそば(10m未満)でも「約0m」にはしない。
+      const rounded = Math.max(10, Math.round(meters / 10) * 10);
       link.textContent =
         spot.note === '' ? `${spotLabel(spot.kind)}(約${rounded}m)` : `${spotLabel(spot.kind)}(約${rounded}m) ${spot.note}`;
       item.append(link);
