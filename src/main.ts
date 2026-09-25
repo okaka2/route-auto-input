@@ -609,6 +609,18 @@ async function commitSave(input: FormInput, continueAfter: boolean): Promise<voi
   }
 }
 
+/**
+ * 許可証の期限が「本当に」入力中の値として変わっているか。駐車の種類が street_permit で
+ * ないときは期限の欄が隠れて意味を持たないので、値が残っていても変更扱いにしない。
+ */
+function isPermitExpiresDirty(input: FormInput, baseline: string, trimInput: boolean): boolean {
+  if (input.parkingType !== 'street_permit') {
+    return false;
+  }
+  const current = trimInput ? input.permitExpires.trim() : input.permitExpires;
+  return current !== baseline;
+}
+
 /** フォームの「キャンセル」。入力途中なら確認してから戻る。 */
 function handleFormCancel(input: FormInput): void {
   const original = currentEditingPatient();
@@ -618,13 +630,13 @@ function handleFormCancel(input: FormInput): void {
         input.address.trim() !== '' ||
         input.phone.trim() !== '' ||
         input.parkingType !== '' ||
-        input.permitExpires.trim() !== '' ||
+        isPermitExpiresDirty(input, '', true) ||
         input.note.trim() !== ''
       : input.name !== original.name ||
         input.address !== original.address ||
         input.phone !== (original.phone ?? '') ||
         input.parkingType !== (original.parking?.type ?? '') ||
-        input.permitExpires !== (original.parking?.permitExpires ?? '') ||
+        isPermitExpiresDirty(input, original.parking?.permitExpires ?? '', false) ||
         input.note !== (original.note ?? '');
   if (dirty && !window.confirm('入力中の内容を捨てますか?')) {
     return;

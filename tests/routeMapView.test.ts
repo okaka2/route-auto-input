@@ -379,7 +379,7 @@ describe('renderRouteMap: 駐車情報とメモ', () => {
     expect(info.textContent).toBe(`${'あ'.repeat(40)}…`);
   });
 
-  it('駐車情報が敷地内OK・不明・未登録なら、駐車のバッジは出ない(不明はバッジ自体が無い)', () => {
+  it('駐車情報が不明・未登録なら、駐車のバッジは出ない(unknown はバッジ自体が無い)', () => {
     const unknown = { ...createPatient('場所1', '東京都1-1'), parking: { type: 'unknown' as const } };
     const none = createPatient('場所2', '東京都2-1');
     const state = { ...createInitialState([unknown, none]), selectedIds: [unknown.id, none.id] };

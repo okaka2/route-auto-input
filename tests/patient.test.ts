@@ -95,6 +95,12 @@ describe('withVisitInfo', () => {
     expect(updated.parking).toEqual({ type: 'street_permit', permitExpires: '2027-01-01' });
   });
 
+  it('street_permit でも、YYYY-MM-DD の形でなければ permitExpires を持たない', () => {
+    const patient = createPatient('山田', '東京都');
+    const updated = withVisitInfo(patient, { parkingType: 'street_permit', permitExpires: '2027/01/01', note: '' });
+    expect(updated.parking).toEqual({ type: 'street_permit' });
+  });
+
   it('note は trim して、空白だけなら外す', () => {
     const patient = { ...createPatient('山田', '東京都'), note: '前のメモ' };
     const updated = withVisitInfo(patient, { parkingType: '', permitExpires: '', note: '  ' });

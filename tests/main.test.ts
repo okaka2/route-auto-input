@@ -1308,6 +1308,49 @@ describe('駐車情報とメモ', () => {
     el<HTMLButtonElement>('[data-testid="notice-permit-dismiss"]')!.click();
     expect(el('[data-testid="permit-notice"]')).toBeNull();
   });
+
+  it('「閉じる」から7日以上たつと、許可証の期限のお知らせが再び出る', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const soon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const patient = {
+      ...createPatient('山田 太郎', '東京都千代田区1-1'),
+      parking: { type: 'street_permit' as const, permitExpires: soon },
+    };
+    await savePatient(patient);
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    window.localStorage.setItem('route-auto-input:permit-dismissed', eightDaysAgo);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    await waitFor(() => expect(el('[data-testid="permit-notice"]')).not.toBeNull());
+    expect(el('[data-testid="permit-notice"]')?.textContent).toContain('許可証の期限が近い訪問先: 1件');
+  });
+
+  it('許可証の期限を入れてから駐車の種類を未設定に戻してキャンセルしても、確認は出ない(隠れた期限は無視する)', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    dismissInstallNotice();
+    el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+
+    const parkingSelect = el<HTMLSelectElement>('[data-testid="parking-select"]')!;
+    parkingSelect.value = 'street_permit';
+    parkingSelect.dispatchEvent(new Event('change'));
+    el<HTMLInputElement>('[data-testid="permit-expires-input"]')!.value = '2027-03-31';
+    // 未設定に戻す(期限の欄は隠れるが、入力した値は消えずに残ったまま)。
+    parkingSelect.value = '';
+    parkingSelect.dispatchEvent(new Event('change'));
+
+    el<HTMLButtonElement>('[data-testid="cancel-button"]')!.click();
+
+    // 名前・住所・電話番号・駐車の種類・メモはすべて最初のまま。隠れて残った permitExpires
+    // だけを理由に「入力中の内容を捨てますか?」の確認が出てはいけない。
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(el('h1')?.textContent).not.toBe('訪問先を登録');
+  });
 });
 
 describe('出発・帰着の選択', () => {

@@ -1190,6 +1190,7 @@ input:focus-visible + .check {
 
 .note-heading {
   min-height: var(--tap-min);
+  min-width: var(--tap-min);
   padding: 0 0.75rem;
   border: 1px solid var(--border-strong);
   border-radius: 999px;

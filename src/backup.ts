@@ -1,10 +1,9 @@
 import type { Parking, ParkingType, Patient } from './types';
-import { PARKING_OPTIONS } from './visitInfo';
+import { isDateKey, PARKING_OPTIONS } from './visitInfo';
 
 const PARKING_TYPES: ParkingType[] = PARKING_OPTIONS.map((option) => option.value).filter(
   (value): value is ParkingType => value !== '',
 );
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const BACKUP_VERSION = 1;
 
@@ -85,7 +84,7 @@ function toParking(value: unknown): Parking | undefined {
     return undefined;
   }
   const permitExpires = record.permitExpires;
-  if (typeof permitExpires === 'string' && DATE_PATTERN.test(permitExpires)) {
+  if (typeof permitExpires === 'string' && isDateKey(permitExpires)) {
     return { type: type as ParkingType, permitExpires };
   }
   return { type: type as ParkingType };

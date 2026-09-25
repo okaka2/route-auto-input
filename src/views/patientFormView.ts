@@ -156,13 +156,24 @@ function renderVisitInfoSection(
   return section;
 }
 
-/** メモの入力欄。見出しボタン(駐車場・入口・インターホン・鍵・注意)を textarea の上に出す。 */
-function renderNoteField(noteInput: HTMLTextAreaElement): HTMLLabelElement {
-  const label = document.createElement('label');
-  label.className = 'field';
+/**
+ * メモの入力欄。見出しボタン(駐車場・入口・インターホン・鍵・注意)を textarea の上に出す。
+ *
+ * 見出しボタンを textarea と同じ <label> に入れると、ラベルの操作対象が最初の子要素
+ * (見出しボタン)になってしまい、「メモ」というキャプションを押すと textarea ではなく
+ * 最初のボタンが押された扱いになる(見出しが誤って足される・textareaに読み上げ名が付かない)。
+ * そのため、ここでは <div class="field"> で包み、キャプションは for/id で textarea だけを指す
+ * 独立した <label> にする。
+ */
+function renderNoteField(noteInput: HTMLTextAreaElement): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'field';
 
-  const caption = document.createElement('span');
+  noteInput.id = 'note-input';
+
+  const caption = document.createElement('label');
   caption.className = 'field-label';
+  caption.htmlFor = 'note-input';
   caption.textContent = 'メモ';
 
   const headings = document.createElement('div');
@@ -177,8 +188,8 @@ function renderNoteField(noteInput: HTMLTextAreaElement): HTMLLabelElement {
     headings.append(headingButton);
   }
 
-  label.append(caption, headings, noteInput);
-  return label;
+  wrapper.append(caption, headings, noteInput);
+  return wrapper;
 }
 
 /** メモの末尾に「見出し: 」を足す(空でなく改行で終わっていなければ改行を足す)。末尾へカーソルを移す。 */

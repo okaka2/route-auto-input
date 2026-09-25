@@ -1,4 +1,5 @@
 import type { GeoLocation, Parking, ParkingType, Patient } from './types';
+import { isDateKey } from './visitInfo';
 
 export function createPatient(
   name: string,
@@ -45,7 +46,7 @@ export function withVisitInfo(
       ? null
       : {
           type: info.parkingType,
-          ...(info.parkingType === 'street_permit' && trimmedPermit !== '' ? { permitExpires: trimmedPermit } : {}),
+          ...(info.parkingType === 'street_permit' && isDateKey(trimmedPermit) ? { permitExpires: trimmedPermit } : {}),
         };
   return {
     ...rest,

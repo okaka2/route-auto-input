@@ -22,7 +22,12 @@ export function parkingBadge(parking: Parking | undefined): { icon: 'P' | '許';
   if (!parking) {
     return null;
   }
-  return PARKING_BADGES[parking.type];
+  return PARKING_BADGES[parking.type] ?? null;
+}
+
+/** 'YYYY-MM-DD' の形かどうか(許可証の期限の欄で、backup.ts と patient.ts が共有するチェック)。 */
+export function isDateKey(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 export const NOTE_HEADINGS = ['駐車場', '入口', 'インターホン', '鍵', '注意'] as const;

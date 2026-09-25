@@ -249,12 +249,24 @@ describe('renderPatientForm: 訪問のための情報(駐車・メモ)', () => {
     }
   });
 
-  it('見出しボタンを押すと、メモの末尾に「見出し: 」が足され、textareaにフォーカスが移る', () => {
+  it('見出しボタンを押すと、メモの末尾に「見出し: 」が足され、textareaにフォーカスが移り、カーソルは末尾に来る', () => {
     const element = renderPatientForm(null, null, null, handlers());
     document.body.append(element);
     q<HTMLButtonElement>(element, 'note-heading-駐車場').click();
     expect(noteInput(element).value).toBe('駐車場: ');
     expect(document.activeElement).toBe(noteInput(element));
+    expect(noteInput(element).selectionStart).toBe(noteInput(element).value.length);
+    element.remove();
+  });
+
+  it('メモのキャプションは textarea だけに結び付く(見出しボタンではない)', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    document.body.append(element);
+    expect(noteInput(element).labels?.length).toBe(1);
+    expect(noteInput(element).labels?.[0]?.textContent).toBe('メモ');
+    noteInput(element).labels?.[0]?.click();
+    // キャプションを押しても、最初の見出しボタン(駐車場)が押された扱いにならない。
+    expect(noteInput(element).value).toBe('');
     element.remove();
   });
 
