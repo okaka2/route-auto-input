@@ -2020,3 +2020,105 @@ describe('写真', () => {
     expect(el('.message')?.textContent).toContain('削除しました');
   });
 });
+
+describe('お役立ち地点の登録', () => {
+  function fakeGeolocation() {
+    let success: PositionCallback = () => {};
+    const geolocation = {
+      watchPosition: vi.fn((s: PositionCallback) => {
+        success = s;
+        return 1;
+      }),
+      clearWatch: vi.fn(),
+      getCurrentPosition: vi.fn(),
+    } as unknown as Geolocation;
+    const emit = (lat: number, lng: number, accuracy: number) =>
+      success({ coords: { latitude: lat, longitude: lng, accuracy } } as GeolocationPosition);
+    return { geolocation, emit };
+  }
+
+  afterEach(() => {
+    delete (navigator as { geolocation?: Geolocation }).geolocation;
+  });
+
+  it('地点を登録 → 設定に出る → 位置のある訪問先の近くに出る → 設定で削除', async () => {
+    const { geolocation, emit } = fakeGeolocation();
+    Object.defineProperty(navigator, 'geolocation', { value: geolocation, configurable: true });
+
+    const { savePatient, listSpots } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = {
+      ...createPatient('山田 太郎', '東京都千代田区1-1'),
+      location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' as const },
+    };
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    // 位置のある訪問先を選んで、地図を開く画面まで進む。
+    el<HTMLInputElement>(`input[data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    const historyRecorded = await armHistoryRecordWait();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await historyRecorded();
+
+    // まだ地点が1つも無いので、見出しは「お役立ち地点」で登録ボタンだけ出る。
+    await waitFor(() => expect(el('[data-testid="spot-add-button"]')).not.toBeNull());
+    expect(el('[data-testid="nearby-spots"]')?.querySelector('h2')?.textContent).toBe('お役立ち地点');
+    expect(el('[data-testid="nearby-spots"] ul')).toBeNull();
+
+    el<HTMLButtonElement>('[data-testid="spot-add-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-measure-button"]')).not.toBeNull());
+
+    // 種類とメモを、測る前に入力しておく(値が保たれるか確かめる)。
+    const select = el<HTMLSelectElement>('[data-testid="spot-kind-select"]')!;
+    select.value = 'toilet';
+    select.dispatchEvent(new Event('change'));
+    const note = el<HTMLInputElement>('[data-testid="spot-note-input"]')!;
+    note.value = 'きれいなトイレ';
+    note.dispatchEvent(new Event('input'));
+
+    el<HTMLButtonElement>('[data-testid="location-measure-button"]')!.click();
+    await waitFor(() => expect(geolocation.watchPosition).toHaveBeenCalledTimes(1));
+    emit(35.0001, 139.0001, 15);
+    await waitFor(() => expect(el<HTMLButtonElement>('[data-testid="spot-save-button"]')?.disabled).toBe(false));
+
+    // 入力した種類・メモは、測定中の再描画をまたいで保たれている。
+    expect(el<HTMLSelectElement>('[data-testid="spot-kind-select"]')!.value).toBe('toilet');
+    expect(el<HTMLInputElement>('[data-testid="spot-note-input"]')!.value).toBe('きれいなトイレ');
+
+    el<HTMLButtonElement>('[data-testid="spot-save-button"]')!.click();
+    await waitFor(async () => {
+      const saved = await listSpots();
+      expect(saved).toHaveLength(1);
+      expect(saved[0]).toMatchObject({ kind: 'toilet', note: 'きれいなトイレ' });
+    });
+    await waitFor(() => expect(el('body')?.textContent).toContain('登録しました'));
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog"]')).toBeNull());
+
+    // 測った位置は訪問先のすぐそばなので、近くのお役立ち地点として出る。
+    await waitFor(() => expect(el('[data-testid="nearby-spots"] ul')).not.toBeNull());
+    expect(el('[data-testid="nearby-spots"]')?.querySelector('h2')?.textContent).toBe('近くのお役立ち地点');
+    expect(el('[data-testid="nearby-spots"] li a')?.textContent).toContain('トイレ');
+    expect(el('[data-testid="nearby-spots"] li a')?.textContent).toContain('きれいなトイレ');
+
+    // 設定にも出る(一覧の画面からしか開けないので、タブで一覧へ戻ってから開く)。
+    el<HTMLButtonElement>('[data-testid="tab-list"]')!.click();
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('body')?.textContent).toContain('きれいなトイレ'));
+    expect(el('body')?.textContent).toContain('登録)');
+
+    // 削除する(確認してから)。
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="spot-delete"]')!.click();
+    expect(window.confirm).toHaveBeenCalledWith('この地点を消しますか?');
+    await waitFor(() => expect(el('body')?.textContent).toContain('まだありません'));
+    await waitFor(async () => expect(await listSpots()).toEqual([]));
+  });
+});

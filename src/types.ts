@@ -66,6 +66,16 @@ export type LocationDialog = {
   previous: GeoLocation | null; // 元に戻す用(saved のとき)
 };
 
+/** お役立ち地点の登録ダイアログ。位置の登録ダイアログと同じ測定の流れ(idle/measuring/measured/error)を使う。 */
+export type SpotDialog = {
+  kind: 'spot';
+  phase: 'idle' | 'measuring' | 'measured' | 'saved' | 'error';
+  best: { lat: number; lng: number; accuracy: number } | null;
+  error: string | null;
+  spotKind: SpotKind;
+  note: string;
+};
+
 /** 開いているダイアログ。1件向けは対象の訪問先のidを、複数選択の一括削除は件数を持たない(state.selectedIdsを見る)。 */
 export type Dialog =
   | { kind: 'rowMenu'; id: string }
@@ -80,6 +90,7 @@ export type Dialog =
       continueAfter: boolean;
     }
   | LocationDialog
+  | SpotDialog
   | { kind: 'photos'; patientId: string; urls: string[]; index: number };
 
 export type AppState = {

@@ -266,6 +266,24 @@ a.disabled {
   flex: 1;
 }
 
+/* 設定のお役立ち地点の一覧。 */
+.spot-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.spot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: var(--tap-min);
+}
+
 /* ===== 画面の骨組み・共通の見出し・下部のタブと選択バー ===== */
 .app-shell {
   max-width: var(--content-max);
@@ -642,6 +660,25 @@ button.select-all {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+/* 近くのお役立ち地点(カードの下、共有の上)。 */
+.nearby-spots {
+  margin-top: 0.75rem;
+}
+
+.nearby-spots ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nearby-spots li a {
+  display: flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  gap: 0.5rem;
+  color: var(--primary);
 }
 
 /* 共有の2つのボタン(共有メニュー・リンクをコピー)。幅が足りなければ縦に並ぶ。 */

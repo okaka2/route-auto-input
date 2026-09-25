@@ -28,6 +28,8 @@ const handlers = (): DialogHandlers => ({
   onSavePasted: vi.fn(),
   onRemove: vi.fn(),
   onUndo: vi.fn(),
+  onSpotDraft: vi.fn(),
+  onSaveSpot: vi.fn(),
   onPhotoIndex: vi.fn(),
   onClose: vi.fn(),
 });

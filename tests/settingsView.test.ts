@@ -11,9 +11,10 @@ const handlers = (): SettingsHandlers => ({
   onSaveOffice: vi.fn(),
   onClearOffice: vi.fn(),
   onClearHistory: vi.fn(),
+  onDeleteSpot: vi.fn(),
 });
 
-const info = (): SettingsInfo => ({ lastBackupAt: null, persisted: null, theme: 'auto', office: null });
+const info = (): SettingsInfo => ({ lastBackupAt: null, persisted: null, theme: 'auto', office: null, spots: [] });
 
 const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: string): T =>
   element.querySelector<T>(`[data-testid="${testid}"]`)!;
@@ -113,10 +114,10 @@ describe('renderSettings: 言葉と並び', () => {
     expect(element.textContent).not.toContain('エクスポート');
     expect(element.textContent).not.toContain('インポート');
   });
-  it('見出しの順は 出発地・帰着地 → バックアップ → データの保存状態 → 表示 → このアプリについて', () => {
+  it('見出しの順は 出発地・帰着地 → バックアップ → お役立ち地点 → データの保存状態 → 表示 → このアプリについて', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
     const headings = [...element.querySelectorAll('h2')].map((h) => h.textContent);
-    expect(headings).toEqual(['出発地・帰着地', 'バックアップ', 'データの保存状態', '表示', 'このアプリについて']);
+    expect(headings).toEqual(['出発地・帰着地', 'バックアップ', 'お役立ち地点', 'データの保存状態', '表示', 'このアプリについて']);
   });
   it('最後のバックアップが無ければ「まだありません」、あれば日付と何日前か', () => {
     const none = renderSettings(createInitialState([]), info(), handlers());

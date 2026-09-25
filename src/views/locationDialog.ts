@@ -1,6 +1,7 @@
 import { accuracyLevel, pointOf } from '../geoPoint';
 import { buildGoogleMapsUrl } from '../googleMapsUrl';
-import type { GeoLocation, LocationDialog, Patient } from '../types';
+import { SPOT_KINDS } from '../spots';
+import type { GeoLocation, LocationDialog, Patient, SpotDialog, SpotKind } from '../types';
 
 export type LocationDialogHandlers = {
   onStartMeasuring(): void;
@@ -13,6 +14,20 @@ export type LocationDialogHandlers = {
   onRemove(): void;
   /** saved のとき「元に戻す」。 */
   onUndo(): void;
+  onClose(): void;
+};
+
+/** renderMeasure が必要とする操作だけの最小限のハンドラー(位置・地点どちらのダイアログからも渡せる)。 */
+export type MeasureHandlers = {
+  onStartMeasuring(): void;
+};
+
+export type SpotDialogHandlers = {
+  onStartMeasuring(): void;
+  /** 種類・メモの入力のたび、入力中の内容をstateに保つ。 */
+  onSpotDraft(draft: { spotKind: SpotKind; note: string }): void;
+  /** 測った位置と、そのときのspotKind・noteでお役立ち地点として登録する。 */
+  onSaveSpot(): void;
   onClose(): void;
 };
 
@@ -72,14 +87,14 @@ export function renderLocationDialog(
     elements.push(renderRegisteredStatus(patient.location), renderCheckLink(patient));
   }
 
-  if (dialog.phase === 'idle') {
-    elements.push(...renderIdlePhase(handlers));
-  } else if (dialog.phase === 'measuring' || dialog.phase === 'measured') {
-    elements.push(...renderMeasuringPhase(dialog, handlers));
-  } else if (dialog.phase === 'error') {
-    elements.push(...renderErrorPhase(dialog, handlers));
-  } else {
+  if (dialog.phase === 'saved') {
     elements.push(...renderSavedPhase(patient, handlers));
+  } else {
+    const measured = renderMeasure(dialog.phase, dialog.best, dialog.error, handlers);
+    if (dialog.phase === 'measuring' || dialog.phase === 'measured') {
+      measured.splice(1, 0, renderRegisterButton('location-save-button', dialog.best, () => handlers.onSaveMeasured()));
+    }
+    elements.push(...measured);
   }
 
   if (dialog.phase !== 'saved') {
@@ -118,7 +133,30 @@ function renderCheckLink(patient: Patient): HTMLAnchorElement {
   return link;
 }
 
-function renderIdlePhase(handlers: LocationDialogHandlers): HTMLElement[] {
+/**
+ * 測定の共通部分(idle: 「今いる場所で登録」と注意書き / measuring・measured: 状態表示と
+ * measuredなら「もう一度測る」 / error: エラーと「もう一度測る」)。位置・地点どちらの
+ * ダイアログでも使う。登録ボタン(保存する内容がダイアログごとに違う)はここには含めない。
+ */
+export function renderMeasure(
+  phase: 'idle' | 'measuring' | 'measured' | 'saved' | 'error',
+  best: { lat: number; lng: number; accuracy: number } | null,
+  error: string | null,
+  handlers: MeasureHandlers,
+): HTMLElement[] {
+  if (phase === 'idle') {
+    return renderIdlePhase(handlers);
+  }
+  if (phase === 'measuring' || phase === 'measured') {
+    return renderMeasuringPhase(phase, best, handlers);
+  }
+  if (phase === 'error') {
+    return renderErrorPhase(error, handlers);
+  }
+  return [];
+}
+
+function renderIdlePhase(handlers: MeasureHandlers): HTMLElement[] {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'primary block';
@@ -133,8 +171,11 @@ function renderIdlePhase(handlers: LocationDialogHandlers): HTMLElement[] {
   return [button, note];
 }
 
-function renderMeasuringPhase(dialog: LocationDialog, handlers: LocationDialogHandlers): HTMLElement[] {
-  const best = dialog.best;
+function renderMeasuringPhase(
+  phase: 'measuring' | 'measured',
+  best: { lat: number; lng: number; accuracy: number } | null,
+  handlers: MeasureHandlers,
+): HTMLElement[] {
   const status = document.createElement('p');
   status.className = statusClass(best?.accuracy ?? null);
   const parts = [best ? `位置を取得しています… ${accuracyPhrase(best.accuracy)}` : '位置を取得しています…'];
@@ -146,17 +187,9 @@ function renderMeasuringPhase(dialog: LocationDialog, handlers: LocationDialogHa
   }
   status.textContent = parts.join(' ');
 
-  const saveButton = document.createElement('button');
-  saveButton.type = 'button';
-  saveButton.className = 'primary block';
-  saveButton.dataset.testid = 'location-save-button';
-  saveButton.textContent = 'この位置で登録';
-  saveButton.disabled = best === null;
-  saveButton.addEventListener('click', () => handlers.onSaveMeasured());
+  const elements: HTMLElement[] = [status];
 
-  const elements = [status, saveButton];
-
-  if (dialog.phase === 'measured') {
+  if (phase === 'measured') {
     const remeasure = document.createElement('button');
     remeasure.type = 'button';
     remeasure.className = 'block';
@@ -169,10 +202,10 @@ function renderMeasuringPhase(dialog: LocationDialog, handlers: LocationDialogHa
   return elements;
 }
 
-function renderErrorPhase(dialog: LocationDialog, handlers: LocationDialogHandlers): HTMLElement[] {
+function renderErrorPhase(error: string | null, handlers: MeasureHandlers): HTMLElement[] {
   const message = document.createElement('p');
   message.className = 'location-status poor';
-  message.textContent = dialog.error ?? '';
+  message.textContent = error ?? '';
 
   const button = document.createElement('button');
   button.type = 'button';
@@ -182,6 +215,22 @@ function renderErrorPhase(dialog: LocationDialog, handlers: LocationDialogHandle
   button.addEventListener('click', () => handlers.onStartMeasuring());
 
   return [message, button];
+}
+
+/** 測った位置で登録するボタン(位置は location-save-button、地点は spot-save-button)。best が無ければ押せない。 */
+function renderRegisterButton(
+  testid: string,
+  best: { accuracy: number } | null,
+  onClick: () => void,
+): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'primary block';
+  button.dataset.testid = testid;
+  button.textContent = 'この位置で登録';
+  button.disabled = best === null;
+  button.addEventListener('click', onClick);
+  return button;
 }
 
 function renderSavedPhase(patient: Patient, handlers: LocationDialogHandlers): HTMLElement[] {
@@ -249,6 +298,89 @@ function renderRemoveButton(handlers: LocationDialogHandlers): HTMLElement {
   button.textContent = '位置を消す';
   button.addEventListener('click', () => handlers.onRemove());
   return button;
+}
+
+/**
+ * お役立ち地点の登録ダイアログの中身。位置の登録ダイアログと同じ測定の流れ(renderMeasure)を使い、
+ * 種類の選択と一言メモを加える。貼り付けでの登録は地点では出さない。
+ */
+export function renderSpotDialog(dialog: SpotDialog, handlers: SpotDialogHandlers): HTMLElement[] {
+  const elements: HTMLElement[] = [];
+
+  const title = document.createElement('h2');
+  title.id = 'dialog-title';
+  title.className = 'sheet-title';
+  title.textContent = 'お役立ち地点を登録';
+  elements.push(title);
+
+  if (dialog.phase === 'saved') {
+    const message = document.createElement('p');
+    message.className = 'location-status good';
+    message.textContent = '登録しました';
+    elements.push(message);
+  } else {
+    const measured = renderMeasure(dialog.phase, dialog.best, dialog.error, handlers);
+    if (dialog.phase === 'measuring' || dialog.phase === 'measured') {
+      measured.splice(1, 0, renderRegisterButton('spot-save-button', dialog.best, () => handlers.onSaveSpot()));
+    }
+    elements.push(...measured, renderSpotKindSelect(dialog, handlers), renderSpotNoteInput(dialog, handlers));
+  }
+
+  const buttons = document.createElement('div');
+  buttons.className = 'sheet-buttons';
+  buttons.append(actionButton('閉じる', 'dialog-cancel', () => handlers.onClose()));
+  elements.push(buttons);
+
+  return elements;
+}
+
+function renderSpotKindSelect(dialog: SpotDialog, handlers: SpotDialogHandlers): HTMLElement {
+  const wrapper = document.createElement('label');
+  wrapper.className = 'field';
+
+  const caption = document.createElement('span');
+  caption.className = 'field-label';
+  caption.textContent = '種類';
+  wrapper.append(caption);
+
+  const select = document.createElement('select');
+  select.className = 'form-select';
+  select.dataset.testid = 'spot-kind-select';
+  for (const option of SPOT_KINDS) {
+    const optionElement = document.createElement('option');
+    optionElement.value = option.value;
+    optionElement.textContent = option.label;
+    select.append(optionElement);
+  }
+  select.value = dialog.spotKind;
+  select.addEventListener('change', () => {
+    handlers.onSpotDraft({ spotKind: select.value as SpotKind, note: dialog.note });
+  });
+  wrapper.append(select);
+
+  return wrapper;
+}
+
+function renderSpotNoteInput(dialog: SpotDialog, handlers: SpotDialogHandlers): HTMLElement {
+  const wrapper = document.createElement('label');
+  wrapper.className = 'field';
+
+  const caption = document.createElement('span');
+  caption.className = 'field-label';
+  caption.textContent = '一言メモ';
+  wrapper.append(caption);
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.dataset.testid = 'spot-note-input';
+  input.placeholder = '例) 24時間開いている';
+  input.value = dialog.note;
+  input.addEventListener('input', () => {
+    handlers.onSpotDraft({ spotKind: dialog.spotKind, note: input.value });
+  });
+  wrapper.append(input);
+
+  return wrapper;
 }
 
 function actionButton(label: string, testid: string, onClick: () => void): HTMLButtonElement {

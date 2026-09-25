@@ -1,7 +1,7 @@
 import { installSteps } from '../installHint';
 import { installPlatform } from '../platform';
-import type { AppState, Dialog, Patient } from '../types';
-import { renderLocationDialog } from './locationDialog';
+import type { AppState, Dialog, Patient, SpotKind } from '../types';
+import { renderLocationDialog, renderSpotDialog } from './locationDialog';
 
 export type DialogHandlers = {
   onEdit(id: string): void;
@@ -36,6 +36,10 @@ export type DialogHandlers = {
   onRemove(): void;
   /** 位置の登録: 保存した直後に元へ戻す。 */
   onUndo(): void;
+  /** お役立ち地点の登録: 種類・メモの入力のたび、入力中の内容をstateに保つ。 */
+  onSpotDraft(draft: { spotKind: SpotKind; note: string }): void;
+  /** お役立ち地点の登録: 測った位置とそのときのspotKind・noteで登録する。 */
+  onSaveSpot(): void;
   /** 写真のダイアログ: 前/次へ切り替える(表示中のindexを変える)。 */
   onPhotoIndex(index: number): void;
   onClose(): void;
@@ -67,6 +71,8 @@ export function renderDialog(state: AppState, handlers: DialogHandlers): HTMLEle
     content = renderSimilar(state, dialog, handlers);
   } else if (dialog.kind === 'photos') {
     content = renderPhotos(dialog, handlers);
+  } else if (dialog.kind === 'spot') {
+    content = renderSpotDialog(dialog, handlers);
   } else {
     const patient = state.patients.find((item) => item.id === dialog.id);
     if (patient === undefined) {

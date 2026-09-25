@@ -5,7 +5,7 @@ import { createPatient } from '../src/patient';
 import { DEFAULT_ROUTE_ENDS, type Office, type RouteContext } from '../src/routePlan';
 import { splitIntoRoutes } from '../src/routeSplitter';
 import { createInitialState } from '../src/state';
-import type { AppState, Patient } from '../src/types';
+import type { AppState, Patient, Spot } from '../src/types';
 import { renderRouteMap, type RouteMapHandlers } from '../src/views/routeMapView';
 
 const handlers = (): RouteMapHandlers => ({
@@ -17,6 +17,7 @@ const handlers = (): RouteMapHandlers => ({
   onToggleVisited: vi.fn(),
   onOpenLocation: vi.fn(),
   onOpenPhotos: vi.fn(),
+  onAddSpot: vi.fn(),
 });
 
 const ctx = (): RouteContext => defaultContext;
@@ -47,7 +48,8 @@ const render = (
   context: RouteContext = defaultContext,
   visited: ReadonlyMap<string, string> = new Map(),
   photoCounts: ReadonlyMap<string, number> = new Map(),
-) => renderRouteMap(state, opened, provider, context, visited, photoCounts, spies);
+  spots: readonly Spot[] = [],
+) => renderRouteMap(state, opened, provider, context, visited, photoCounts, spots, spies);
 
 const cards = (element: HTMLElement) =>
   [...element.querySelectorAll<HTMLElement>('[data-testid="route-card"]')];
@@ -327,7 +329,7 @@ describe('renderRouteMap: 訪問済み', () => {
     const [a, b] = state.patients;
     const visited = new Map([[a!.id, new Date(2026, 8, 22, 9, 12).toISOString()]]);
     const spies = handlers();
-    const element = renderRouteMap(state, new Map(), googleMapsProvider, ctx(), visited, new Map(), spies);
+    const element = renderRouteMap(state, new Map(), googleMapsProvider, ctx(), visited, new Map(), [], spies);
     const buttons = [...element.querySelectorAll<HTMLButtonElement>('[data-testid="visited-toggle"]')];
     expect(buttons).toHaveLength(2);
     expect(buttons[0]!.textContent).toBe('済 9:12');
@@ -423,6 +425,7 @@ describe('renderRouteMap: 出発・帰着', () => {
       { ends: { start: 'office', end: 'office' }, office },
       new Map(),
       new Map(),
+      [],
       handlers(),
     );
     const cards = [...element.querySelectorAll('[data-testid="route-card"]')];
@@ -438,6 +441,7 @@ describe('renderRouteMap: 出発・帰着', () => {
       { ends: DEFAULT_ROUTE_ENDS, office: null },
       new Map(),
       new Map(),
+      [],
       handlers(),
     );
     expect(element.querySelector('[data-testid="route-ends"]')).toBeNull();
@@ -450,6 +454,7 @@ describe('renderRouteMap: 出発・帰着', () => {
       { ends: { start: 'office', end: 'office' }, office },
       new Map(),
       new Map(),
+      [],
       handlers(),
     );
     expect(element.querySelectorAll('[data-testid="route-card"]')).toHaveLength(2);

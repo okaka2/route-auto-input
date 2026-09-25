@@ -54,6 +54,10 @@ function keepDialog(
   if (dialog.kind === 'photos') {
     return existingIds.has(dialog.patientId) ? dialog : null;
   }
+  if (dialog.kind === 'spot') {
+    // お役立ち地点は特定の訪問先に紐づかないので、読み直しでは閉じない。
+    return dialog;
+  }
   return existingIds.has(dialog.id) ? dialog : null;
 }
 

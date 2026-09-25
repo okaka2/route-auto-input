@@ -1,8 +1,9 @@
 import { APP_NAME, APP_VERSION } from '../appInfo';
 import { formatLastBackup } from '../backupReminder';
 import type { Office } from '../routePlan';
+import { spotLabel } from '../spots';
 import type { ThemeSetting } from '../theme';
-import type { AppState } from '../types';
+import type { AppState, Spot } from '../types';
 import { renderMessage, renderScreenHeader } from './common';
 
 export type SettingsInfo = {
@@ -12,6 +13,8 @@ export type SettingsInfo = {
   persisted: boolean | null;
   theme: ThemeSetting;
   office: Office | null;
+  /** 登録済みのお役立ち地点(トイレ・休憩など)。 */
+  spots: Spot[];
 };
 
 export type SettingsHandlers = {
@@ -22,6 +25,8 @@ export type SettingsHandlers = {
   onSaveOffice(name: string, address: string): void;
   onClearOffice(): void;
   onClearHistory(): void;
+  /** お役立ち地点の一覧の「削除」。確認してから消す。 */
+  onDeleteSpot(id: string): void;
 };
 
 /** 設定画面。出発地・帰着地 → バックアップ → データの保存状態 → 表示 → このアプリについて の順。 */
@@ -44,11 +49,46 @@ export function renderSettings(
     count,
     renderOffice(info, handlers),
     renderBackup(info, handlers, now),
+    renderSpots(info, handlers),
     renderProtection(info, handlers),
     renderTheme(info, handlers),
     renderAbout(),
   );
   return container;
+}
+
+/** 日時(ISO 8601)を「月/日」の形にする(端末のローカル時刻)。読めなければ空文字。 */
+function formatDateOnly(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+/** 「お役立ち地点」: 種類・メモ・登録日の一覧と、各行の削除。 */
+function renderSpots(info: SettingsInfo, handlers: SettingsHandlers): HTMLElement {
+  const card = section('お役立ち地点');
+  if (info.spots.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'hint';
+    empty.textContent = 'まだありません。地図を開く画面の下から登録できます。';
+    card.append(empty);
+    return card;
+  }
+  const list = document.createElement('ul');
+  list.className = 'spot-list';
+  for (const spot of info.spots) {
+    const item = document.createElement('li');
+    item.className = 'spot-row';
+    const label = spot.note === '' ? spotLabel(spot.kind) : `${spotLabel(spot.kind)}・${spot.note}`;
+    const text = document.createElement('span');
+    text.textContent = `${label}(${formatDateOnly(spot.createdAt)} 登録)`;
+    item.append(text, button('spot-delete', '削除', 'danger', () => handlers.onDeleteSpot(spot.id)));
+    list.append(item);
+  }
+  card.append(list);
+  return card;
 }
 
 function renderOffice(info: SettingsInfo, handlers: SettingsHandlers): HTMLElement {

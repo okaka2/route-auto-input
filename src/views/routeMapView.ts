@@ -1,9 +1,12 @@
 import { MAX_STOPS_PER_ROUTE } from '../config';
 import { formatDateTime, formatPhoneHref, formatTime } from '../format';
+import { pointOf } from '../geoPoint';
+import { buildGoogleMapsUrl } from '../googleMapsUrl';
 import type { MapProvider } from '../mapProviders';
 import { buildRoutePlans, stopsPerRoute, type RoutePlan, type RouteContext } from '../routePlan';
+import { nearbySpots, spotLabel } from '../spots';
 import { selectedPatients } from '../state';
-import type { AppState, Patient } from '../types';
+import type { AppState, Patient, Spot } from '../types';
 import { noteSummary, parkingBadge } from '../visitInfo';
 import { renderMessage, renderScreenHeader } from './common';
 
@@ -23,6 +26,8 @@ export type RouteMapHandlers = {
   onOpenLocation(id: string): void;
   /** 写真がある訪問先の行の「写真 N」ボタン。写真のダイアログを開く。 */
   onOpenPhotos(id: string): void;
+  /** 「今いる場所をお役立ち地点に登録」。お役立ち地点の登録ダイアログを開く。 */
+  onAddSpot(): void;
 };
 
 /** done: 開いた / next: 次に開く(最初の未開封) / later: それ以降 */
@@ -36,6 +41,7 @@ type CardState = 'done' | 'next' | 'later';
  * @param opened 開いたルートの番号 → 開いた日時(ISO 8601。不明なら '')
  * @param visited 訪問先の id → 訪問済みにした日時(ISO 8601)
  * @param photoCounts 訪問先の id → 登録した写真の枚数(0枚、または未登録なら出さない)
+ * @param spots 登録済みのお役立ち地点(トイレ・休憩など)。近くの分だけカードの下に出す。
  */
 export function renderRouteMap(
   state: AppState,
@@ -44,6 +50,7 @@ export function renderRouteMap(
   context: RouteContext,
   visited: ReadonlyMap<string, string>,
   photoCounts: ReadonlyMap<string, number>,
+  spots: readonly Spot[],
   handlers: RouteMapHandlers,
 ): HTMLElement {
   const container = document.createElement('div');
@@ -74,8 +81,66 @@ export function renderRouteMap(
       renderRouteCard(plan, index, cardState, opened.get(index) ?? '', provider, visited, photoCounts, handlers),
     );
   });
-  container.append(cards, renderShare(handlers));
+  container.append(cards);
+
+  const nearby = renderNearbySpots(stops, spots, handlers);
+  if (nearby) {
+    container.append(nearby);
+  }
+
+  container.append(renderShare(handlers));
   return container;
+}
+
+/**
+ * カードの下、共有の上に出す「近くのお役立ち地点」。500m以内が1件も無く、かつ地点が
+ * 1件も登録されていなければ節ごと出さない。地点が1件でも登録されていれば
+ * (近くに無くても)見出しを「お役立ち地点」にして、登録ボタンだけは出す。
+ */
+function renderNearbySpots(
+  stops: readonly Patient[],
+  spots: readonly Spot[],
+  handlers: RouteMapHandlers,
+): HTMLElement | null {
+  const nearby = nearbySpots(spots, stops);
+  if (nearby.length === 0 && spots.length > 0) {
+    return null;
+  }
+
+  const card = document.createElement('section');
+  card.className = 'card nearby-spots';
+  card.dataset.testid = 'nearby-spots';
+
+  const heading = document.createElement('h2');
+  heading.textContent = nearby.length > 0 ? '近くのお役立ち地点' : 'お役立ち地点';
+  card.append(heading);
+
+  if (nearby.length > 0) {
+    const list = document.createElement('ul');
+    for (const { spot, meters } of nearby) {
+      const item = document.createElement('li');
+      const link = document.createElement('a');
+      link.target = '_blank';
+      link.rel = 'noreferrer';
+      link.href = buildGoogleMapsUrl([pointOf({ address: '', location: spot.location })]);
+      const rounded = Math.round(meters / 10) * 10;
+      link.textContent =
+        spot.note === '' ? `${spotLabel(spot.kind)}(約${rounded}m)` : `${spotLabel(spot.kind)}(約${rounded}m) ${spot.note}`;
+      item.append(link);
+      list.append(item);
+    }
+    card.append(list);
+  }
+
+  const addButton = document.createElement('button');
+  addButton.type = 'button';
+  addButton.className = 'block';
+  addButton.dataset.testid = 'spot-add-button';
+  addButton.textContent = '今いる場所をお役立ち地点に登録';
+  addButton.addEventListener('click', () => handlers.onAddSpot());
+  card.append(addButton);
+
+  return card;
 }
 
 /** 別の人に送るための共有ボタン。受け取った人はURLを開くだけで、同じルートの地図を使える。 */

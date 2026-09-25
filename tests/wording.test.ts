@@ -10,7 +10,7 @@ import {
   setSearchQuery,
   toggleSelection,
 } from '../src/state';
-import type { AppState, LocationDialog, Patient } from '../src/types';
+import type { AppState, LocationDialog, Patient, Spot, SpotDialog } from '../src/types';
 import { validatePatientInput, validateSelection } from '../src/validation';
 import { googleMapsProvider } from '../src/mapProviders';
 import type { HistoryEntry } from '../src/db';
@@ -67,6 +67,8 @@ const dialogHandlers = {
   onSavePasted: noop,
   onRemove: noop,
   onUndo: noop,
+  onSpotDraft: noop,
+  onSaveSpot: noop,
   onPhotoIndex: noop,
   onClose: noop,
 };
@@ -222,12 +224,23 @@ describe('画面の文言(禁止語が出ない)', () => {
       onToggleVisited: noop,
       onOpenLocation: noop,
       onOpenPhotos: noop,
+      onAddSpot: noop,
     };
     const at = new Date(2026, 8, 21, 14, 32).toISOString();
     const withLocation = {
       ...places(1)[0]!,
       location: { lat: 35, lng: 139, accuracy: 12, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' as const },
     };
+    // 「位置あり」のすぐ近くに置く、近くのお役立ち地点(節の文言もここで調べる)。
+    const spots: Spot[] = [
+      {
+        id: 'spot-1',
+        kind: 'toilet',
+        note: 'きれいなトイレ',
+        location: { lat: 35, lng: 139.001, accuracy: 10, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' },
+        createdAt: '2026-09-22T00:00:00.000Z',
+      },
+    ];
     for (const [label, state, opened] of [
       ['0件', createInitialState([]), new Map<number, string>()],
       ['1本', selected(places(3)), new Map<number, string>()],
@@ -246,19 +259,52 @@ describe('画面の文言(禁止語が出ない)', () => {
       ] as const) {
         expectClean(
           `地図(${label}・${ctxLabel})`,
-          renderRouteMap(state, opened, googleMapsProvider, context, new Map(), new Map(), handlers).outerHTML,
+          renderRouteMap(state, opened, googleMapsProvider, context, new Map(), new Map(), spots, handlers).outerHTML,
         );
       }
     }
   });
 
   it('設定・タブ・選択バー', () => {
+    const spot: Spot = {
+      id: 'spot-1',
+      kind: 'toilet',
+      note: 'きれいなトイレ',
+      location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' },
+      createdAt: '2026-09-22T00:00:00.000Z',
+    };
     expectClean(
-      '設定',
+      '設定(地点あり)',
       renderSettings(
         createInitialState(places(2)),
-        { lastBackupAt: null, persisted: null, theme: 'auto', office: null },
-        { onExport: noop, onImport: noop, onThemeChange: noop, onBack: noop, onSaveOffice: noop, onClearOffice: noop, onClearHistory: noop },
+        { lastBackupAt: null, persisted: null, theme: 'auto', office: null, spots: [spot] },
+        {
+          onExport: noop,
+          onImport: noop,
+          onThemeChange: noop,
+          onBack: noop,
+          onSaveOffice: noop,
+          onClearOffice: noop,
+          onClearHistory: noop,
+          onDeleteSpot: noop,
+        },
+      ).outerHTML,
+    );
+    expectClean(
+      '設定(地点なし)',
+      renderSettings(
+        createInitialState(places(2)),
+        { lastBackupAt: null, persisted: null, theme: 'auto', office: null, spots: [] },
+        {
+          onExport: noop,
+          onImport: noop,
+          onThemeChange: noop,
+          onBack: noop,
+          onSaveOffice: noop,
+          onClearOffice: noop,
+          onClearHistory: noop,
+          onDeleteSpot: noop,
+        },
       ).outerHTML,
     );
     expectClean('タブ', renderTabBar('list', true, { onSelect: noop }).outerHTML);
@@ -370,6 +416,27 @@ describe('画面の文言(禁止語が出ない)', () => {
     const phases: LocationDialog[] = withoutPasteOpen.map((p) => ({ ...p, pasteOpen: false }));
     phases.forEach((phase, index) => {
       expectClean(`位置の登録#${index}`, renderDialog(base(phase), dialogHandlers)!.outerHTML);
+    });
+  });
+
+  it('お役立ち地点の登録ダイアログ: 全phase', () => {
+    const withState = (dialog: SpotDialog): AppState => ({ ...createInitialState([]), dialog });
+    const spotPhases: SpotDialog[] = [
+      { kind: 'spot', phase: 'idle', best: null, error: null, spotKind: 'toilet', note: '' },
+      { kind: 'spot', phase: 'measuring', best: { lat: 35, lng: 139, accuracy: 12 }, error: null, spotKind: 'rest', note: '24時間開いている' },
+      { kind: 'spot', phase: 'measured', best: { lat: 35, lng: 139, accuracy: 12 }, error: null, spotKind: 'store', note: '' },
+      {
+        kind: 'spot',
+        phase: 'error',
+        best: null,
+        error: '位置を取得できませんでした。車の外や屋外で、もう一度試してください。',
+        spotKind: 'parking',
+        note: '',
+      },
+      { kind: 'spot', phase: 'saved', best: null, error: null, spotKind: 'other', note: '' },
+    ];
+    spotPhases.forEach((phase, index) => {
+      expectClean(`お役立ち地点の登録#${index}`, renderDialog(withState(phase), dialogHandlers)!.outerHTML);
     });
   });
 

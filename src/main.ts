@@ -11,11 +11,14 @@ import {
   deletePatients,
   deletePhoto,
   deletePhotosOf,
+  deleteSpot,
   getMeta,
   listHistory,
   listPatients,
   listPhotos,
+  listSpots,
   mergePatients,
+  putSpot,
   replaceAllPatients,
   savePatient,
   setMeta,
@@ -37,6 +40,7 @@ import { daysBetween, shouldRemindBackup } from './backupReminder';
 import { buildRoutePlans, DEFAULT_ROUTE_ENDS, type RouteContext, type RouteEnds } from './routePlan';
 import { clearSession, loadSession, saveSession } from './session';
 import { buildShareText, copyText, shareText } from './share';
+import { SPOT_KINDS } from './spots';
 import { registerServiceWorkerUpdates } from './swUpdate';
 import { applyTheme, initTheme, loadThemeSetting, saveThemeSetting } from './theme';
 import {
@@ -61,7 +65,19 @@ import {
   withPatients,
   withScreen,
 } from './state';
-import type { AppState, GeoLocation, Message, Patient, PatientFormDraft, SortOrder } from './types';
+import type {
+  AppState,
+  Dialog,
+  GeoLocation,
+  LocationDialog,
+  Message,
+  Patient,
+  PatientFormDraft,
+  SortOrder,
+  Spot,
+  SpotDialog,
+  SpotKind,
+} from './types';
 import { permitsExpiringSoon } from './visitInfo';
 import { validatePatientInput, validateSelection } from './validation';
 import { renderDialog } from './views/dialogs';
@@ -152,6 +168,9 @@ let formDraft: PatientFormDraft | null = null;
 // 訪問先ごとの写真の枚数。起動時と、写真の追加・削除・訪問先の削除のあとに読み直す。
 let photoCounts = new Map<string, number>();
 
+// 登録済みのお役立ち地点(トイレ・休憩など)。起動時と、登録・削除のあとに読み直す。
+let spots: Spot[] = [];
+
 // 編集フォームに出す写真(object URLつき)。フォームを開くときlistPhotosから作り、
 // フォームを離れる/読み直すときに revoke する(片付けはsetState一箇所にまとめる。下記参照)。
 let formPhotos: { id: string; url: string }[] = [];
@@ -177,7 +196,7 @@ function stopCurrentMeasuring(): void {
 }
 
 // 設定画面に出す情報(最後のバックアップ日時・データの保存状態・表示の設定・事業所)。
-let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting(), office: null };
+let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting(), office: null, spots: [] };
 
 // 出発・帰着の選び方と事業所。起動時に loadRouteContext() で読み直す(Task 3 が使う)。
 let routeContext: RouteContext = { ends: DEFAULT_ROUTE_ENDS, office: null };
@@ -373,6 +392,16 @@ async function loadPhotoCounts(): Promise<void> {
   render();
 }
 
+/** お役立ち地点をDBから読み直す。起動時と、登録・削除のあとに呼ぶ。 */
+async function loadSpots(): Promise<void> {
+  try {
+    spots = await listSpots();
+  } catch {
+    spots = [];
+  }
+  render();
+}
+
 /** 「地図を開く」を押したとき、その日の訪問先と順番を記録する(同じ日は上書き。済の記録は保つ)。 */
 async function recordTodayRoute(): Promise<void> {
   const ids = state.selectedIds;
@@ -503,22 +532,35 @@ async function handleClearOffice(): Promise<void> {
   }
 }
 
+/** 次のdialogが、測定を続けてよい「同じ」ダイアログか(location: 同じ訪問先のid、spot: 地点のダイアログのまま)。 */
+function isSameMeasuringDialog(
+  dialog: Dialog | null,
+  target: { kind: 'location'; id: string } | { kind: 'spot' },
+): dialog is LocationDialog | SpotDialog {
+  if (dialog === null) {
+    return false;
+  }
+  if (target.kind === 'location') {
+    return dialog.kind === 'location' && dialog.id === target.id;
+  }
+  return dialog.kind === 'spot';
+}
+
 /**
- * 位置を測っている最中に、ダイアログが閉じる/画面が変わる/別の訪問先へ切り替わる
- * (いずれも次のdialogが「同じidのlocationダイアログ」でなくなる)なら、ここ一箇所で止める。
+ * 位置・地点を測っている最中に、ダイアログが閉じる/画面が変わる/別の訪問先へ切り替わる
+ * (いずれも次のdialogが「同じ測定中のダイアログ」でなくなる)なら、ここ一箇所で止める。
  */
 function setState(next: AppState): void {
   const previousDialog = state.dialog;
   const previousScreen = state.screen;
   state = next;
   if (stopMeasuring !== null) {
-    const stillSameLocation =
+    const stillSameMeasuring =
       previousDialog !== null &&
-      previousDialog.kind === 'location' &&
-      next.dialog !== null &&
-      next.dialog.kind === 'location' &&
-      next.dialog.id === previousDialog.id;
-    if (!stillSameLocation) {
+      (previousDialog.kind === 'location'
+        ? isSameMeasuringDialog(next.dialog, { kind: 'location', id: previousDialog.id })
+        : previousDialog.kind === 'spot' && isSameMeasuringDialog(next.dialog, { kind: 'spot' }));
+    if (!stillSameMeasuring) {
       stopCurrentMeasuring();
     }
   }
@@ -802,18 +844,22 @@ function openLocation(id: string): void {
   });
 }
 
-/** 今いる場所の測定を始める(「今いる場所で登録」「もう一度測る」)。既存の測定は先に止める。 */
-async function startLocationMeasure(): Promise<void> {
+/**
+ * 今いる場所の測定を始める(「今いる場所で登録」「もう一度測る」)。位置・地点どちらの
+ * ダイアログでも使う(対象のダイアログのkindを見て書き換える)。既存の測定は先に止める。
+ */
+async function startMeasure(): Promise<void> {
   stopCurrentMeasuring();
   const dialog = state.dialog;
-  if (dialog?.kind !== 'location') {
+  if (dialog?.kind !== 'location' && dialog?.kind !== 'spot') {
     return;
   }
-  const targetId = dialog.id;
+  const target: { kind: 'location'; id: string } | { kind: 'spot' } =
+    dialog.kind === 'location' ? { kind: 'location', id: dialog.id } : { kind: 'spot' };
   const { startMeasuring } = await import('./geo');
   // importの読み込み中にダイアログが閉じた/別の訪問先へ変わったかもしれないので、確かめてから始める。
   const current = state.dialog;
-  if (current?.kind !== 'location' || current.id !== targetId) {
+  if (!isSameMeasuringDialog(current, target)) {
     return;
   }
   setState({ ...state, dialog: { ...current, phase: 'measuring', best: null, error: null } });
@@ -823,8 +869,8 @@ async function startLocationMeasure(): Promise<void> {
   stopMeasuring = startMeasuring(navigator.geolocation, (update) => {
     const d = state.dialog;
     // saved になった後の更新は無視する(保存後に測定が止め切れていない場合の保険。
-    // 実際に止めるのはsaveLocationの先頭)。
-    if (d?.kind !== 'location' || d.id !== targetId || d.phase === 'saved') {
+    // 実際に止めるのはsaveLocation/saveSpotの先頭)。
+    if (!isSameMeasuringDialog(d, target) || d.phase === 'saved') {
       return;
     }
     if (update.kind === 'reading') {
@@ -978,6 +1024,65 @@ async function removeLocation(): Promise<void> {
     await reloadPatients();
   } catch {
     setState(withMessage(state, { kind: 'error', text: '位置を消せませんでした。' }));
+  }
+}
+
+/** 地図の画面の「今いる場所をお役立ち地点に登録」。お役立ち地点の登録ダイアログを開く。 */
+function openSpotDialog(): void {
+  dialogReturnId = null;
+  setState({
+    ...state,
+    dialog: { kind: 'spot', phase: 'idle', best: null, error: null, spotKind: SPOT_KINDS[0]!.value, note: '' },
+  });
+}
+
+/** お役立ち地点の登録: 種類・メモの入力のたび呼ばれる。値を再描画のあいだ保つ。 */
+function changeSpotDraft(draft: { spotKind: SpotKind; note: string }): void {
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'spot') {
+    return;
+  }
+  setState({ ...state, dialog: { ...dialog, spotKind: draft.spotKind, note: draft.note } });
+}
+
+/** 測った位置と、そのときのspotKind・noteでお役立ち地点として登録する。 */
+async function saveSpot(): Promise<void> {
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'spot' || dialog.best === null) {
+    return;
+  }
+  // 測定中に保存したら、そこで測定を止める(止めないと、この後の更新がsaved状態を上書きしてしまう)。
+  stopCurrentMeasuring();
+  const spot: Spot = {
+    id: crypto.randomUUID(),
+    kind: dialog.spotKind,
+    note: dialog.note.trim(),
+    location: { ...dialog.best, recordedAt: new Date().toISOString(), source: 'gps' },
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    await putSpot(spot);
+    requestProtectionOnce();
+    await loadSpots();
+    const current = state.dialog;
+    if (current?.kind === 'spot') {
+      setState({ ...state, dialog: { ...current, phase: 'saved' } });
+    }
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: 'お役立ち地点を保存できませんでした。' }));
+  }
+}
+
+/** 設定画面のお役立ち地点の「削除」。確認してから消す。 */
+async function handleDeleteSpot(id: string): Promise<void> {
+  if (!window.confirm('この地点を消しますか?')) {
+    return;
+  }
+  try {
+    await deleteSpot(id);
+    await loadSpots();
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: 'お役立ち地点を消せませんでした。' }));
   }
 }
 
@@ -1367,6 +1472,7 @@ function renderScreen(): HTMLElement {
         routeContext,
         todayVisited(),
         photoCounts,
+        spots,
         {
           onOpenRoute: handleOpenRoute,
           onBack: () => setState(withScreen(state, { name: 'order' })),
@@ -1384,10 +1490,11 @@ function renderScreen(): HTMLElement {
           onOpenPhotos: (id) => {
             void openPhotos(id);
           },
+          onAddSpot: openSpotDialog,
         },
       );
     case 'settings':
-      return renderSettings(state, settingsInfo, {
+      return renderSettings(state, { ...settingsInfo, spots }, {
         onExport: () => {
           void handleExport();
         },
@@ -1409,6 +1516,9 @@ function renderScreen(): HTMLElement {
         },
         onClearHistory: () => {
           void handleClearHistory();
+        },
+        onDeleteSpot: (id) => {
+          void handleDeleteSpot(id);
         },
       });
     case 'history':
@@ -1489,7 +1599,7 @@ function renderApp(): HTMLElement {
     },
     onOpenLocation: openLocation,
     onStartMeasuring: () => {
-      void startLocationMeasure();
+      void startMeasure();
     },
     onSaveMeasured: saveMeasuredLocation,
     onPasteChange: changePasteText,
@@ -1500,6 +1610,10 @@ function renderApp(): HTMLElement {
     },
     onUndo: () => {
       void undoLocation();
+    },
+    onSpotDraft: changeSpotDraft,
+    onSaveSpot: () => {
+      void saveSpot();
     },
     onPhotoIndex: setPhotoIndex,
     onClose: closeAnyDialog,
@@ -1592,6 +1706,7 @@ function startApp(): void {
     loadRouteContext(),
     deleteHistoryBefore(keepFromDate(new Date())).catch(() => undefined).then(() => loadHistory()),
     loadPhotoCounts(),
+    loadSpots(),
   ]).then(() => undefined);
   (window as WindowWithStartup).__routeAutoInputStartup = startup;
   void startup;
