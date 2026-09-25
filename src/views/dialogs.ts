@@ -28,6 +28,8 @@ export type DialogHandlers = {
   onSaveMeasured(): void;
   /** 位置の登録: 貼り付け欄の入力。 */
   onPasteChange(text: string): void;
+  /** 位置の登録: 貼り付け欄(details)の開閉。 */
+  onPasteToggle(open: boolean): void;
   /** 位置の登録: 貼り付けた位置で登録する。 */
   onSavePasted(): void;
   /** 位置の登録: 登録済みの位置を消す。 */

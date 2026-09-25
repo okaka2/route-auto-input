@@ -26,6 +26,7 @@ function dialog(overrides: Partial<LocationDialog> = {}): LocationDialog {
     error: null,
     pasteText: '',
     pasteError: null,
+    pasteOpen: false,
     previous: null,
     ...overrides,
   };
@@ -36,6 +37,7 @@ function handlers(): LocationDialogHandlers {
     onStartMeasuring: vi.fn(),
     onSaveMeasured: vi.fn(),
     onPasteChange: vi.fn(),
+    onPasteToggle: vi.fn(),
     onSavePasted: vi.fn(),
     onRemove: vi.fn(),
     onUndo: vi.fn(),
@@ -164,7 +166,8 @@ describe('renderLocationDialog: saved', () => {
     const spies = handlers();
     const saved = registeredPatient();
     const el = wrap(renderLocationDialog(saved, dialog({ phase: 'saved', previous: null }), spies));
-    expect(el.textContent).toContain('登録しました');
+    expect(el.textContent).toContain('登録しました(誤差 ±8m)');
+    expect(el.querySelector('.location-status')?.classList.contains('good')).toBe(true);
     const link = q<HTMLAnchorElement>(el, 'location-check-link');
     expect(link.getAttribute('href')).toContain('api=1&query=35.000000%2C139.000000');
     expect(link.target).toBe('_blank');
@@ -181,12 +184,32 @@ describe('renderLocationDialog: saved', () => {
     expect(el.querySelector('[data-testid="location-remove-button"]')).toBeNull();
   });
 
-  it('精度が分からない(貼り付け)ときは「誤差」を付けずに「登録しました。」', () => {
+  it('精度が分からない(貼り付け)ときは「誤差」を付けずに「登録しました(貼り付けた位置)」', () => {
     const saved = patient({
       location: { lat: 35, lng: 139, accuracy: null, recordedAt: '2026-09-22T01:00:00.000Z', source: 'paste' },
     });
     const el = wrap(renderLocationDialog(saved, dialog({ phase: 'saved' }), handlers()));
-    expect(el.textContent).toContain('登録しました。');
+    expect(el.textContent).toContain('登録しました(貼り付けた位置)');
+    expect(el.textContent).not.toContain('誤差');
+  });
+
+  it('精度が良くない(poor)ときは赤の表示にする', () => {
+    const saved = patient({
+      location: { lat: 35, lng: 139, accuracy: 60, recordedAt: '2026-09-22T01:00:00.000Z', source: 'gps' },
+    });
+    const el = wrap(renderLocationDialog(saved, dialog({ phase: 'saved' }), handlers()));
+    expect(el.textContent).toContain('登録しました(誤差 ±60m)');
+    expect(el.querySelector('.location-status')?.classList.contains('poor')).toBe(true);
+  });
+
+  it('精度がふつう(fair)のときは、goodにもpoorにもしない', () => {
+    const saved = patient({
+      location: { lat: 35, lng: 139, accuracy: 30, recordedAt: '2026-09-22T01:00:00.000Z', source: 'gps' },
+    });
+    const el = wrap(renderLocationDialog(saved, dialog({ phase: 'saved' }), handlers()));
+    const status = el.querySelector('.location-status')!;
+    expect(status.classList.contains('good')).toBe(false);
+    expect(status.classList.contains('poor')).toBe(false);
   });
 });
 
@@ -220,6 +243,46 @@ describe('renderLocationDialog: 貼り付け欄', () => {
     const el = wrap(renderLocationDialog(patient(), dialog({ pasteError: null }), handlers()));
     const details = el.querySelector('.location-paste')!;
     expect(details.querySelectorAll('p')).toHaveLength(0);
+  });
+
+  it('入力欄には名前(aria-label)と例のplaceholderを付ける', () => {
+    const el = wrap(renderLocationDialog(patient(), dialog(), handlers()));
+    const input = q<HTMLInputElement>(el, 'location-paste-input');
+    expect(input.getAttribute('aria-label')).toBe('座標またはGoogleマップのURL');
+    expect(input.placeholder).toBe('例) 35.68124, 139.76712');
+  });
+
+  it('pasteOpen/入力中/エラー中でなければ、折りたたみは閉じている', () => {
+    const el = wrap(
+      renderLocationDialog(patient(), dialog({ pasteOpen: false, pasteText: '', pasteError: null }), handlers()),
+    );
+    const details = el.querySelector<HTMLDetailsElement>('.location-paste')!;
+    expect(details.open).toBe(false);
+  });
+
+  it('pasteOpen が true なら、入力が空でも開いたまま', () => {
+    const el = wrap(renderLocationDialog(patient(), dialog({ pasteOpen: true }), handlers()));
+    const details = el.querySelector<HTMLDetailsElement>('.location-paste')!;
+    expect(details.open).toBe(true);
+  });
+
+  it('入力中(pasteText非空)やエラー中は、pasteOpenがfalseでも開いたまま', () => {
+    const typing = wrap(renderLocationDialog(patient(), dialog({ pasteOpen: false, pasteText: '35' }), handlers()));
+    expect(typing.querySelector<HTMLDetailsElement>('.location-paste')!.open).toBe(true);
+
+    const erroring = wrap(
+      renderLocationDialog(patient(), dialog({ pasteOpen: false, pasteError: '読み取れませんでした。' }), handlers()),
+    );
+    expect(erroring.querySelector<HTMLDetailsElement>('.location-paste')!.open).toBe(true);
+  });
+
+  it('開閉(toggle)すると onPasteToggle が呼ばれる', () => {
+    const spies = handlers();
+    const el = wrap(renderLocationDialog(patient(), dialog(), spies));
+    const details = el.querySelector<HTMLDetailsElement>('.location-paste')!;
+    details.open = true;
+    details.dispatchEvent(new Event('toggle'));
+    expect(spies.onPasteToggle).toHaveBeenCalledWith(true);
   });
 });
 

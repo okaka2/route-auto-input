@@ -157,6 +157,12 @@ let dialogReturnId: string | null = null;
 // 止める場所はsetState一箇所にまとめる(下記参照)。
 let stopMeasuring: (() => void) | null = null;
 
+/** 測定中なら止めて、stopMeasuringをnullに戻す(二重に止めても安全)。 */
+function stopCurrentMeasuring(): void {
+  stopMeasuring?.();
+  stopMeasuring = null;
+}
+
 // 設定画面に出す情報(最後のバックアップ日時・データの保存状態・表示の設定・事業所)。
 let settingsInfo: SettingsInfo = { lastBackupAt: null, persisted: null, theme: loadThemeSetting(), office: null };
 
@@ -461,8 +467,7 @@ function setState(next: AppState): void {
       next.dialog.kind === 'location' &&
       next.dialog.id === previousDialog.id;
     if (!stillSameLocation) {
-      stopMeasuring();
-      stopMeasuring = null;
+      stopCurrentMeasuring();
     }
   }
   render();
@@ -674,6 +679,7 @@ function openLocation(id: string): void {
       error: null,
       pasteText: '',
       pasteError: null,
+      pasteOpen: false,
       previous: null,
     },
   });
@@ -681,8 +687,7 @@ function openLocation(id: string): void {
 
 /** 今いる場所の測定を始める(「今いる場所で登録」「もう一度測る」)。既存の測定は先に止める。 */
 async function startLocationMeasure(): Promise<void> {
-  stopMeasuring?.();
-  stopMeasuring = null;
+  stopCurrentMeasuring();
   const dialog = state.dialog;
   if (dialog?.kind !== 'location') {
     return;
@@ -695,9 +700,14 @@ async function startLocationMeasure(): Promise<void> {
     return;
   }
   setState({ ...state, dialog: { ...current, phase: 'measuring', best: null, error: null } });
+  // importの待ち時間に二重にボタンが押されていたら、ここでもう一度止めてから始める
+  // (二重に測定が走って、片方が止められなくなる漏れを防ぐ)。
+  stopCurrentMeasuring();
   stopMeasuring = startMeasuring(navigator.geolocation, (update) => {
     const d = state.dialog;
-    if (d?.kind !== 'location' || d.id !== targetId) {
+    // saved になった後の更新は無視する(保存後に測定が止め切れていない場合の保険。
+    // 実際に止めるのはsaveLocationの先頭)。
+    if (d?.kind !== 'location' || d.id !== targetId || d.phase === 'saved') {
       return;
     }
     if (update.kind === 'reading') {
@@ -728,6 +738,8 @@ async function saveLocation(location: GeoLocation): Promise<void> {
   if (dialog?.kind !== 'location') {
     return;
   }
+  // 測定中に保存したら、そこで測定を止める(止めないと、この後の更新がsaved状態を上書きしてしまう)。
+  stopCurrentMeasuring();
   const patient = state.patients.find((item) => item.id === dialog.id);
   if (!patient) {
     closeAnyDialog();
@@ -781,6 +793,15 @@ function changePasteText(text: string): void {
     return;
   }
   setState({ ...state, dialog: { ...dialog, pasteText: text, pasteError: null } });
+}
+
+/** 貼り付け欄(details)の開閉(toggleイベント)。開閉した状態を再描画のたびに保つ。 */
+function togglePasteSection(open: boolean): void {
+  const dialog = state.dialog;
+  if (dialog?.kind !== 'location') {
+    return;
+  }
+  setState({ ...state, dialog: { ...dialog, pasteOpen: open } });
 }
 
 /** saved のときの「元に戻す」。保存前の位置(previous、無ければ外す)に戻して閉じる。 */
@@ -1203,6 +1224,7 @@ function renderApp(): HTMLElement {
     },
     onSaveMeasured: saveMeasuredLocation,
     onPasteChange: changePasteText,
+    onPasteToggle: togglePasteSection,
     onSavePasted: savePastedLocation,
     onRemove: () => {
       void removeLocation();
@@ -1221,7 +1243,9 @@ function renderApp(): HTMLElement {
 /**
  * 画面全体を作り直すため、そのままでは検索欄に1文字打つたびにフォーカスが外れる。
  * 描画の前後でフォーカス位置を引き継ぐ。ダイアログは、開いたら最初のボタンへ、
- * 閉じたら開いた元の「⋯」へ、フォーカスを移す。
+ * 閉じたら開いた元の「⋯」へ、フォーカスを移す。ただし、同じダイアログが開いたまま
+ * 再描画した場合(貼り付け欄への入力など)は、直前にフォーカスしていた要素(同じtestid)が
+ * まだあれば、そこへフォーカスと入力位置を戻す(無ければ、新しく開いたときと同じ最初のボタンへ)。
  */
 function render(): void {
   const active = document.activeElement;
@@ -1237,13 +1261,25 @@ function render(): void {
 
   const dialog = root!.querySelector<HTMLElement>('[data-testid="dialog"]');
   if (dialog) {
+    if (hadDialog && testid !== undefined) {
+      const selector =
+        rowId === undefined ? `[data-testid="${testid}"]` : `[data-testid="${testid}"][data-id="${rowId}"]`;
+      const restored = dialog.querySelector<HTMLElement>(selector);
+      if (restored) {
+        restored.focus();
+        if (restored instanceof HTMLInputElement && restored.type === 'text' && caret !== null) {
+          restored.setSelectionRange(caret, caret);
+        }
+        return;
+      }
+    }
     dialog.querySelector<HTMLElement>('button')?.focus();
     return;
   }
   if (hadDialog && dialogReturnId !== null) {
     root!
       .querySelector<HTMLElement>(
-        `[data-testid="row-menu"][data-id="${dialogReturnId}"], [data-testid="stop-menu"][data-id="${dialogReturnId}"]`,
+        `[data-testid="row-menu"][data-id="${dialogReturnId}"], [data-testid="stop-menu"][data-id="${dialogReturnId}"], [data-testid="location-pin"][data-id="${dialogReturnId}"]`,
       )
       ?.focus();
     dialogReturnId = null;

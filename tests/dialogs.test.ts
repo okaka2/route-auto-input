@@ -24,6 +24,7 @@ const handlers = (): DialogHandlers => ({
   onStartMeasuring: vi.fn(),
   onSaveMeasured: vi.fn(),
   onPasteChange: vi.fn(),
+  onPasteToggle: vi.fn(),
   onSavePasted: vi.fn(),
   onRemove: vi.fn(),
   onUndo: vi.fn(),
@@ -296,6 +297,7 @@ describe('renderDialog: 位置の登録ダイアログ', () => {
         error: null,
         pasteText: '',
         pasteError: null,
+        pasteOpen: false,
         previous: null,
       },
     };
@@ -315,6 +317,7 @@ describe('renderDialog: 位置の登録ダイアログ', () => {
         error: null,
         pasteText: '',
         pasteError: null,
+        pasteOpen: false,
         previous: null,
       },
     };

@@ -62,6 +62,7 @@ const dialogHandlers = {
   onStartMeasuring: noop,
   onSaveMeasured: noop,
   onPasteChange: noop,
+  onPasteToggle: noop,
   onSavePasted: noop,
   onRemove: noop,
   onUndo: noop,
@@ -264,7 +265,7 @@ describe('画面の文言(禁止語が出ない)', () => {
       ...createInitialState([unregistered, registered]),
       dialog: phase,
     });
-    const phases: LocationDialog[] = [
+    const withoutPasteOpen: Omit<LocationDialog, 'pasteOpen'>[] = [
       { kind: 'location', id: unregistered.id, phase: 'idle', best: null, error: null, pasteText: '', pasteError: null, previous: null },
       { kind: 'location', id: registered.id, phase: 'idle', best: null, error: null, pasteText: '', pasteError: null, previous: null },
       {
@@ -318,6 +319,7 @@ describe('画面の文言(禁止語が出ない)', () => {
         previous: null,
       },
     ];
+    const phases: LocationDialog[] = withoutPasteOpen.map((p) => ({ ...p, pasteOpen: false }));
     phases.forEach((phase, index) => {
       expectClean(`位置の登録#${index}`, renderDialog(base(phase), dialogHandlers)!.outerHTML);
     });

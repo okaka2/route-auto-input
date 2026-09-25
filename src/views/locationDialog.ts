@@ -6,6 +6,8 @@ export type LocationDialogHandlers = {
   onStartMeasuring(): void;
   onSaveMeasured(): void;
   onPasteChange(text: string): void;
+  /** 貼り付け欄(details)の開閉が変わった(toggleイベント)。 */
+  onPasteToggle(open: boolean): void;
   onSavePasted(): void;
   /** 登録済みのとき「位置を消す」。 */
   onRemove(): void;
@@ -183,10 +185,13 @@ function renderErrorPhase(dialog: LocationDialog, handlers: LocationDialogHandle
 }
 
 function renderSavedPhase(patient: Patient, handlers: LocationDialogHandlers): HTMLElement[] {
-  const acc = patient.location ? accuracyPhrase(patient.location.accuracy) : '';
+  const location = patient.location;
   const message = document.createElement('p');
-  message.className = 'location-status good';
-  message.textContent = acc ? `登録しました(${acc})` : '登録しました。';
+  message.className = statusClass(location?.accuracy ?? null);
+  message.textContent =
+    location && location.accuracy !== null
+      ? `登録しました(${accuracyPhrase(location.accuracy)})`
+      : '登録しました(貼り付けた位置)';
 
   const undo = document.createElement('button');
   undo.type = 'button';
@@ -201,6 +206,9 @@ function renderSavedPhase(patient: Patient, handlers: LocationDialogHandlers): H
 function renderPasteSection(dialog: LocationDialog, handlers: LocationDialogHandlers): HTMLElement {
   const details = document.createElement('details');
   details.className = 'location-paste';
+  // 手で開いたまま、入力中、エラー表示中は、再描画のたびに閉じてしまわないよう開いたままにする。
+  details.open = dialog.pasteOpen || dialog.pasteText !== '' || dialog.pasteError !== null;
+  details.addEventListener('toggle', () => handlers.onPasteToggle(details.open));
 
   const summary = document.createElement('summary');
   summary.textContent = '座標やURLを貼り付けて登録';
@@ -209,6 +217,8 @@ function renderPasteSection(dialog: LocationDialog, handlers: LocationDialogHand
   const input = document.createElement('input');
   input.type = 'text';
   input.dataset.testid = 'location-paste-input';
+  input.setAttribute('aria-label', '座標またはGoogleマップのURL');
+  input.placeholder = '例) 35.68124, 139.76712';
   input.value = dialog.pasteText;
   input.addEventListener('input', () => handlers.onPasteChange(input.value));
   details.append(input);

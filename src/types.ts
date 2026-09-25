@@ -44,6 +44,8 @@ export type LocationDialog = {
   error: string | null;
   pasteText: string;
   pasteError: string | null;
+  /** 座標やURLを貼り付ける折りたたみ(details)を、手で開いたままにしているか。 */
+  pasteOpen: boolean;
   previous: GeoLocation | null; // 元に戻す用(saved のとき)
 };
 

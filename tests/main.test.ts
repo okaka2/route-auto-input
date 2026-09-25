@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_NAME } from '../src/appInfo';
 import { serializeBackup } from '../src/backup';
 import { unlock } from '../src/passwordGate';
+import type { Patient } from '../src/types';
 
 // window.location.href への実遷移を避ける(jsdomは未実装で警告を出すうえ、
 // テスト間でナビゲーションが発生すると副作用が漏れる)。main.tsはopenUrlを
@@ -1544,5 +1545,181 @@ describe('位置の登録', () => {
       const saved = (await listPatients()).find((p) => p.id === patient.id);
       expect(saved?.location).toEqual({ lat: 35.1, lng: 139.1, accuracy: null, recordedAt: expect.any(String), source: 'paste' });
     });
+  });
+
+  /** 患者を1人登録し、位置の登録ダイアログを開いて「今いる場所で登録」を押し、watchPositionが呼ばれるまで待つ。 */
+  async function setupMeasuring(): Promise<{
+    patient: Patient;
+    geolocation: Geolocation & { watchPosition: ReturnType<typeof vi.fn>; clearWatch: ReturnType<typeof vi.fn> };
+    emit: (lat: number, lng: number, accuracy: number) => void;
+  }> {
+    const { geolocation, emit } = fakeGeolocation();
+    Object.defineProperty(navigator, 'geolocation', { value: geolocation, configurable: true });
+
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-location"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-measure-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="location-measure-button"]')!.click();
+    await waitFor(() => expect(geolocation.watchPosition).toHaveBeenCalledTimes(1));
+
+    return {
+      patient,
+      geolocation: geolocation as unknown as Geolocation & {
+        watchPosition: ReturnType<typeof vi.fn>;
+        clearWatch: ReturnType<typeof vi.fn>;
+      },
+      emit,
+    };
+  }
+
+  it('測定中に保存すると、そこで測定を止める。保存後の遅れて来た更新はsavedを上書きしない', async () => {
+    const { geolocation, emit } = await setupMeasuring();
+
+    // 35m(fair)は自動では終わらない値。まだ測定中のまま保存する。
+    emit(35.1, 139.1, 35);
+    await waitFor(() => expect(el<HTMLButtonElement>('[data-testid="location-save-button"]')?.disabled).toBe(false));
+
+    el<HTMLButtonElement>('[data-testid="location-save-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-undo-button"]')).not.toBeNull());
+    await waitFor(() => expect(geolocation.clearWatch).toHaveBeenCalled());
+
+    // 止め終わった後に(遅れて)来た更新は無視され、saved のままでなければならない。
+    emit(35.2, 139.2, 25);
+    expect(el('[data-testid="location-undo-button"]')).not.toBeNull();
+  });
+
+  it('ダイアログをキャンセルで閉じると、測定中なら止める(clearWatch)', async () => {
+    const { geolocation } = await setupMeasuring();
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    await waitFor(() => expect(geolocation.clearWatch).toHaveBeenCalledTimes(1));
+  });
+
+  it('Escapeで閉じると、測定中なら止める(clearWatch)', async () => {
+    const { geolocation } = await setupMeasuring();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+
+    await waitFor(() => expect(geolocation.clearWatch).toHaveBeenCalledTimes(1));
+  });
+
+  it('画面を移ると、測定中なら止める(clearWatch)', async () => {
+    const { geolocation } = await setupMeasuring();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+
+    await waitFor(() => expect(geolocation.clearWatch).toHaveBeenCalledTimes(1));
+  });
+
+  it('貼り付けで2回登録してから元に戻すと、1回目の位置にきっちり戻る', async () => {
+    const { savePatient, listPatients } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    const registerByPaste = async (text: string) => {
+      el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+      el<HTMLButtonElement>('[data-testid="dialog-location"]')!.click();
+      await waitFor(() => expect(el('[data-testid="location-paste-input"]')).not.toBeNull());
+      const input = el<HTMLInputElement>('[data-testid="location-paste-input"]')!;
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+      el<HTMLButtonElement>('[data-testid="location-paste-save"]')!.click();
+      await waitFor(() => expect(el('[data-testid="location-undo-button"]')).not.toBeNull());
+    };
+
+    await registerByPaste('35.1, 139.1');
+    const firstLocation = (await listPatients()).find((p) => p.id === patient.id)!.location!;
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog"]')).toBeNull());
+
+    await registerByPaste('35.2, 139.2');
+    const secondLocation = (await listPatients()).find((p) => p.id === patient.id)!.location!;
+    expect(secondLocation).not.toEqual(firstLocation);
+
+    el<HTMLButtonElement>('[data-testid="location-undo-button"]')!.click();
+    await waitFor(async () => {
+      const reverted = (await listPatients()).find((p) => p.id === patient.id)!.location;
+      expect(reverted).toEqual(firstLocation);
+    });
+  });
+
+  it('貼り付け欄を開いて入力すると、再描画のたびにフォーカスと開いた状態を保つ。読めない入力は開いたままエラーを出す', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-location"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-paste-input"]')).not.toBeNull());
+
+    const details = () => el<HTMLDetailsElement>('.location-paste')!;
+    expect(details().open).toBe(false);
+
+    // 折りたたみを手で開く(toggleイベント)。
+    details().open = true;
+    details().dispatchEvent(new Event('toggle'));
+    await waitFor(() => expect(details().open).toBe(true));
+
+    const text = 'これは座標ではない';
+    for (let i = 1; i <= text.length; i += 1) {
+      const input = el<HTMLInputElement>('[data-testid="location-paste-input"]')!;
+      input.focus();
+      input.value = text.slice(0, i);
+      input.dispatchEvent(new Event('input'));
+      expect(document.activeElement).toBe(el('[data-testid="location-paste-input"]'));
+      expect(details().open).toBe(true);
+    }
+
+    el<HTMLButtonElement>('[data-testid="location-paste-save"]')!.click();
+    await waitFor(() => expect(el('body')?.textContent).toContain('座標またはGoogleマップのURLを読み取れませんでした。'));
+    expect(details().open).toBe(true);
+    expect(details().contains(el('[data-testid="location-paste-input"]'))).toBe(true);
+  });
+
+  it('地図のカードの「位置」から開いたダイアログを閉じると、フォーカスが位置ボタンへ戻る', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('場所A', '東京都千代田区1-1');
+    await savePatient(patient);
+    window.localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        selectedIds: [patient.id],
+        opened: [{ index: 0, at: '' }],
+      }),
+    );
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="location-pin"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="location-pin"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(el(`[data-testid="location-pin"][data-id="${patient.id}"]`));
   });
 });

@@ -355,6 +355,7 @@ describe('ダイアログの状態', () => {
       error: null,
       pasteText: '',
       pasteError: null,
+      pasteOpen: false,
       previous: null,
     };
     const opened = { ...createInitialState(patients), dialog: locationDialog };
@@ -372,6 +373,7 @@ describe('ダイアログの状態', () => {
       error: null,
       pasteText: '',
       pasteError: null,
+      pasteOpen: false,
       previous: null,
     };
     const opened = { ...createInitialState(patients), dialog: locationDialog };
