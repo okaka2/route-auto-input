@@ -795,10 +795,25 @@ function changePasteText(text: string): void {
   setState({ ...state, dialog: { ...dialog, pasteText: text, pasteError: null } });
 }
 
-/** 貼り付け欄(details)の開閉(toggleイベント)。開閉した状態を再描画のたびに保つ。 */
+/**
+ * 貼り付け欄(details)の開閉(toggleイベント)。開閉した状態を再描画のたびに保つ。
+ *
+ * 本物のブラウザでは、toggleイベントは手で開閉したときだけでなく、openプロパティを
+ * スクリプトから変えたとき(views/locationDialog.tsのrenderPasteSectionがdetails.openを
+ * 描画のたびに立て直す処理)にも飛ぶ。ここで無条件にsetStateすると、
+ * 再描画→details.openを立て直す→toggleが飛ぶ→setState→再描画…と無限に回ってしまう。
+ * すでに描画されている開閉(pasteOpen/pasteText/pasteErrorから決まる実際の見た目)と
+ * 変わらないtoggleは無視する。
+ * (テキストが入っている状態で閉じようとすると、pasteOpenはfalseになるが、
+ * テキストがある間は開いたままになる。これは仕様として許容する。)
+ */
 function togglePasteSection(open: boolean): void {
   const dialog = state.dialog;
   if (dialog?.kind !== 'location') {
+    return;
+  }
+  const effectiveOpen = dialog.pasteOpen || dialog.pasteText !== '' || dialog.pasteError !== null;
+  if (open === effectiveOpen) {
     return;
   }
   setState({ ...state, dialog: { ...dialog, pasteOpen: open } });

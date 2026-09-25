@@ -1722,4 +1722,44 @@ describe('位置の登録', () => {
     expect(el('[data-testid="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(el(`[data-testid="location-pin"][data-id="${patient.id}"]`));
   });
+
+  it('本物のブラウザのように、details.openを立て直すだけでtoggleが飛んでも、無限に再描画しない', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-location"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-paste-input"]')).not.toBeNull());
+
+    // テキストを入れると details.open が(パース中のsetStateとは別に)立って開いたままになる。
+    // このinput イベントの再描画で入力欄自体も作り直されるので、以降の比較のために
+    // 基準となる要素は、この再描画が終わったあとで取り直す。
+    el<HTMLInputElement>('[data-testid="location-paste-input"]')!.value = '35.1, 139.1';
+    el<HTMLInputElement>('[data-testid="location-paste-input"]')!.dispatchEvent(new Event('input'));
+
+    const details = el<HTMLDetailsElement>('.location-paste')!;
+    const input = el<HTMLInputElement>('[data-testid="location-paste-input"]')!;
+    expect(details.open).toBe(true);
+
+    // 本物のブラウザでは、再描画のたびに details.open = true を立て直す処理そのものが
+    // toggleイベントを飛ばす。jsdomは自動では飛ばさないので、ここで直接シミュレートする。
+    // ガードが無ければ、1回ごとにonPasteToggle→setState→再描画→新しいdetails要素…と
+    // 無限ループになる(このテストはタイムアウトするはず)。ガードがあれば、見た目
+    // (open=true)がすでに一致しているので、setStateも再描画も起きない。
+    details.dispatchEvent(new Event('toggle'));
+    details.dispatchEvent(new Event('toggle'));
+    details.dispatchEvent(new Event('toggle'));
+
+    // 再描画していなければ、同じdetails要素のまま(root.replaceChildrenは呼ばれていない)。
+    expect(el<HTMLDetailsElement>('.location-paste')).toBe(details);
+    // 入力欄の値も、打った内容のまま(作り直されていれば別のinput要素になっている)。
+    expect(el<HTMLInputElement>('[data-testid="location-paste-input"]')).toBe(input);
+    expect(input.value).toBe('35.1, 139.1');
+  });
 });
