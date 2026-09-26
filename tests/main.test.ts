@@ -2415,4 +2415,120 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
     expect(el<HTMLInputElement>('[data-testid="office-name-input"]')?.value).toBe('本店');
     expect(el('body')?.textContent).toContain('きれいなトイレ');
   });
+
+  it('写真つきのv2ファイルを「入れ替える」で読み込むと、古い訪問先の写真は消え、新しい写真が入る', async () => {
+    const { savePatient, addPhoto, listPhotos } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const { serializeBackup } = await import('../src/backup');
+    const oldPatient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(oldPatient);
+    await addPhoto({
+      id: 'old-photo',
+      patientId: oldPatient.id,
+      blob: new Blob(['x'], { type: 'image/jpeg' }),
+      createdAt: '2026-09-01T00:00:00.000Z',
+    });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="import-input"]')).not.toBeNull());
+
+    // 入れ替え先のファイルは別の訪問先(id)だけを含む。入れ替え(replace)なので
+    // 古い訪問先自体が居なくなり、その写真は孤立して片付けられるはず。
+    const newPatient = createPatient('鈴木 花子', '大阪市北区2-2');
+    const text = serializeBackup({
+      patients: [newPatient],
+      photos: [{ id: 'new-photo', patientId: newPatient.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' }],
+      spots: [],
+      meta: {},
+    });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+    const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('取り込みました'));
+
+    expect(await listPhotos(oldPatient.id)).toHaveLength(0);
+    expect(await listPhotos(newPatient.id)).toHaveLength(1);
+  });
+
+  it('壊れた写真(base64の中身が壊れている)を含むファイルは、確認より前に中断して何も変わらない', async () => {
+    const { savePatient, listPatients } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const { serializeBackup } = await import('../src/backup');
+    const existing = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(existing);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="import-input"]')).not.toBeNull());
+
+    // dataUrlの形(data:<type>;base64,...)自体はtoBackupPhotoの検査を通るが、
+    // base64の中身(@@@)が壊れているため、dataUrlToBlobでの事前デコードが失敗する。
+    const fromFile = createPatient('鈴木 花子', '大阪市北区2-2');
+    const text = serializeBackup({
+      patients: [fromFile],
+      photos: [{ id: 'p1', patientId: fromFile.id, dataUrl: 'data:image/jpeg;base64,@@@', createdAt: 't1' }],
+      spots: [],
+      meta: {},
+    });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+    const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+
+    // 入れ替え(replace)は既定のモード。確認ダイアログより前に中断するはずなので、
+    // confirmが呼ばれないことも合わせて確認する。
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
+    await waitFor(() =>
+      expect(el('.message')?.textContent).toContain('バックアップのファイルの写真が壊れています。'),
+    );
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect((await listPatients()).map((p) => p.id)).toEqual([existing.id]);
+  });
+
+  it('確認の文の写真枚数は、実際に取り込まれる訪問先ぶんだけを数える(孤立した写真は数えない)', async () => {
+    const { serializeBackup } = await import('../src/backup');
+    const { createPatient } = await import('../src/patient');
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="import-input"]')).not.toBeNull());
+
+    // ファイルの訪問先は1件だけなのに、写真は2枚(うち1枚は訪問先がファイルに無い=孤立)。
+    // 入れ替え(replace)では、実際に残るのはファイルの訪問先ぶんの写真だけなので、
+    // 確認の文には「写真1枚」とだけ出るはず。
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const text = serializeBackup({
+      patients: [patient],
+      photos: [
+        { id: 'p1', patientId: patient.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' },
+        { id: 'p2', patientId: 'not-in-file', dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' },
+      ],
+      spots: [],
+      meta: {},
+    });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+    const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+
+    expect(confirmSpy.mock.calls[0]![0]).toContain('写真1枚');
+    expect(confirmSpy.mock.calls[0]![0]).not.toContain('写真2枚');
+  });
 });

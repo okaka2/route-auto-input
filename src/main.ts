@@ -1438,9 +1438,36 @@ function backupExtrasLabel(photoCount: number, spotCount: number): string {
 }
 
 async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void> {
+  let writeStarted = false;
   try {
     const content = parseBackup(await readTextFile(file));
-    const extras = backupExtrasLabel(content.photos?.length ?? 0, content.spots.length);
+
+    // 書き込みを始める前に、写真を1枚ずつ全部デコードしておく(dataUrlToBlobは形が
+    // 正しくてもbase64の中身が壊れていれば例外を投げる)。ここで1枚でも壊れていれば、
+    // 訪問先の入れ替え・追加より前に中断して、何も変えない。
+    let decodedPhotos: Photo[] | null;
+    try {
+      decodedPhotos =
+        content.photos === null
+          ? null
+          : content.photos.map((photo) => ({
+              id: photo.id,
+              patientId: photo.patientId,
+              blob: dataUrlToBlob(photo.dataUrl),
+              createdAt: photo.createdAt,
+            }));
+    } catch {
+      setState(withMessage(state, { kind: 'error', text: 'バックアップのファイルの写真が壊れています。' }));
+      return;
+    }
+
+    // 確認の件数は、実際に取り込まれる訪問先に属する写真だけを数える
+    // (入れ替えならファイルの訪問先だけ、追加ならファイル+今の訪問先)。
+    const fileIds = new Set(content.patients.map((patient) => patient.id));
+    const countedIds =
+      mode === 'replace' ? fileIds : new Set([...fileIds, ...state.patients.map((patient) => patient.id)]);
+    const photoCount = decodedPhotos?.filter((photo) => countedIds.has(photo.patientId)).length ?? 0;
+    const extras = backupExtrasLabel(photoCount, content.spots.length);
     const question =
       mode === 'replace'
         ? `今のデータ${state.patients.length}件を消して、${content.patients.length}件${extras}を取り込みます。よろしいですか?`
@@ -1448,6 +1475,8 @@ async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void
     if (!window.confirm(question)) {
       return;
     }
+
+    writeStarted = true;
     if (mode === 'replace') {
       await replaceAllPatients(content.patients);
     } else {
@@ -1455,14 +1484,8 @@ async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void
     }
     // 写真がnullのとき(書き出す側で外した、または旧version 1のバックアップ)は、
     // 既存の写真に一切触れない(消さない)。
-    if (content.photos !== null) {
-      const photos: Photo[] = content.photos.map((photo) => ({
-        id: photo.id,
-        patientId: photo.patientId,
-        blob: dataUrlToBlob(photo.dataUrl),
-        createdAt: photo.createdAt,
-      }));
-      await putPhotos(photos);
+    if (decodedPhotos !== null) {
+      await putPhotos(decodedPhotos);
     }
     await putSpots(content.spots);
     if (content.meta.office !== undefined) {
@@ -1485,7 +1508,16 @@ async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void
     await reloadPatients({ kind: 'info', text: `${content.patients.length}件を取り込みました。` });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'データを取り込めませんでした。';
-    setState(withMessage(state, { kind: 'error', text: message }));
+    if (writeStarted) {
+      // 訪問先の入れ替え・追加が始まったあとに失敗した場合、DBには一部だけ書き込まれている
+      // ことがあるので、画面をその実際の状態に合わせ直す(訪問先・地点・写真の件数/サイズ)。
+      await loadSpots();
+      await loadPhotoCounts();
+      await loadPhotoBytes();
+      await reloadPatients({ kind: 'error', text: message });
+    } else {
+      setState(withMessage(state, { kind: 'error', text: message }));
+    }
   }
 }
 

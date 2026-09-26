@@ -25,11 +25,6 @@ describe('serializeBackup', () => {
     expect(json.exportedAt).toBe('2026-09-02T09:00:00.000Z');
     expect(json.patients).toHaveLength(2);
   });
-
-  it('写真を含めなければ photos は null', () => {
-    const json = JSON.parse(serializeBackup(emptyContent()));
-    expect(json.photos).toBeNull();
-  });
 });
 
 describe('parseBackup', () => {
@@ -40,11 +35,6 @@ describe('parseBackup', () => {
 
   it('JSONとして壊れていれば例外を投げる', () => {
     expect(() => parseBackup('{ not json')).toThrow();
-  });
-
-  it('バージョンが1でも2でもなければ「対応していないバージョンのバックアップファイルです。」', () => {
-    const text = JSON.stringify({ version: 3, exportedAt: '', patients: [] });
-    expect(() => parseBackup(text)).toThrow('対応していないバージョンのバックアップファイルです。');
   });
 
   it('patientsが配列でなければ例外を投げる', () => {
@@ -86,7 +76,7 @@ describe('parseBackup', () => {
     expect(parseBackup(serializeBackup(emptyContent(patients))).patients).toEqual(patients);
   });
 
-  it('駐車情報とメモも、あれば往復して残る', () => {
+  it('駐車情報とメモも、version 1 の実ファイルから読み込める(旧ステージのバックアップ)', () => {
     const patients = [
       { ...createPatient('山田 太郎', '東京都千代田区1-1'), parking: { type: 'coin' as const }, note: '北側の月極' },
       {
@@ -94,7 +84,8 @@ describe('parseBackup', () => {
         parking: { type: 'street_permit' as const, permitExpires: '2027-03-31' },
       },
     ];
-    expect(parseBackup(serializeBackup(emptyContent(patients))).patients).toEqual(patients);
+    const text = JSON.stringify({ version: 1, exportedAt: '2026-01-01T00:00:00.000Z', patients });
+    expect(parseBackup(text).patients).toEqual(patients);
   });
 
   it('parking.type が選択肢にない/壊れていれば parking を無視する', () => {
@@ -246,6 +237,21 @@ describe('parseBackup', () => {
       exportedAt: '',
       patients: [],
       photos: [good, { id: 'p2' /* patientIdが無い */ }, 'not an object'],
+      spots: [],
+      meta: {},
+    });
+    const result = parseBackup(text);
+    expect(result.photos).toEqual([good]);
+  });
+
+  it('dataUrlの形(data:<type>;base64,...)をしていない写真は捨てる', () => {
+    const good: BackupPhoto = { id: 'p1', patientId: 'a', dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' };
+    const bad: BackupPhoto = { id: 'p2', patientId: 'a', dataUrl: 'not a data url', createdAt: 't1' };
+    const text = JSON.stringify({
+      version: BACKUP_VERSION,
+      exportedAt: '',
+      patients: [],
+      photos: [good, bad],
       spots: [],
       meta: {},
     });

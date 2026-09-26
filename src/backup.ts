@@ -154,6 +154,9 @@ function toGeoLocation(value: unknown): GeoLocation | undefined {
   return { lat, lng, accuracy, recordedAt: record.recordedAt, source: record.source };
 }
 
+/** data URL(`data:<type>;base64,...`)の形をしているかどうか(中身のbase64自体が正しいかは見ない)。 */
+const DATA_URL_PREFIX_PATTERN = /^data:[^;,]*;base64,/;
+
 /** 形が合わなければ丸ごと捨てる(null)。写真は1件ごとに独立しているため、この項目だけ落とせばよい。 */
 function toBackupPhoto(value: unknown): BackupPhoto | null {
   if (typeof value !== 'object' || value === null) {
@@ -166,7 +169,7 @@ function toBackupPhoto(value: unknown): BackupPhoto | null {
   if (typeof record.patientId !== 'string' || record.patientId === '') {
     return null;
   }
-  if (typeof record.dataUrl !== 'string' || record.dataUrl === '') {
+  if (typeof record.dataUrl !== 'string' || !DATA_URL_PREFIX_PATTERN.test(record.dataUrl)) {
     return null;
   }
   if (typeof record.createdAt !== 'string' || record.createdAt === '') {
