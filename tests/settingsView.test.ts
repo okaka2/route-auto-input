@@ -14,7 +14,14 @@ const handlers = (): SettingsHandlers => ({
   onDeleteSpot: vi.fn(),
 });
 
-const info = (): SettingsInfo => ({ lastBackupAt: null, persisted: null, theme: 'auto', office: null, spots: [] });
+const info = (): SettingsInfo => ({
+  lastBackupAt: null,
+  persisted: null,
+  theme: 'auto',
+  office: null,
+  spots: [],
+  photoBytes: 0,
+});
 
 const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: string): T =>
   element.querySelector<T>(`[data-testid="${testid}"]`)!;
@@ -62,6 +69,36 @@ describe('renderSettings: 書き出し', () => {
   it('説明に「訪問先」の言葉を使う', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
     expect(element.textContent).toContain('訪問先のデータをバックアップのファイルとして保存します。');
+  });
+
+  it('写真が無ければ「写真も含める」は出さず、onExport(true)で書き出す', () => {
+    const spies = handlers();
+    const element = renderSettings(createInitialState([]), { ...info(), photoBytes: 0 }, spies);
+    expect(element.querySelector('[data-testid="include-photos"]')).toBeNull();
+    q<HTMLButtonElement>(element, 'export-button').click();
+    expect(spies.onExport).toHaveBeenCalledWith(true);
+  });
+
+  it('写真があれば「写真も含める(約N.NMB)」のチェック(既定でオン)を出す', () => {
+    // 3MB相当のバイト数(data URL化で4/3になる分を見込んだ表示)。
+    const bytes = 3 * 1024 * 1024 * (3 / 4);
+    const element = renderSettings(createInitialState([]), { ...info(), photoBytes: bytes }, handlers());
+    const checkbox = q<HTMLInputElement>(element, 'include-photos');
+    expect(checkbox.checked).toBe(true);
+    expect(element.textContent).toContain('写真も含める(約3.0MB)');
+  });
+
+  it('小さい写真は「約0.1MB未満」と出す', () => {
+    const element = renderSettings(createInitialState([]), { ...info(), photoBytes: 1000 }, handlers());
+    expect(element.textContent).toContain('写真も含める(約0.1MB未満)');
+  });
+
+  it('チェックを外して書き出すと onExport(false)', () => {
+    const spies = handlers();
+    const element = renderSettings(createInitialState([]), { ...info(), photoBytes: 1000 }, spies);
+    q<HTMLInputElement>(element, 'include-photos').checked = false;
+    q<HTMLButtonElement>(element, 'export-button').click();
+    expect(spies.onExport).toHaveBeenCalledWith(false);
   });
 });
 

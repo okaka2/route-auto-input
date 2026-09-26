@@ -1,35 +1,50 @@
 import { describe, expect, it } from 'vitest';
-import { BACKUP_VERSION, parseBackup, serializeBackup } from '../src/backup';
+import { BACKUP_VERSION, parseBackup, serializeBackup, type BackupContent, type BackupPhoto } from '../src/backup';
 import { createPatient } from '../src/patient';
+import type { GeoLocation, Spot } from '../src/types';
 
 const samplePatients = () => [
   createPatient('山田 太郎', '東京都千代田区1-1'),
   createPatient('鈴木 花子', '大阪市北区2-2'),
 ];
 
+const emptyContent = (patients = samplePatients()): BackupContent => ({
+  patients,
+  photos: null,
+  spots: [],
+  meta: {},
+});
+
+const sampleLocation: GeoLocation = { lat: 35.68, lng: 139.76, accuracy: 12, recordedAt: '2026-09-01T00:00:00.000Z', source: 'gps' };
+
 describe('serializeBackup', () => {
   it('バージョンと書き出し日時と患者一覧を含む', () => {
     const patients = samplePatients();
-    const json = JSON.parse(serializeBackup(patients, new Date('2026-09-02T09:00:00.000Z')));
+    const json = JSON.parse(serializeBackup(emptyContent(patients), new Date('2026-09-02T09:00:00.000Z')));
     expect(json.version).toBe(BACKUP_VERSION);
     expect(json.exportedAt).toBe('2026-09-02T09:00:00.000Z');
     expect(json.patients).toHaveLength(2);
+  });
+
+  it('写真を含めなければ photos は null', () => {
+    const json = JSON.parse(serializeBackup(emptyContent()));
+    expect(json.photos).toBeNull();
   });
 });
 
 describe('parseBackup', () => {
   it('書き出したものを読み込むと同じ患者一覧に戻る', () => {
     const patients = samplePatients();
-    expect(parseBackup(serializeBackup(patients))).toEqual(patients);
+    expect(parseBackup(serializeBackup(emptyContent(patients))).patients).toEqual(patients);
   });
 
   it('JSONとして壊れていれば例外を投げる', () => {
     expect(() => parseBackup('{ not json')).toThrow();
   });
 
-  it('バージョンが違えば例外を投げる', () => {
-    const text = JSON.stringify({ version: 999, exportedAt: '', patients: [] });
-    expect(() => parseBackup(text)).toThrow();
+  it('バージョンが1でも2でもなければ「対応していないバージョンのバックアップファイルです。」', () => {
+    const text = JSON.stringify({ version: 3, exportedAt: '', patients: [] });
+    expect(() => parseBackup(text)).toThrow('対応していないバージョンのバックアップファイルです。');
   });
 
   it('patientsが配列でなければ例外を投げる', () => {
@@ -63,12 +78,12 @@ describe('parseBackup', () => {
   });
 
   it('患者0件のファイルは空配列として読み込める', () => {
-    expect(parseBackup(serializeBackup([]))).toEqual([]);
+    expect(parseBackup(serializeBackup(emptyContent([]))).patients).toEqual([]);
   });
 
   it('電話番号つきの訪問先も、往復して phone が残る', () => {
     const patients = [createPatient('山田 太郎', '東京都千代田区1-1', new Date(), '03-1234-5678')];
-    expect(parseBackup(serializeBackup(patients))).toEqual(patients);
+    expect(parseBackup(serializeBackup(emptyContent(patients))).patients).toEqual(patients);
   });
 
   it('駐車情報とメモも、あれば往復して残る', () => {
@@ -79,7 +94,7 @@ describe('parseBackup', () => {
         parking: { type: 'street_permit' as const, permitExpires: '2027-03-31' },
       },
     ];
-    expect(parseBackup(serializeBackup(patients))).toEqual(patients);
+    expect(parseBackup(serializeBackup(emptyContent(patients))).patients).toEqual(patients);
   });
 
   it('parking.type が選択肢にない/壊れていれば parking を無視する', () => {
@@ -105,9 +120,9 @@ describe('parseBackup', () => {
         },
       ],
     });
-    const result = parseBackup(text);
-    expect('parking' in result[0]!).toBe(false);
-    expect('parking' in result[1]!).toBe(false);
+    const { patients } = parseBackup(text);
+    expect('parking' in patients[0]!).toBe(false);
+    expect('parking' in patients[1]!).toBe(false);
   });
 
   it('permitExpires が YYYY-MM-DD でなければ無視する(parking自体は残す)', () => {
@@ -125,8 +140,8 @@ describe('parseBackup', () => {
         },
       ],
     });
-    const result = parseBackup(text);
-    expect(result[0]!.parking).toEqual({ type: 'street_permit' });
+    const { patients } = parseBackup(text);
+    expect(patients[0]!.parking).toEqual({ type: 'street_permit' });
   });
 
   it('note が空文字や不正な型なら持たない', () => {
@@ -138,9 +153,9 @@ describe('parseBackup', () => {
         { id: 'b', name: '鈴木花子', address: '大阪市北区2-2', createdAt: 't1', updatedAt: 't2', note: 123 },
       ],
     });
-    const result = parseBackup(text);
-    expect('note' in result[0]!).toBe(false);
-    expect('note' in result[1]!).toBe(false);
+    const { patients } = parseBackup(text);
+    expect('note' in patients[0]!).toBe(false);
+    expect('note' in patients[1]!).toBe(false);
   });
 
   it('phone が無い古いデータも読み込める', () => {
@@ -151,7 +166,122 @@ describe('parseBackup', () => {
         { id: 'a', name: '山田太郎', address: '東京都千代田区1-1', createdAt: 't1', updatedAt: 't2' },
       ],
     });
+    const { patients } = parseBackup(text);
+    expect('phone' in patients[0]!).toBe(false);
+  });
+
+  it('位置つきの訪問先も、往復して location が残る', () => {
+    const patients = [{ ...createPatient('山田 太郎', '東京都千代田区1-1'), location: sampleLocation }];
+    expect(parseBackup(serializeBackup(emptyContent(patients))).patients).toEqual(patients);
+  });
+
+  it('壊れた location は外して読む(訪問先自体は読む)', () => {
+    const text = JSON.stringify({
+      version: BACKUP_VERSION,
+      exportedAt: '',
+      patients: [
+        {
+          id: 'a',
+          name: '山田太郎',
+          address: '東京都千代田区1-1',
+          createdAt: 't1',
+          updatedAt: 't2',
+          location: { lat: 200, lng: 139.76, accuracy: null, recordedAt: 't1', source: 'gps' },
+        },
+        {
+          id: 'b',
+          name: '鈴木花子',
+          address: '大阪市北区2-2',
+          createdAt: 't1',
+          updatedAt: 't2',
+          location: { lat: 35, lng: 139, accuracy: null, recordedAt: 't1', source: 'unknown' },
+        },
+      ],
+    });
+    const { patients } = parseBackup(text);
+    expect('location' in patients[0]!).toBe(false);
+    expect('location' in patients[1]!).toBe(false);
+  });
+
+  it('v2の往復: 写真・お役立ち地点・meta(事業所・出発帰着)も残る', () => {
+    const patients = samplePatients();
+    const photos: BackupPhoto[] = [
+      { id: 'p1', patientId: patients[0]!.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' },
+    ];
+    const spots: Spot[] = [
+      { id: 's1', kind: 'toilet', note: 'コンビニのトイレ', location: sampleLocation, createdAt: 't1' },
+    ];
+    const content: BackupContent = {
+      patients,
+      photos,
+      spots,
+      meta: { office: { name: '本店', address: '東京都中央区1-2-3' }, routeEnds: { start: 'office', end: 'last' } },
+    };
+    const result = parseBackup(serializeBackup(content));
+    expect(result.patients).toEqual(patients);
+    expect(result.photos).toEqual(photos);
+    expect(result.spots).toEqual(spots);
+    expect(result.meta).toEqual(content.meta);
+  });
+
+  it('写真を含めずに書き出すと、読み込んだ photos は null', () => {
+    const result = parseBackup(serializeBackup(emptyContent()));
+    expect(result.photos).toBeNull();
+  });
+
+  it('旧形式(version 1)のファイルも読める(photosはnull、spotsは空、metaは空)', () => {
+    const patients = samplePatients();
+    const text = JSON.stringify({ version: 1, exportedAt: '2026-01-01T00:00:00.000Z', patients });
     const result = parseBackup(text);
-    expect('phone' in result[0]!).toBe(false);
+    expect(result.patients).toEqual(patients);
+    expect(result.photos).toBeNull();
+    expect(result.spots).toEqual([]);
+    expect(result.meta).toEqual({});
+  });
+
+  it('壊れた写真だけ捨てて、ほかは読み込む', () => {
+    const good: BackupPhoto = { id: 'p1', patientId: 'a', dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' };
+    const text = JSON.stringify({
+      version: BACKUP_VERSION,
+      exportedAt: '',
+      patients: [],
+      photos: [good, { id: 'p2' /* patientIdが無い */ }, 'not an object'],
+      spots: [],
+      meta: {},
+    });
+    const result = parseBackup(text);
+    expect(result.photos).toEqual([good]);
+  });
+
+  it('壊れたお役立ち地点だけ捨てて、ほかは読み込む', () => {
+    const good: Spot = { id: 's1', kind: 'toilet', note: '', location: sampleLocation, createdAt: 't1' };
+    const text = JSON.stringify({
+      version: BACKUP_VERSION,
+      exportedAt: '',
+      patients: [],
+      photos: null,
+      spots: [good, { id: 's2', kind: 'unknown-kind', note: '', location: sampleLocation, createdAt: 't1' }],
+      meta: {},
+    });
+    const result = parseBackup(text);
+    expect(result.spots).toEqual([good]);
+  });
+
+  it('形の合わない meta(事業所・出発帰着)は無視する', () => {
+    const text = JSON.stringify({
+      version: BACKUP_VERSION,
+      exportedAt: '',
+      patients: [],
+      photos: null,
+      spots: [],
+      meta: { office: { name: '' }, routeEnds: { start: 'space', end: 'last' } },
+    });
+    const result = parseBackup(text);
+    expect(result.meta).toEqual({});
+  });
+
+  it('バージョン3のファイルは「対応していないバージョンのバックアップファイルです。」で拒否する', () => {
+    const text = JSON.stringify({ version: 3, exportedAt: '', patients: [], photos: null, spots: [], meta: {} });
+    expect(() => parseBackup(text)).toThrow('対応していないバージョンのバックアップファイルです。');
   });
 });

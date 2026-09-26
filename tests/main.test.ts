@@ -129,6 +129,33 @@ async function armSpotDeleteWait(): Promise<() => Promise<void>> {
   return () => done;
 }
 
+/**
+ * お役立ち地点の登録(saveSpot: db.putSpot → db.listSpots → render)が終わるまで待てるようにする
+ * (armSpotDeleteWaitと同じ理由・同じ仕組み)。待たずに次のテストのbeforeEach(deleteDB)へ進むと、
+ * まだ動いている読み込みが後からdb接続を開き直してしまうことがある。
+ */
+async function armSpotSaveWait(): Promise<() => Promise<void>> {
+  const db = await import('../src/db');
+  let resolveDone: () => void = () => {};
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
+  const originalPutSpot = db.putSpot;
+  const putSpy = vi.spyOn(db, 'putSpot').mockImplementation(async (spot) => {
+    putSpy.mockRestore();
+    const result = await originalPutSpot(spot);
+    const originalListSpots = db.listSpots;
+    const listSpy = vi.spyOn(db, 'listSpots').mockImplementation(async () => {
+      listSpy.mockRestore();
+      const listResult = await originalListSpots();
+      resolveDone();
+      return listResult;
+    });
+    return result;
+  });
+  return () => done;
+}
+
 const el = <T extends HTMLElement = HTMLElement>(selector: string): T | null =>
   document.querySelector<T>(selector);
 
@@ -544,7 +571,7 @@ describe('インポートの確認(cancel/confirm)', () => {
   }
 
   function attachBackupFile(): void {
-    const text = serializeBackup([]); // 空データへの全置換
+    const text = serializeBackup({ patients: [], photos: null, spots: [], meta: {} }); // 空データへの全置換
     const file = new File([text], 'backup.json', { type: 'application/json' });
     const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
@@ -2268,10 +2295,124 @@ describe('お役立ち地点の登録', () => {
     const saveButton = el<HTMLButtonElement>('[data-testid="spot-save-button"]')!;
     // 1回目のクリックでDBへの書き込み(await putSpot)が始まった時点で二重実行防止の
     // フラグが立つので、そのまま連打しても2回目は何もしない(1回目の完了を待つ必要は無い)。
+    // 次のテストのbeforeEach(deleteDB)と競合しないよう、登録の一連が完全に終わるまで待つ。
+    const spotSaved = await armSpotSaveWait();
     saveButton.click();
     saveButton.click();
+    await spotSaved();
 
-    await waitFor(async () => expect(await listSpots()).toHaveLength(1));
+    expect(await listSpots()).toHaveLength(1);
     expect(geolocation.clearWatch).toHaveBeenCalled();
+  });
+});
+
+describe('バックアップ v2(写真・お役立ち地点・事業所)', () => {
+  it('写真つきで書き出すとファイルの中身に photos があり、チェックを外すと null になる', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+    // fake-indexeddb(jsdomのBlobをstructuredCloneすると中身が失われる)を避けるため、
+    // 写真の一覧そのものをスパイして、本物のBlobを持つ写真を返す(main.ts側の
+    // 合計サイズの計算・書き出しのロジックだけを検証する)。
+    vi.spyOn(db, 'listAllPhotos').mockResolvedValue([
+      {
+        id: 'photo-1',
+        patientId: patient.id,
+        blob: new Blob(['x'], { type: 'image/jpeg' }),
+        createdAt: '2026-09-01T00:00:00.000Z',
+      },
+    ]);
+
+    const fileIo = await import('../src/fileIo');
+    const downloadSpy = vi.spyOn(fileIo, 'downloadTextFile').mockImplementation(() => {});
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="include-photos"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="export-button"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('書き出しました'));
+    expect(downloadSpy).toHaveBeenCalledTimes(1);
+    const withPhotos = JSON.parse(downloadSpy.mock.calls[0]![1] as string);
+    expect(Array.isArray(withPhotos.photos)).toBe(true);
+    expect(withPhotos.photos).toHaveLength(1);
+
+    el<HTMLInputElement>('[data-testid="include-photos"]')!.checked = false;
+    el<HTMLButtonElement>('[data-testid="export-button"]')!.click();
+    await waitFor(() => expect(downloadSpy).toHaveBeenCalledTimes(2));
+    const withoutPhotos = JSON.parse(downloadSpy.mock.calls[1]![1] as string);
+    expect(withoutPhotos.photos).toBeNull();
+  });
+
+  it('写真なしのファイルを「入れ替える」で読み込んでも、既存の写真は残る', async () => {
+    const { savePatient, addPhoto, listPhotos } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const { serializeBackup } = await import('../src/backup');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+    await addPhoto({
+      id: 'photo-1',
+      patientId: patient.id,
+      blob: new Blob(['x'], { type: 'image/jpeg' }),
+      createdAt: '2026-09-01T00:00:00.000Z',
+    });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="import-input"]')).not.toBeNull());
+
+    // 同じ訪問先(id)を含み、写真は含めない(=null)バックアップ。
+    const text = serializeBackup({ patients: [patient], photos: null, spots: [], meta: {} });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+    const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('取り込みました'));
+
+    expect(await listPhotos(patient.id)).toHaveLength(1);
+  });
+
+  it('v2のファイルを読み込むと、お役立ち地点と事業所が入る', async () => {
+    const { serializeBackup } = await import('../src/backup');
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="import-input"]')).not.toBeNull());
+
+    const spot = {
+      id: 's1',
+      kind: 'toilet' as const,
+      note: 'きれいなトイレ',
+      location: { lat: 35, lng: 139, accuracy: null, recordedAt: '2026-09-01T00:00:00.000Z', source: 'gps' as const },
+      createdAt: '2026-09-01T00:00:00.000Z',
+    };
+    const text = serializeBackup({
+      patients: [],
+      photos: null,
+      spots: [spot],
+      meta: { office: { name: '本店', address: '東京都中央区1-2-3' }, routeEnds: { start: 'office', end: 'last' } },
+    });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+    const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('取り込みました'));
+
+    expect(el<HTMLInputElement>('[data-testid="office-name-input"]')?.value).toBe('本店');
+    expect(el('body')?.textContent).toContain('きれいなトイレ');
   });
 });

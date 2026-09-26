@@ -250,6 +250,13 @@ a.disabled {
   min-height: var(--tap-min);
 }
 
+.backup-photos-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap-min);
+}
+
 .office-fields {
   display: flex;
   flex-direction: column;

@@ -16,10 +16,12 @@ export type SettingsInfo = {
   office: Office | null;
   /** 登録済みのお役立ち地点(トイレ・休憩など)。 */
   spots: Spot[];
+  /** 登録済みの写真の合計バイト数(0なら「写真も含める」を出さない)。 */
+  photoBytes: number;
 };
 
 export type SettingsHandlers = {
-  onExport(): void;
+  onExport(includePhotos: boolean): void;
   onImport(file: File, mode: 'replace' | 'merge'): void;
   onThemeChange(setting: ThemeSetting): void;
   onBack(): void;
@@ -131,7 +133,23 @@ function renderBackup(info: SettingsInfo, handlers: SettingsHandlers, now: Date)
 
   const note = document.createElement('p');
   note.textContent = '訪問先のデータをバックアップのファイルとして保存します。';
-  const exportButton = button('export-button', '書き出す', 'primary block', () => handlers.onExport());
+
+  let includePhotosInput: HTMLInputElement | null = null;
+  let includePhotosLabel: HTMLLabelElement | null = null;
+  if (info.photoBytes > 0) {
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = true;
+    checkbox.dataset.testid = 'include-photos';
+    includePhotosInput = checkbox;
+    const label = document.createElement('label');
+    label.className = 'backup-photos-field';
+    label.append(checkbox, document.createTextNode(` 写真も含める(${formatPhotoBytes(info.photoBytes)})`));
+    includePhotosLabel = label;
+  }
+  const exportButton = button('export-button', '書き出す', 'primary block', () =>
+    handlers.onExport(includePhotosInput ? includePhotosInput.checked : true),
+  );
 
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
@@ -153,8 +171,17 @@ function renderBackup(info: SettingsInfo, handlers: SettingsHandlers, now: Date)
       handlers.onImport(file, mergeRadio.input.checked ? 'merge' : 'replace');
     }
   });
-  card.append(last, note, exportButton, fileInput, modes, importButton);
+  card.append(last, note, ...(includePhotosLabel ? [includePhotosLabel] : []), exportButton, fileInput, modes, importButton);
   return card;
+}
+
+/** バックアップに含める写真の合計サイズの表示。data URL化(base64)で元のバイト数の約4/3になる分を見込む。 */
+function formatPhotoBytes(bytes: number): string {
+  const mb = (bytes * 4) / 3 / 1024 / 1024;
+  if (mb < 0.1) {
+    return '約0.1MB未満';
+  }
+  return `約${mb.toFixed(1)}MB`;
 }
 
 function renderProtection(info: SettingsInfo, handlers: SettingsHandlers): HTMLElement {

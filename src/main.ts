@@ -7,18 +7,22 @@ import {
   countPhotosByPatient,
   deleteHistoryBefore,
   deleteMeta,
+  deleteOrphanPhotos,
   deletePatient,
   deletePatients,
   deletePhoto,
   deletePhotosOf,
   deleteSpot,
   getMeta,
+  listAllPhotos,
   listHistory,
   listPatients,
   listPhotos,
   listSpots,
   mergePatients,
+  putPhotos,
   putSpot,
+  putSpots,
   replaceAllPatients,
   savePatient,
   setMeta,
@@ -34,6 +38,7 @@ import { openUrl } from './openRoute';
 import { checkPassword, isUnlocked, renderPasswordGate, unlock } from './passwordGate';
 import { findSimilar } from './normalize';
 import { createPatient, updatePatientFields, withLocation, withVisitInfo } from './patient';
+import { blobToDataUrl, dataUrlToBlob } from './photoCodec';
 import { isStandaloneDisplay } from './platform';
 import { isStoragePersisted, requestPersistentStorage } from './protection';
 import { daysBetween, shouldRemindBackup } from './backupReminder';
@@ -73,6 +78,7 @@ import type {
   Message,
   Patient,
   PatientFormDraft,
+  Photo,
   SortOrder,
   Spot,
   SpotDialog,
@@ -208,6 +214,7 @@ let settingsInfo: Omit<SettingsInfo, 'spots'> = {
   persisted: null,
   theme: loadThemeSetting(),
   office: null,
+  photoBytes: 0,
 };
 
 // 出発・帰着の選び方と事業所。起動時に loadRouteContext() で読み直す(Task 3 が使う)。
@@ -362,8 +369,12 @@ function requestProtectionOnce(): void {
  */
 async function loadSettingsInfo(): Promise<void> {
   try {
-    const [lastBackupAt, persisted] = await Promise.all([getMeta('lastBackupAt'), isStoragePersisted()]);
-    settingsInfo = { ...settingsInfo, lastBackupAt: lastBackupAt ?? null, persisted };
+    const [lastBackupAt, persisted, photoBytes] = await Promise.all([
+      getMeta('lastBackupAt'),
+      isStoragePersisted(),
+      sumPhotoBytes(),
+    ]);
+    settingsInfo = { ...settingsInfo, lastBackupAt: lastBackupAt ?? null, persisted, photoBytes };
   } catch {
     // 読み込みに失敗しても、アプリを止めない。今のsettingsInfoをそのまま使う
     // (お知らせはsettingsLoadedがtrueになった時点でlastBackupAt: nullとして出る)。
@@ -371,6 +382,23 @@ async function loadSettingsInfo(): Promise<void> {
     settingsLoaded = true;
     render();
   }
+}
+
+/** バックアップの「写真も含める」に出す合計バイト数。読めなければ0扱い(この関数自体は例外を投げない)。 */
+async function sumPhotoBytes(): Promise<number> {
+  try {
+    const photos = await listAllPhotos();
+    return photos.reduce((sum, photo) => sum + photo.blob.size, 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** 写真を追加・削除したあと、設定画面の合計サイズだけを読み直す(ほかの設定情報はそのまま)。 */
+async function loadPhotoBytes(): Promise<void> {
+  const photoBytes = await sumPhotoBytes();
+  settingsInfo = { ...settingsInfo, photoBytes };
+  render();
 }
 
 /** 出発・帰着の選び方と事業所をDBから読み直す(Task 3 が使う)。 */
@@ -775,6 +803,7 @@ async function handleDelete(id: string): Promise<void> {
       // (孤立した写真は残るが、消えたはずのデータとして扱われるよりまし)。
     }
     await loadPhotoCounts();
+    await loadPhotoBytes();
     await reloadPatients({ kind: 'info', text: '削除しました。' });
   } catch {
     setState(withMessage(state, { kind: 'error', text: 'データを削除できませんでした。' }));
@@ -819,6 +848,7 @@ async function handleConfirmDeleteSelected(): Promise<void> {
       // 写真を消せなくても、訪問先自体の削除は済んでいるので、これ全体を失敗として扱わない。
     }
     await loadPhotoCounts();
+    await loadPhotoBytes();
     await reloadPatients({ kind: 'info', text: `${ids.length}件を削除しました。` });
   } catch {
     setState(withMessage(state, { kind: 'error', text: 'データを削除できませんでした。' }));
@@ -1154,6 +1184,7 @@ async function addPhotoFromFile(file: File): Promise<void> {
     await addPhoto({ id: crypto.randomUUID(), patientId, blob, createdAt: new Date().toISOString() });
     await loadFormPhotos(patientId);
     await loadPhotoCounts();
+    await loadPhotoBytes();
   } catch (error) {
     const message =
       error instanceof Error && KNOWN_PHOTO_ERROR_MESSAGES.has(error.message)
@@ -1174,6 +1205,7 @@ async function deleteFormPhoto(id: string): Promise<void> {
     await deletePhoto(id);
     await loadFormPhotos(patientId);
     await loadPhotoCounts();
+    await loadPhotoBytes();
   } catch {
     setState(withMessage(state, { kind: 'error', text: '写真を削除できませんでした。' }));
   }
@@ -1355,10 +1387,28 @@ function showCopiedMessage(): void {
   );
 }
 
-async function handleExport(): Promise<void> {
+async function handleExport(includePhotos = true): Promise<void> {
   try {
+    const photos = includePhotos
+      ? await Promise.all(
+          (await listAllPhotos()).map(async (photo) => ({
+            id: photo.id,
+            patientId: photo.patientId,
+            dataUrl: await blobToDataUrl(photo.blob),
+            createdAt: photo.createdAt,
+          })),
+        )
+      : null;
     const date = new Date().toISOString().slice(0, 10);
-    downloadTextFile(`route-auto-input-${date}.json`, serializeBackup(state.patients));
+    downloadTextFile(
+      `route-auto-input-${date}.json`,
+      serializeBackup({
+        patients: state.patients,
+        photos,
+        spots,
+        meta: { office: routeContext.office ?? undefined, routeEnds: routeContext.ends },
+      }),
+    );
   } catch {
     setState(withMessage(state, { kind: 'error', text: 'バックアップを書き出せませんでした。' }));
     return;
@@ -1375,22 +1425,64 @@ async function handleExport(): Promise<void> {
   setState(withMessage(state, { kind: 'info', text: 'バックアップを書き出しました。' }));
 }
 
+/** インポートの確認に出す「(写真M枚・お役立ち地点K件)」。0件の部分は書かず、両方0なら空文字。 */
+function backupExtrasLabel(photoCount: number, spotCount: number): string {
+  const parts: string[] = [];
+  if (photoCount > 0) {
+    parts.push(`写真${photoCount}枚`);
+  }
+  if (spotCount > 0) {
+    parts.push(`お役立ち地点${spotCount}件`);
+  }
+  return parts.length > 0 ? `(${parts.join('・')})` : '';
+}
+
 async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void> {
   try {
-    const patients = parseBackup(await readTextFile(file));
+    const content = parseBackup(await readTextFile(file));
+    const extras = backupExtrasLabel(content.photos?.length ?? 0, content.spots.length);
     const question =
       mode === 'replace'
-        ? `今のデータ${state.patients.length}件を消して、${patients.length}件を取り込みます。よろしいですか?`
-        : `${patients.length}件を今のデータに追加します。よろしいですか?`;
+        ? `今のデータ${state.patients.length}件を消して、${content.patients.length}件${extras}を取り込みます。よろしいですか?`
+        : `${content.patients.length}件${extras}を今のデータに追加します。よろしいですか?`;
     if (!window.confirm(question)) {
       return;
     }
     if (mode === 'replace') {
-      await replaceAllPatients(patients);
+      await replaceAllPatients(content.patients);
     } else {
-      await mergePatients(patients);
+      await mergePatients(content.patients);
     }
-    await reloadPatients({ kind: 'info', text: `${patients.length}件を取り込みました。` });
+    // 写真がnullのとき(書き出す側で外した、または旧version 1のバックアップ)は、
+    // 既存の写真に一切触れない(消さない)。
+    if (content.photos !== null) {
+      const photos: Photo[] = content.photos.map((photo) => ({
+        id: photo.id,
+        patientId: photo.patientId,
+        blob: dataUrlToBlob(photo.dataUrl),
+        createdAt: photo.createdAt,
+      }));
+      await putPhotos(photos);
+    }
+    await putSpots(content.spots);
+    if (content.meta.office !== undefined) {
+      const office = content.meta.office;
+      await setMeta('office', office);
+      routeContext = { ...routeContext, office };
+      settingsInfo = { ...settingsInfo, office };
+    }
+    if (content.meta.routeEnds !== undefined) {
+      const routeEnds = content.meta.routeEnds;
+      await setMeta('routeEnds', routeEnds);
+      routeContext = { ...routeContext, ends: routeEnds };
+    }
+    openedRoutes.clear();
+    const importedPatients = await listPatients();
+    await deleteOrphanPhotos(new Set(importedPatients.map((patient) => patient.id)));
+    await loadSpots();
+    await loadPhotoCounts();
+    await loadPhotoBytes();
+    await reloadPatients({ kind: 'info', text: `${content.patients.length}件を取り込みました。` });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'データを取り込めませんでした。';
     setState(withMessage(state, { kind: 'error', text: message }));
@@ -1514,8 +1606,8 @@ function renderScreen(): HTMLElement {
       );
     case 'settings':
       return renderSettings(state, { ...settingsInfo, spots }, {
-        onExport: () => {
-          void handleExport();
+        onExport: (includePhotos) => {
+          void handleExport(includePhotos);
         },
         onImport: (file, mode) => {
           void handleImport(file, mode);

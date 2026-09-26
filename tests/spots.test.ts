@@ -287,7 +287,14 @@ describe('設定画面: お役立ち地点', () => {
       onDeleteSpot: vi.fn(),
     };
   }
-  const info = (spots: Spot[]): SettingsInfo => ({ lastBackupAt: null, persisted: null, theme: 'auto', office: null, spots });
+  const info = (spots: Spot[]): SettingsInfo => ({
+    lastBackupAt: null,
+    persisted: null,
+    theme: 'auto',
+    office: null,
+    spots,
+    photoBytes: 0,
+  });
 
   it('空なら案内文を出す', () => {
     const el = renderSettings(createInitialState([]), info([]), settingsHandlers());
