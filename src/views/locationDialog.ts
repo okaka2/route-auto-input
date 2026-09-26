@@ -114,7 +114,13 @@ function renderRegisteredStatus(location: GeoLocation): HTMLElement {
   return p;
 }
 
-function renderCheckLink(patient: Patient): HTMLAnchorElement {
+/**
+ * autofocus: trueは、保存した直後(saved)に付ける。render()側(main.ts)は、ダイアログを
+ * 開き直したときに data-autofocus な要素があれば、それを最初のボタンより優先してフォーカスする。
+ * saved直後の最初の押せる要素は「元に戻す」ボタンなので、付けないとEnterキーでうっかり
+ * 元に戻してしまう(Minor 5)。
+ */
+function renderCheckLink(patient: Patient, autofocus = false): HTMLAnchorElement {
   const link = document.createElement('a');
   link.className = 'map-check';
   link.dataset.testid = 'location-check-link';
@@ -122,6 +128,9 @@ function renderCheckLink(patient: Patient): HTMLAnchorElement {
   link.target = '_blank';
   link.rel = 'noreferrer';
   link.textContent = '地図で確かめる';
+  if (autofocus) {
+    link.dataset.autofocus = 'true';
+  }
   return link;
 }
 
@@ -170,7 +179,15 @@ function renderMeasuringPhase(
 ): HTMLElement[] {
   const status = document.createElement('p');
   status.className = statusClass(best?.accuracy ?? null);
-  const parts = [best ? `位置を取得しています… ${accuracyPhrase(best.accuracy)}` : '位置を取得しています…'];
+  // 状態の表示は測定のあいだ何度も変わるので、スクリーンリーダーに知らせる(Minor 5)。
+  status.setAttribute('aria-live', 'polite');
+  const parts = [
+    phase === 'measured' && best
+      ? `測り終わりました(${accuracyPhrase(best.accuracy)})`
+      : best
+        ? `位置を取得しています… ${accuracyPhrase(best.accuracy)}`
+        : '位置を取得しています…',
+  ];
   if (best) {
     const message = levelMessage(best.accuracy);
     if (message) {
@@ -241,7 +258,7 @@ function renderSavedPhase(patient: Patient, handlers: LocationDialogHandlers): H
   undo.textContent = '元に戻す';
   undo.addEventListener('click', () => handlers.onUndo());
 
-  return [message, renderCheckLink(patient), undo];
+  return [message, renderCheckLink(patient, true), undo];
 }
 
 function renderPasteSection(dialog: LocationDialog, handlers: LocationDialogHandlers): HTMLElement {
@@ -261,7 +278,22 @@ function renderPasteSection(dialog: LocationDialog, handlers: LocationDialogHand
   input.setAttribute('aria-label', '座標またはGoogleマップのURL');
   input.placeholder = '例) 35.68124, 139.76712';
   input.value = dialog.pasteText;
-  input.addEventListener('input', () => handlers.onPasteChange(input.value));
+  // 検索欄(patientListView.tsのrenderSearch)と同じ変換ガード。座標の貼り付けは
+  // 普段IMEを使わないが、念のため一貫して付けておく(Important 3)。
+  let isComposing = false;
+  input.addEventListener('compositionstart', () => {
+    isComposing = true;
+  });
+  input.addEventListener('compositionend', () => {
+    isComposing = false;
+    handlers.onPasteChange(input.value);
+  });
+  input.addEventListener('input', () => {
+    if (isComposing) {
+      return;
+    }
+    handlers.onPasteChange(input.value);
+  });
   details.append(input);
 
   const saveButton = document.createElement('button');
@@ -315,7 +347,7 @@ export function renderSpotDialog(dialog: SpotDialog, handlers: SpotDialogHandler
     if (dialog.phase === 'measuring' || dialog.phase === 'measured') {
       measured.splice(1, 0, renderRegisterButton('spot-save-button', dialog.best, () => handlers.onSaveSpot()));
     }
-    elements.push(...measured, renderSpotKindSelect(dialog, handlers), renderSpotNoteInput(dialog, handlers));
+    elements.push(...measured, ...renderSpotFields(dialog, handlers));
   }
 
   const buttons = document.createElement('div');
@@ -326,14 +358,25 @@ export function renderSpotDialog(dialog: SpotDialog, handlers: SpotDialogHandler
   return elements;
 }
 
-function renderSpotKindSelect(dialog: SpotDialog, handlers: SpotDialogHandlers): HTMLElement {
-  const wrapper = document.createElement('label');
-  wrapper.className = 'field';
-
-  const caption = document.createElement('span');
-  caption.className = 'field-label';
-  caption.textContent = '種類';
-  wrapper.append(caption);
+/**
+ * 種類のselectと一言メモの入力欄。まとめて作る理由: どちらかが変わったときに送る
+ * onSpotDraftは、もう片方の値も一緒に必要になる。dialog(閉じ込めた値)を読むと、
+ * 測定中の再描画をまたいでも古い値のまま送ってしまうことがあるので、常にお互いの
+ * 生のDOMの値(select.value/input.value)を読む(Important 3)。
+ *
+ * メモの入力欄はIME変換中に画面全体を再描画すると変換セッションが壊れるので、
+ * 検索欄(patientListView.tsのrenderSearch)と同じ変換ガードを付ける: 変換中はonSpotDraftを
+ * 呼ばず、compositionendで確定した文字列を送る。呼び出し側(main.ts)はonSpotDraftの結果を
+ * 再描画なしでstateへ入れるので(setState(..., { render: false }))、変換中でないときの
+ * 入力のたびの呼び出しでも画面は作り直されず、変換は壊れない。
+ */
+function renderSpotFields(dialog: SpotDialog, handlers: SpotDialogHandlers): HTMLElement[] {
+  const selectWrapper = document.createElement('label');
+  selectWrapper.className = 'field';
+  const selectCaption = document.createElement('span');
+  selectCaption.className = 'field-label';
+  selectCaption.textContent = '種類';
+  selectWrapper.append(selectCaption);
 
   const select = document.createElement('select');
   select.className = 'form-select';
@@ -345,34 +388,44 @@ function renderSpotKindSelect(dialog: SpotDialog, handlers: SpotDialogHandlers):
     select.append(optionElement);
   }
   select.value = dialog.spotKind;
-  select.addEventListener('change', () => {
-    handlers.onSpotDraft({ spotKind: select.value as SpotKind, note: dialog.note });
+  selectWrapper.append(select);
+
+  const noteWrapper = document.createElement('label');
+  noteWrapper.className = 'field';
+  const noteCaption = document.createElement('span');
+  noteCaption.className = 'field-label';
+  noteCaption.textContent = '一言メモ';
+  noteWrapper.append(noteCaption);
+
+  const noteInput = document.createElement('input');
+  noteInput.type = 'text';
+  noteInput.dataset.testid = 'spot-note-input';
+  noteInput.placeholder = '例) 24時間開いている';
+  noteInput.value = dialog.note;
+  noteWrapper.append(noteInput);
+
+  const report = (): void => {
+    handlers.onSpotDraft({ spotKind: select.value as SpotKind, note: noteInput.value });
+  };
+
+  select.addEventListener('change', report);
+
+  let isComposing = false;
+  noteInput.addEventListener('compositionstart', () => {
+    isComposing = true;
   });
-  wrapper.append(select);
-
-  return wrapper;
-}
-
-function renderSpotNoteInput(dialog: SpotDialog, handlers: SpotDialogHandlers): HTMLElement {
-  const wrapper = document.createElement('label');
-  wrapper.className = 'field';
-
-  const caption = document.createElement('span');
-  caption.className = 'field-label';
-  caption.textContent = '一言メモ';
-  wrapper.append(caption);
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.dataset.testid = 'spot-note-input';
-  input.placeholder = '例) 24時間開いている';
-  input.value = dialog.note;
-  input.addEventListener('input', () => {
-    handlers.onSpotDraft({ spotKind: dialog.spotKind, note: input.value });
+  noteInput.addEventListener('compositionend', () => {
+    isComposing = false;
+    report();
   });
-  wrapper.append(input);
+  noteInput.addEventListener('input', () => {
+    if (isComposing) {
+      return;
+    }
+    report();
+  });
 
-  return wrapper;
+  return [selectWrapper, noteWrapper];
 }
 
 function actionButton(label: string, testid: string, onClick: () => void): HTMLButtonElement {

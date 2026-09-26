@@ -18,10 +18,18 @@ export type SettingsInfo = {
   spots: Spot[];
   /** 登録済みの写真の合計バイト数(0なら「写真も含める」を出さない)。 */
   photoBytes: number;
+  /**
+   * バックアップの「写真も含める」チェックの状態(既定はtrue)。main.ts側の変数で持ち、
+   * 再描画のたびにここへ渡すことで、他の理由での再描画(テーマ変更など)をまたいでも
+   * チェックの状態が消えないようにする(Minor 7)。
+   */
+  includePhotos: boolean;
 };
 
 export type SettingsHandlers = {
   onExport(includePhotos: boolean): void;
+  /** 「写真も含める」チェックの変更のたび呼ばれる。再描画はしない(Minor 7)。 */
+  onIncludePhotosChange(value: boolean): void;
   onImport(file: File, mode: 'replace' | 'merge'): void;
   onThemeChange(setting: ThemeSetting): void;
   onBack(): void;
@@ -139,8 +147,9 @@ function renderBackup(info: SettingsInfo, handlers: SettingsHandlers, now: Date)
   if (info.photoBytes > 0) {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox.checked = true;
+    checkbox.checked = info.includePhotos;
     checkbox.dataset.testid = 'include-photos';
+    checkbox.addEventListener('change', () => handlers.onIncludePhotosChange(checkbox.checked));
     includePhotosInput = checkbox;
     const label = document.createElement('label');
     label.className = 'backup-photos-field';

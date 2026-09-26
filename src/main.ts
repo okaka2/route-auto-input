@@ -20,10 +20,11 @@ import {
   listPhotos,
   listSpots,
   mergePatients,
-  putPhotos,
+  mergePhotosCapped,
   putSpot,
   putSpots,
   replaceAllPatients,
+  replacePhotosFor,
   savePatient,
   setMeta,
   updateHistory,
@@ -215,6 +216,7 @@ let settingsInfo: Omit<SettingsInfo, 'spots'> = {
   theme: loadThemeSetting(),
   office: null,
   photoBytes: 0,
+  includePhotos: true,
 };
 
 // 出発・帰着の選び方と事業所。起動時に loadRouteContext() で読み直す(Task 3 が使う)。
@@ -589,8 +591,13 @@ function isSameMeasuringDialog(
 /**
  * 位置・地点を測っている最中に、ダイアログが閉じる/画面が変わる/別の訪問先へ切り替わる
  * (いずれも次のdialogが「同じ測定中のダイアログ」でなくなる)なら、ここ一箇所で止める。
+ *
+ * options.render: false を渡すと、片付け(measuringの停止・formPhotos/写真ダイアログの
+ * revoke)はいつもどおり行うが、最後のrender()だけ省く。地点メモの入力中(Important 3)のような
+ * draftだけの変更で使う: 画面を作り直さないので、入力中のIME変換やフォーカス・キャレット位置が
+ * (再描画によるDOM作り直しが起きないぶん)そのまま保たれる。
  */
-function setState(next: AppState): void {
+function setState(next: AppState, options?: { render?: boolean }): void {
   const previousDialog = state.dialog;
   const previousScreen = state.screen;
   state = next;
@@ -625,6 +632,9 @@ function setState(next: AppState): void {
     for (const url of previousDialog.urls) {
       URL.revokeObjectURL(url);
     }
+  }
+  if (options?.render === false) {
+    return;
   }
   render();
 }
@@ -1078,13 +1088,17 @@ function openSpotDialog(): void {
   });
 }
 
-/** お役立ち地点の登録: 種類・メモの入力のたび呼ばれる。値を再描画のあいだ保つ。 */
+/**
+ * お役立ち地点の登録: 種類・メモの入力のたび呼ばれる。値をstateに保つが、draftだけの変更なので
+ * 再描画はしない(Important 3)。GPSの読み取り更新(startMeasureのonUpdate)は引き続き
+ * 通常どおりsetStateで再描画され、そのときにこのdraftの内容も一緒に反映される。
+ */
 function changeSpotDraft(draft: { spotKind: SpotKind; note: string }): void {
   const dialog = state.dialog;
   if (dialog?.kind !== 'spot') {
     return;
   }
-  setState({ ...state, dialog: { ...dialog, spotKind: draft.spotKind, note: draft.note } });
+  setState({ ...state, dialog: { ...dialog, spotKind: draft.spotKind, note: draft.note } }, { render: false });
 }
 
 /** 測った位置と、そのときのspotKind・noteでお役立ち地点として登録する。 */
@@ -1167,13 +1181,19 @@ async function loadFormPhotos(patientId: string): Promise<void> {
 // 含みうるもの)は、汎用のメッセージに丸める。
 const KNOWN_PHOTO_ERROR_MESSAGES = new Set(['写真を読み込めませんでした。', '写真は1件につき3枚までです。']);
 
-/** フォームの「写真を追加」。縮小してからDBへ追加し、フォームの写真と地図の件数バッジを読み直す。 */
-async function addPhotoFromFile(file: File): Promise<void> {
+/**
+ * フォームの「写真を追加」。縮小してからDBへ追加し、フォームの写真と地図の件数バッジを読み直す。
+ * 読み込み・保存のあいだに何度もrender()が挟まる(loadFormPhotos/loadPhotoCounts/loadPhotoBytes)ため、
+ * 先にformDraftへ今の入力値(values)を入れておく。こうすると、そのあいだの再描画でも
+ * フォームはformDraftから組み立てられ、入力中の名前・住所・メモなどが消えない(Critical 1)。
+ */
+async function addPhotoFromFile(file: File, values: PatientFormDraft): Promise<void> {
   const screen = state.screen;
   if (screen.name !== 'form' || screen.patientId === null) {
     return;
   }
   const patientId = screen.patientId;
+  formDraft = values;
   try {
     const { resizeImage } = await import('./imageResize');
     const blob = await resizeImage(file);
@@ -1194,13 +1214,14 @@ async function addPhotoFromFile(file: File): Promise<void> {
   }
 }
 
-/** フォームの写真の「削除」。 */
-async function deleteFormPhoto(id: string): Promise<void> {
+/** フォームの写真の「削除」。addPhotoFromFileと同じ理由でformDraftを先に入れる(Critical 1)。 */
+async function deleteFormPhoto(id: string, values: PatientFormDraft): Promise<void> {
   const screen = state.screen;
   if (screen.name !== 'form' || screen.patientId === null) {
     return;
   }
   const patientId = screen.patientId;
+  formDraft = values;
   try {
     await deletePhoto(id);
     await loadFormPhotos(patientId);
@@ -1485,7 +1506,15 @@ async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void
     // 写真がnullのとき(書き出す側で外した、または旧version 1のバックアップ)は、
     // 既存の写真に一切触れない(消さない)。
     if (decodedPhotos !== null) {
-      await putPhotos(decodedPhotos);
+      if (mode === 'replace') {
+        // putPhotosは同じidだけ上書きするので、ファイルの写真のidが既存と違うと
+        // 上限(MAX_PHOTOS_PER_PATIENT)を超えて残ってしまう。入れ替えでは、
+        // ファイルに含まれる訪問先ぶんの写真をいったんすべて消してから入れる。
+        await replacePhotosFor([...fileIds], decodedPhotos);
+      } else {
+        // 追加では、既存の写真を残したまま、訪問先ごとの上限を超えないぶんだけ足す。
+        await mergePhotosCapped(decodedPhotos);
+      }
     }
     await putSpots(content.spots);
     if (content.meta.office !== undefined) {
@@ -1507,15 +1536,18 @@ async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void
     await loadPhotoBytes();
     await reloadPatients({ kind: 'info', text: `${content.patients.length}件を取り込みました。` });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'データを取り込めませんでした。';
     if (writeStarted) {
       // 訪問先の入れ替え・追加が始まったあとに失敗した場合、DBには一部だけ書き込まれている
       // ことがあるので、画面をその実際の状態に合わせ直す(訪問先・地点・写真の件数/サイズ)。
+      // このerrorはDBやブラウザAPIの技術的な例外であることがあり、そのまま出すと
+      // 利用者に見せてよくない内容(英語のエラーメッセージなど)を出しかねないので、
+      // 汎用の案内文にする(Minor 9)。
       await loadSpots();
       await loadPhotoCounts();
       await loadPhotoBytes();
-      await reloadPatients({ kind: 'error', text: message });
+      await reloadPatients({ kind: 'error', text: '取り込みの途中で失敗しました。画面を最新の内容に合わせました。' });
     } else {
+      const message = error instanceof Error ? error.message : 'データを取り込めませんでした。';
       setState(withMessage(state, { kind: 'error', text: message }));
     }
   }
@@ -1574,11 +1606,11 @@ function renderScreen(): HTMLElement {
           onCancel: (values) => {
             handleFormCancel(values);
           },
-          onAddPhoto: (file) => {
-            void addPhotoFromFile(file);
+          onAddPhoto: (file, values) => {
+            void addPhotoFromFile(file, values);
           },
-          onDeletePhoto: (id) => {
-            void deleteFormPhoto(id);
+          onDeletePhoto: (id, values) => {
+            void deleteFormPhoto(id, values);
           },
         },
         formPhotos,
@@ -1640,6 +1672,11 @@ function renderScreen(): HTMLElement {
       return renderSettings(state, { ...settingsInfo, spots }, {
         onExport: (includePhotos) => {
           void handleExport(includePhotos);
+        },
+        onIncludePhotosChange: (value) => {
+          // draftだけの変更なので再描画はしない(Minor 7)。setState/renderを経由しなくても、
+          // 次にrender()が(他の理由で)呼ばれたとき、この値を読んだ設定画面が作られる。
+          settingsInfo = { ...settingsInfo, includePhotos: value };
         },
         onImport: (file, mode) => {
           void handleImport(file, mode);
@@ -1804,6 +1841,14 @@ function render(): void {
         return;
       }
     }
+    // data-autofocus な要素(例: 位置を保存した直後の「地図で確かめる」リンク)があれば、
+    // 先頭の押せるボタンより優先する(Minor 5。無いと、保存直後は先頭のボタンである
+    // 「元に戻す」へフォーカスが移り、Enterキーでうっかり元に戻してしまう)。
+    const autofocus = dialog.querySelector<HTMLElement>('[data-autofocus]');
+    if (autofocus) {
+      autofocus.focus();
+      return;
+    }
     dialog.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
     return;
   }
@@ -1814,11 +1859,16 @@ function render(): void {
     return;
   }
   if (hadDialog && dialogReturnId !== null) {
-    root!
-      .querySelector<HTMLElement>(
-        `[data-testid="row-menu"][data-id="${dialogReturnId}"], [data-testid="stop-menu"][data-id="${dialogReturnId}"], [data-testid="location-pin"][data-id="${dialogReturnId}"], [data-testid="photo-count"][data-id="${dialogReturnId}"]`,
-      )
-      ?.focus();
+    const returnTarget = root!.querySelector<HTMLElement>(
+      `[data-testid="row-menu"][data-id="${dialogReturnId}"], [data-testid="stop-menu"][data-id="${dialogReturnId}"], [data-testid="location-pin"][data-id="${dialogReturnId}"], [data-testid="photo-count"][data-id="${dialogReturnId}"]`,
+    );
+    if (returnTarget) {
+      returnTarget.focus();
+    } else {
+      // 位置を新しく登録した直後などは、開いた元の位置ピン自体が(位置が付いたので)
+      // 無くなっていることがある。その場合は、ルートカードの「開く」ボタンへ逃がす(Minor 5)。
+      root!.querySelector<HTMLElement>('[data-testid="open-route"]')?.focus();
+    }
     dialogReturnId = null;
     return;
   }

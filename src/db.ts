@@ -258,6 +258,57 @@ export async function putPhotos(photos: readonly Photo[]): Promise<void> {
   await tx.done;
 }
 
+/**
+ * バックアップの「入れ替える」読み込み用。指定した訪問先ぶんの写真を、1つの読み書き
+ * トランザクションの中で、すべて消してから新しい写真を入れる(putPhotosは同じidだけ
+ * 上書きするので、ファイルの写真のidが既存と違えば、上限(MAX_PHOTOS_PER_PATIENT)を
+ * 超えて残ってしまう。先に全部消すことでそれを防ぐ)。対象に含まれない訪問先の写真には触れない。
+ */
+export async function replacePhotosFor(patientIds: readonly string[], photos: readonly Photo[]): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(PHOTOS_STORE, 'readwrite');
+  const index = tx.store.index('patientId');
+  for (const patientId of new Set(patientIds)) {
+    for (const key of await index.getAllKeys(patientId)) {
+      await tx.store.delete(key);
+    }
+  }
+  for (const photo of photos) {
+    await tx.store.put(photo);
+  }
+  await tx.done;
+}
+
+/**
+ * バックアップの「追加する」読み込み用。既存の写真は残したまま、訪問先ごとの上限
+ * (MAX_PHOTOS_PER_PATIENT)を超えないぶんだけファイルの写真を追加する。同じidの写真は
+ * 上限に数えず上書きし、上限を超えるぶんの新しい写真は書き込まずスキップする。
+ */
+export async function mergePhotosCapped(photos: readonly Photo[]): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(PHOTOS_STORE, 'readwrite');
+  const index = tx.store.index('patientId');
+  const countByPatient = new Map<string, number>();
+  for (const photo of photos) {
+    if (!countByPatient.has(photo.patientId)) {
+      countByPatient.set(photo.patientId, await index.count(photo.patientId));
+    }
+    const existingKey = await tx.store.getKey(photo.id);
+    if (existingKey !== undefined) {
+      // 同じidは上書き(件数には数えない)。
+      await tx.store.put(photo);
+      continue;
+    }
+    const count = countByPatient.get(photo.patientId) ?? 0;
+    if (count >= MAX_PHOTOS_PER_PATIENT) {
+      continue;
+    }
+    await tx.store.put(photo);
+    countByPatient.set(photo.patientId, count + 1);
+  }
+  await tx.done;
+}
+
 /** 名簿に無い訪問先を指す、孤立した写真を消す(バックアップの読み込み後の片付けなど)。消した件数を返す。 */
 export async function deleteOrphanPhotos(validPatientIds: ReadonlySet<string>): Promise<number> {
   const db = await getDb();

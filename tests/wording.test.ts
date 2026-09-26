@@ -282,9 +282,10 @@ describe('画面の文言(禁止語が出ない)', () => {
       '設定(地点あり)',
       renderSettings(
         createInitialState(places(2)),
-        { lastBackupAt: null, persisted: null, theme: 'auto', office: null, spots: [spot], photoBytes: 0 },
+        { lastBackupAt: null, persisted: null, theme: 'auto', office: null, spots: [spot], photoBytes: 0, includePhotos: true },
         {
           onExport: noop,
+          onIncludePhotosChange: noop,
           onImport: noop,
           onThemeChange: noop,
           onBack: noop,
@@ -299,9 +300,10 @@ describe('画面の文言(禁止語が出ない)', () => {
       '設定(地点なし)',
       renderSettings(
         createInitialState(places(2)),
-        { lastBackupAt: null, persisted: null, theme: 'auto', office: null, spots: [], photoBytes: 0 },
+        { lastBackupAt: null, persisted: null, theme: 'auto', office: null, spots: [], photoBytes: 0, includePhotos: true },
         {
           onExport: noop,
+          onIncludePhotosChange: noop,
           onImport: noop,
           onThemeChange: noop,
           onBack: noop,

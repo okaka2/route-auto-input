@@ -333,9 +333,12 @@ describe('renderPatientForm: 写真', () => {
     expect(element.querySelectorAll('[data-testid="photo-delete"]')).toHaveLength(2);
   });
 
-  it('3枚未満なら追加ボタン(file input)を出す。押して選ぶと onAddPhoto(file)', () => {
+  it('3枚未満なら追加ボタン(file input)を出す。押して選ぶと onAddPhoto(file, 今の入力値)', () => {
     const spies = handlers();
     const element = renderPatientForm(patient, null, null, spies, photos);
+    // 保存前の入力(打ちかけの名前)。写真の追加でこの値が消えないよう、
+    // onAddPhotoには今のフォームの入力値もあわせて渡される(Critical 1)。
+    nameInput(element).value = '山田 次郎';
     const input = element.querySelector<HTMLInputElement>('[data-testid="photo-input"]')!;
     expect(input).not.toBeNull();
     expect(input.accept).toBe('image/*');
@@ -343,7 +346,14 @@ describe('renderPatientForm: 写真', () => {
     const file = new File(['x'], 'photo.jpg', { type: 'image/jpeg' });
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
     input.dispatchEvent(new Event('change'));
-    expect(spies.onAddPhoto).toHaveBeenCalledWith(file);
+    expect(spies.onAddPhoto).toHaveBeenCalledWith(file, {
+      name: '山田 次郎',
+      address: '東京都',
+      phone: '',
+      parkingType: '',
+      permitExpires: '',
+      note: '',
+    });
     expect(input.value).toBe('');
   });
 
@@ -353,11 +363,19 @@ describe('renderPatientForm: 写真', () => {
     expect(element.querySelector('[data-testid="photo-input"]')).toBeNull();
   });
 
-  it('削除ボタンを押すと onDeletePhoto(id)', () => {
+  it('削除ボタンを押すと onDeletePhoto(id, 今の入力値)', () => {
     const spies = handlers();
     const element = renderPatientForm(patient, null, null, spies, photos);
+    noteInput(element).value = '打ちかけのメモ';
     q<HTMLButtonElement>(element, 'photo-delete').click();
-    expect(spies.onDeletePhoto).toHaveBeenCalledWith('p1');
+    expect(spies.onDeletePhoto).toHaveBeenCalledWith('p1', {
+      name: '山田',
+      address: '東京都',
+      phone: '',
+      parkingType: '',
+      permitExpires: '',
+      note: '打ちかけのメモ',
+    });
   });
 
   it('撮影時の注意を出す', () => {

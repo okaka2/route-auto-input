@@ -142,6 +142,21 @@ describe('renderLocationDialog: measured', () => {
     remeasure.click();
     expect(spies.onStartMeasuring).toHaveBeenCalledTimes(1);
   });
+
+  it('「位置を取得しています…」ではなく「測り終わりました(誤差 ±Nm)」と出す(Minor 5)', () => {
+    const el = wrap(
+      renderLocationDialog(patient(), dialog({ phase: 'measured', best: { lat: 35, lng: 139, accuracy: 12 } }), handlers()),
+    );
+    expect(el.textContent).toContain('測り終わりました(誤差 ±12m)');
+    expect(el.textContent).not.toContain('位置を取得しています');
+  });
+
+  it('状態の表示にaria-live="polite"を付ける', () => {
+    const el = wrap(
+      renderLocationDialog(patient(), dialog({ phase: 'measured', best: { lat: 35, lng: 139, accuracy: 12 } }), handlers()),
+    );
+    expect(el.querySelector('.location-status')?.getAttribute('aria-live')).toBe('polite');
+  });
 });
 
 describe('renderLocationDialog: error', () => {
@@ -176,6 +191,18 @@ describe('renderLocationDialog: saved', () => {
     expect(spies.onUndo).toHaveBeenCalledTimes(1);
     q<HTMLButtonElement>(el, 'dialog-cancel').click();
     expect(spies.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('保存直後は、地図で確かめるリンクにdata-autofocusを付ける(Enterで誤って元に戻すのを防ぐ、Minor 5)', () => {
+    const el = wrap(renderLocationDialog(registeredPatient(), dialog({ phase: 'saved' }), handlers()));
+    const link = q<HTMLAnchorElement>(el, 'location-check-link');
+    expect(link.hasAttribute('data-autofocus')).toBe(true);
+  });
+
+  it('saved 以外(すでに登録済みの表示)の地図で確かめるリンクには、data-autofocusを付けない', () => {
+    const el = wrap(renderLocationDialog(registeredPatient(), dialog({ phase: 'idle' }), handlers()));
+    const link = q<HTMLAnchorElement>(el, 'location-check-link');
+    expect(link.hasAttribute('data-autofocus')).toBe(false);
   });
 
   it('saved のときは貼り付け欄と「位置を消す」を出さない', () => {

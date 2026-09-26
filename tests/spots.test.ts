@@ -129,7 +129,7 @@ function dialogHandlers(): DialogHandlers {
 describe('お役立ち地点の登録ダイアログ', () => {
   const stateWith = (dialog: SpotDialog): AppState => ({ ...createInitialState([]), dialog });
 
-  it('種類のselectとメモの入力欄を出し、入力のたびonSpotDraft', () => {
+  it('種類のselectとメモの入力欄を出し、入力のたびonSpotDraftを生のDOMの値(select/inputの今の値)で呼ぶ', () => {
     const spies = dialogHandlers();
     const el = renderDialog(stateWith(spotDialog()), spies)!;
     const select = q<HTMLSelectElement>(el, 'spot-kind-select')!;
@@ -138,10 +138,27 @@ describe('お役立ち地点の登録ダイアログ', () => {
     select.dispatchEvent(new Event('change'));
     expect(spies.onSpotDraft).toHaveBeenCalledWith({ spotKind: 'rest', note: '' });
 
+    // メモの入力欄は、閉じ込めたdialogではなく、選択欄の今の(生のDOMの)値を一緒に送る
+    // (Important 3: GPSの読み取りなどで再描画をまたいでも、渡された値が古くならないように)。
     const note = q<HTMLInputElement>(el, 'spot-note-input')!;
     note.value = '24時間開いている';
     note.dispatchEvent(new Event('input'));
-    expect(spies.onSpotDraft).toHaveBeenCalledWith({ spotKind: 'toilet', note: '24時間開いている' });
+    expect(spies.onSpotDraft).toHaveBeenCalledWith({ spotKind: 'rest', note: '24時間開いている' });
+  });
+
+  it('メモの入力欄はIME変換中はonSpotDraftを呼ばず、変換の確定(compositionend)で呼ぶ', () => {
+    const spies = dialogHandlers();
+    const el = renderDialog(stateWith(spotDialog()), spies)!;
+    const note = q<HTMLInputElement>(el, 'spot-note-input')!;
+
+    note.dispatchEvent(new Event('compositionstart'));
+    note.value = 'にゅ';
+    note.dispatchEvent(new Event('input'));
+    expect(spies.onSpotDraft).not.toHaveBeenCalled();
+
+    note.value = '入力中';
+    note.dispatchEvent(new Event('compositionend'));
+    expect(spies.onSpotDraft).toHaveBeenCalledWith({ spotKind: 'toilet', note: '入力中' });
   });
 
   it('idleでは登録ボタンを出さず、「今いる場所で登録」を押すとonStartMeasuring', () => {
@@ -278,6 +295,7 @@ describe('設定画面: お役立ち地点', () => {
   function settingsHandlers(): SettingsHandlers {
     return {
       onExport: vi.fn(),
+      onIncludePhotosChange: vi.fn(),
       onImport: vi.fn(),
       onThemeChange: vi.fn(),
       onBack: vi.fn(),
@@ -294,6 +312,7 @@ describe('設定画面: お役立ち地点', () => {
     office: null,
     spots,
     photoBytes: 0,
+    includePhotos: true,
   });
 
   it('空なら案内文を出す', () => {

@@ -23,11 +23,13 @@ import {
   listSpots,
   MAX_PHOTOS_PER_PATIENT,
   mergePatients,
+  mergePhotosCapped,
   putHistory,
   putPhotos,
   putSpot,
   putSpots,
   replaceAllPatients,
+  replacePhotosFor,
   savePatient,
   setMeta,
   updateHistory,
@@ -249,6 +251,63 @@ describe('写真', () => {
     const remaining = await listAllPhotos();
     expect(remaining.map((p) => p.id)).toEqual(['a']);
     expect(remaining[0]?.patientId).toBe('p1');
+  });
+
+  it('replacePhotosForで、指定した訪問先の写真をすべて入れ替える(既存を消してから新しい写真を入れる)', async () => {
+    // p1は3枚(上限いっぱい)、p2は1枚。p1だけ入れ替える。
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'old-a'));
+    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z', 'old-b'));
+    await addPhoto(photo('p1', '2026-09-22T00:00:00.000Z', 'old-c'));
+    await addPhoto(photo('p2', '2026-09-20T00:00:00.000Z', 'kept'));
+
+    await replacePhotosFor(
+      ['p1'],
+      [
+        photo('p1', '2026-09-23T00:00:00.000Z', 'new-a'),
+        photo('p1', '2026-09-24T00:00:00.000Z', 'new-b'),
+        photo('p1', '2026-09-25T00:00:00.000Z', 'new-c'),
+      ],
+    );
+
+    const p1Photos = await listPhotos('p1');
+    expect(p1Photos.map((p) => p.id)).toEqual(['new-a', 'new-b', 'new-c']);
+    expect(await listPhotos('p2')).toHaveLength(1);
+  });
+
+  it('replacePhotosForは、対象に含まれない訪問先の写真には触れない', async () => {
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
+    await addPhoto(photo('p2', '2026-09-20T00:00:00.000Z', 'b'));
+    await replacePhotosFor(['p1'], []);
+    expect(await listPhotos('p1')).toEqual([]);
+    expect(await listPhotos('p2')).toHaveLength(1);
+  });
+
+  it('mergePhotosCappedは、既存を残したまま訪問先ごとの上限までしか追加せず、同じidは上書きする', async () => {
+    // p1はすでに2枚。ファイルは3枚追加しようとするが、上限3枚のため1枚だけ追加され、残りはスキップされる。
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'e1'));
+    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z', 'e2'));
+
+    await mergePhotosCapped([
+      photo('p1', '2026-09-22T00:00:00.000Z', 'n1'),
+      photo('p1', '2026-09-23T00:00:00.000Z', 'n2'),
+    ]);
+
+    const p1Photos = await listPhotos('p1');
+    expect(p1Photos).toHaveLength(3);
+    expect(p1Photos.map((p) => p.id)).toEqual(['e1', 'e2', 'n1']);
+  });
+
+  it('mergePhotosCappedは、同じidの写真は上限に数えず上書きする', async () => {
+    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
+    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z', 'b'));
+    await addPhoto(photo('p1', '2026-09-22T00:00:00.000Z', 'c'));
+
+    // 3枚とも上限いっぱいだが、既存と同じidの上書きなので、件数を増やさず反映される。
+    await mergePhotosCapped([{ ...photo('p1', '2026-09-25T00:00:00.000Z', 'a'), createdAt: '2026-09-25T00:00:00.000Z' }]);
+
+    const p1Photos = await listPhotos('p1');
+    expect(p1Photos).toHaveLength(3);
+    expect(p1Photos.find((p) => p.id === 'a')?.createdAt).toBe('2026-09-25T00:00:00.000Z');
   });
 });
 

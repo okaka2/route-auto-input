@@ -13,8 +13,13 @@ export type PatientFormHandlers = {
   onSave(values: PatientFormDraft): void;
   onSaveAndContinue(values: PatientFormDraft): void;
   onCancel(values: PatientFormDraft): void;
-  onAddPhoto(file: File): void;
-  onDeletePhoto(id: string): void;
+  /**
+   * 写真の追加。写真の読み込み・保存は非同期(DBへの書き込みを挟む)で、そのあいだにも
+   * 再描画が起きうるため、フォームの今の入力値(values)もあわせて渡す。呼び出し側は、
+   * この値を使って再描画してもフォームの入力が消えないようにする(Critical 1)。
+   */
+  onAddPhoto(file: File, values: PatientFormDraft): void;
+  onDeletePhoto(id: string, values: PatientFormDraft): void;
 };
 
 /**
@@ -127,7 +132,9 @@ export function renderPatientForm(
     renderMapCheck(addressInput),
   );
 
-  container.append(renderVisitInfoSection(parkingSelect, permitField, noteInput, patient, photos, handlers));
+  container.append(
+    renderVisitInfoSection(parkingSelect, permitField, noteInput, patient, photos, handlers, currentValues),
+  );
 
   if (patient === null) {
     const actions = document.createElement('div');
@@ -151,6 +158,7 @@ function renderVisitInfoSection(
   patient: Patient | null,
   photos: readonly FormPhoto[],
   handlers: PatientFormHandlers,
+  currentValues: () => PatientFormDraft,
 ): HTMLElement {
   const section = document.createElement('section');
   section.className = 'visit-info';
@@ -162,7 +170,7 @@ function renderVisitInfoSection(
   section.append(field('駐車', parkingSelect, false));
   section.append(permitField);
   section.append(renderNoteField(noteInput));
-  section.append(renderPhotosField(patient, photos, handlers));
+  section.append(renderPhotosField(patient, photos, handlers, currentValues));
 
   return section;
 }
@@ -175,6 +183,7 @@ function renderPhotosField(
   patient: Patient | null,
   photos: readonly FormPhoto[],
   handlers: PatientFormHandlers,
+  currentValues: () => PatientFormDraft,
 ): HTMLElement {
   const wrapper = document.createElement('div');
   wrapper.className = 'field';
@@ -194,9 +203,9 @@ function renderPhotosField(
 
   const list = document.createElement('div');
   list.className = 'photo-list';
-  photos.forEach((photo, index) => list.append(renderPhotoItem(photo, index, handlers)));
+  photos.forEach((photo, index) => list.append(renderPhotoItem(photo, index, handlers, currentValues)));
   if (photos.length < MAX_PHOTOS_PER_PATIENT) {
-    list.append(renderPhotoAdd(handlers));
+    list.append(renderPhotoAdd(handlers, currentValues));
   }
   wrapper.append(list);
 
@@ -208,7 +217,12 @@ function renderPhotosField(
   return wrapper;
 }
 
-function renderPhotoItem(photo: FormPhoto, index: number, handlers: PatientFormHandlers): HTMLElement {
+function renderPhotoItem(
+  photo: FormPhoto,
+  index: number,
+  handlers: PatientFormHandlers,
+  currentValues: () => PatientFormDraft,
+): HTMLElement {
   const item = document.createElement('div');
   item.className = 'photo-item';
 
@@ -222,14 +236,14 @@ function renderPhotoItem(photo: FormPhoto, index: number, handlers: PatientFormH
   deleteButton.type = 'button';
   deleteButton.dataset.testid = 'photo-delete';
   deleteButton.textContent = '削除';
-  deleteButton.addEventListener('click', () => handlers.onDeletePhoto(photo.id));
+  deleteButton.addEventListener('click', () => handlers.onDeletePhoto(photo.id, currentValues()));
   item.append(deleteButton);
 
   return item;
 }
 
 /** 見た目は「写真を追加」ボタン。中身は撮影/選択できる file input(見た目には出さない)。 */
-function renderPhotoAdd(handlers: PatientFormHandlers): HTMLElement {
+function renderPhotoAdd(handlers: PatientFormHandlers, currentValues: () => PatientFormDraft): HTMLElement {
   const label = document.createElement('label');
   label.className = 'photo-add';
   label.append(document.createTextNode('写真を追加'));
@@ -243,7 +257,7 @@ function renderPhotoAdd(handlers: PatientFormHandlers): HTMLElement {
   input.addEventListener('change', () => {
     const file = input.files?.[0];
     if (file) {
-      handlers.onAddPhoto(file);
+      handlers.onAddPhoto(file, currentValues());
     }
     input.value = '';
   });

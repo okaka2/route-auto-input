@@ -156,6 +156,28 @@ async function armSpotSaveWait(): Promise<() => Promise<void>> {
   return () => done;
 }
 
+/**
+ * フォームでの写真の追加(addPhotoFromFile)・削除(deleteFormPhoto)は、どちらも最後に
+ * db.loadPhotoBytes(内部でdb.listAllPhotos)まで一連で読み直す。サムネイルの見た目が
+ * 変わった時点ではまだこの最後の読み直しが終わっていないことがあるため、
+ * armSpotSaveWaitと同じ仕組みで、その完了まで待てるようにする。
+ */
+async function armPhotoActionWait(): Promise<() => Promise<void>> {
+  const db = await import('../src/db');
+  let resolveDone: () => void = () => {};
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
+  const original = db.listAllPhotos;
+  const spy = vi.spyOn(db, 'listAllPhotos').mockImplementation(async () => {
+    spy.mockRestore();
+    const result = await original();
+    resolveDone();
+    return result;
+  });
+  return () => done;
+}
+
 const el = <T extends HTMLElement = HTMLElement>(selector: string): T | null =>
   document.querySelector<T>(selector);
 
@@ -1805,6 +1827,51 @@ describe('位置の登録', () => {
     expect(el('[data-testid="location-undo-button"]')).not.toBeNull();
   });
 
+  it('保存すると、フォーカスが「地図で確かめる」へ移る(Enterキーで誤って元に戻すのを防ぐ、Minor 5)', async () => {
+    const { emit } = await setupMeasuring();
+    emit(35.1, 139.1, 15);
+    await waitFor(() => expect(el<HTMLButtonElement>('[data-testid="location-save-button"]')?.disabled).toBe(false));
+
+    el<HTMLButtonElement>('[data-testid="location-save-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-undo-button"]')).not.toBeNull());
+    expect(document.activeElement).toBe(el('[data-testid="location-check-link"]'));
+  });
+
+  it('位置ピンから開いて新しく登録し閉じると、ピンが無くなっていても「開く」ボタンへフォーカスが戻る(Minor 5)', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('場所A', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLInputElement>(`input[data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    const historyRecorded = await armHistoryRecordWait();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await historyRecorded();
+
+    await waitFor(() => expect(el('[data-testid="location-pin"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="location-pin"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-paste-input"]')).not.toBeNull());
+
+    const input = el<HTMLInputElement>('[data-testid="location-paste-input"]')!;
+    input.value = '35.1, 139.1';
+    input.dispatchEvent(new Event('input'));
+    el<HTMLButtonElement>('[data-testid="location-paste-save"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-check-link"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog"]')).toBeNull());
+
+    // 位置が登録されたので、位置ピン自体が(このカードからは)無くなっている。
+    expect(el('[data-testid="location-pin"]')).toBeNull();
+    expect(document.activeElement).toBe(el('[data-testid="open-route"]'));
+  });
+
   it('ダイアログをキャンセルで閉じると、測定中なら止める(clearWatch)', async () => {
     const { geolocation } = await setupMeasuring();
 
@@ -2008,6 +2075,48 @@ describe('写真', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(0));
     expect(await listPhotos(patient.id)).toEqual([]);
+  });
+
+  it('編集フォームで名前とメモを打ちかけたまま写真を追加/削除しても、入力中の内容が消えない', async () => {
+    const { savePatient, listPhotos } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-edit"]')!.click();
+    await waitFor(() => expect(el('[data-testid="photo-input"]')).not.toBeNull());
+
+    const nameInput = el<HTMLInputElement>('[data-testid="name-input"]')!;
+    nameInput.value = '山田 次郎';
+    nameInput.dispatchEvent(new Event('input'));
+    const noteInput = el<HTMLTextAreaElement>('[data-testid="note-input"]')!;
+    noteInput.value = '打ちかけのメモ';
+    noteInput.dispatchEvent(new Event('input'));
+
+    const file = new File(['x'], 'photo.jpg', { type: 'image/jpeg' });
+    const input = el<HTMLInputElement>('[data-testid="photo-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    const addDone = await armPhotoActionWait();
+    input.dispatchEvent(new Event('change'));
+
+    await waitFor(() => expect(el('[data-testid="photo-thumb"]')).not.toBeNull());
+    await addDone();
+    expect(await listPhotos(patient.id)).toHaveLength(1);
+    // 写真が増えてフォームが作り直されても、打ちかけの入力はそのまま。
+    expect(el<HTMLInputElement>('[data-testid="name-input"]')!.value).toBe('山田 次郎');
+    expect(el<HTMLTextAreaElement>('[data-testid="note-input"]')!.value).toBe('打ちかけのメモ');
+
+    const deleteDone = await armPhotoActionWait();
+    el<HTMLButtonElement>('[data-testid="photo-delete"]')!.click();
+    await waitFor(async () => expect(await listPhotos(patient.id)).toHaveLength(0));
+    await deleteDone();
+    expect(el<HTMLInputElement>('[data-testid="name-input"]')!.value).toBe('山田 次郎');
+    expect(el<HTMLTextAreaElement>('[data-testid="note-input"]')!.value).toBe('打ちかけのメモ');
   });
 
   it('写真を3枚登録すると追加ボタンが消え、地図のカードに「写真 N」が出て押すと見られる', async () => {
@@ -2304,6 +2413,28 @@ describe('お役立ち地点の登録', () => {
     expect(await listSpots()).toHaveLength(1);
     expect(geolocation.clearWatch).toHaveBeenCalled();
   });
+
+  it('地点メモの入力中(IME変換)にGPSの読み取りが来ても、入力中の内容とフォーカスを保つ', async () => {
+    const { emit } = await setupSpotMeasuring();
+
+    const note = el<HTMLInputElement>('[data-testid="spot-note-input"]')!;
+    note.focus();
+    note.dispatchEvent(new Event('compositionstart'));
+    note.value = 'にゅうりょくちゅう';
+    note.dispatchEvent(new Event('input'));
+    note.dispatchEvent(new Event('compositionend'));
+    // 変換の確定はdraftだけの更新で、再描画はしないので、同じinput要素のままフォーカスも保たれる。
+    expect(el('[data-testid="spot-note-input"]')).toBe(note);
+    expect(document.activeElement).toBe(note);
+
+    // 測定中のGPSの読み取り更新は、いつもどおり再描画される。
+    emit(35.0001, 139.0001, 15);
+    await waitFor(() => expect(el<HTMLButtonElement>('[data-testid="spot-save-button"]')?.disabled).toBe(false));
+
+    // 再描画で入力欄は作り直されるが、確定していた入力内容とフォーカスは保たれる。
+    expect(el<HTMLInputElement>('[data-testid="spot-note-input"]')!.value).toBe('にゅうりょくちゅう');
+    expect(document.activeElement).toBe(el('[data-testid="spot-note-input"]'));
+  });
 });
 
 describe('バックアップ v2(写真・お役立ち地点・事業所)', () => {
@@ -2346,6 +2477,40 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
     await waitFor(() => expect(downloadSpy).toHaveBeenCalledTimes(2));
     const withoutPhotos = JSON.parse(downloadSpy.mock.calls[1]![1] as string);
     expect(withoutPhotos.photos).toBeNull();
+  });
+
+  it('「写真も含める」のチェックを外した状態は、テーマ変更などの再描画をまたいでも保たれる(Minor 7)', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+    vi.spyOn(db, 'listAllPhotos').mockResolvedValue([
+      {
+        id: 'photo-1',
+        patientId: patient.id,
+        blob: new Blob(['x'], { type: 'image/jpeg' }),
+        createdAt: '2026-09-01T00:00:00.000Z',
+      },
+    ]);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="include-photos"]')).not.toBeNull());
+
+    const checkbox = el<HTMLInputElement>('[data-testid="include-photos"]')!;
+    expect(checkbox.checked).toBe(true);
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event('change'));
+
+    // テーマの変更は、settingsInfoを更新してrender()を直接呼ぶ(=設定画面を作り直す)。
+    // 「写真も含める」のチェックは、その再描画をまたいでも外れたままでなければならない。
+    el<HTMLInputElement>('[data-testid="theme-dark"]')!.click();
+    await waitFor(() => expect(el<HTMLInputElement>('[data-testid="theme-dark"]')?.checked).toBe(true));
+
+    expect(el<HTMLInputElement>('[data-testid="include-photos"]')!.checked).toBe(false);
   });
 
   it('写真なしのファイルを「入れ替える」で読み込んでも、既存の写真は残る', async () => {
@@ -2457,6 +2622,101 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
     expect(await listPhotos(newPatient.id)).toHaveLength(1);
   });
 
+  it('同じ訪問先に3枚ある状態で、その訪問先ぶん3枚を含むファイルを「入れ替える」と、上限を超えず新しい3枚だけになる', async () => {
+    const { savePatient, addPhoto, listPhotos } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const { serializeBackup } = await import('../src/backup');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+    for (let i = 0; i < 3; i += 1) {
+      await addPhoto({
+        id: `old-${i}`,
+        patientId: patient.id,
+        blob: new Blob(['x'], { type: 'image/jpeg' }),
+        createdAt: `2026-09-0${i + 1}T00:00:00.000Z`,
+      });
+    }
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="import-input"]')).not.toBeNull());
+
+    // 同じ訪問先(同じid)ぶんの写真を3枚(既存とは別のid)含む入れ替え用ファイル。
+    const text = serializeBackup({
+      patients: [patient],
+      photos: [
+        { id: 'new-0', patientId: patient.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' },
+        { id: 'new-1', patientId: patient.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't2' },
+        { id: 'new-2', patientId: patient.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't3' },
+      ],
+      spots: [],
+      meta: {},
+    });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+    const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('取り込みました'));
+
+    const stored = await listPhotos(patient.id);
+    expect(stored).toHaveLength(3);
+    expect(stored.map((p) => p.id).sort()).toEqual(['new-0', 'new-1', 'new-2']);
+  });
+
+  it('2枚ある訪問先に、追加する形式で2枚のファイルを読み込むと、上限3枚までしか増えない', async () => {
+    const { savePatient, addPhoto, listPhotos } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const { serializeBackup } = await import('../src/backup');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+    await addPhoto({
+      id: 'old-0',
+      patientId: patient.id,
+      blob: new Blob(['x'], { type: 'image/jpeg' }),
+      createdAt: '2026-09-01T00:00:00.000Z',
+    });
+    await addPhoto({
+      id: 'old-1',
+      patientId: patient.id,
+      blob: new Blob(['x'], { type: 'image/jpeg' }),
+      createdAt: '2026-09-02T00:00:00.000Z',
+    });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="import-input"]')).not.toBeNull());
+
+    const text = serializeBackup({
+      patients: [patient],
+      photos: [
+        { id: 'new-0', patientId: patient.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' },
+        { id: 'new-1', patientId: patient.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't2' },
+      ],
+      spots: [],
+      meta: {},
+    });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+    const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="mode-merge"]')!.click();
+    el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('取り込みました'));
+
+    const stored = await listPhotos(patient.id);
+    expect(stored).toHaveLength(3);
+    expect(stored.map((p) => p.id).sort()).toEqual(['new-0', 'old-0', 'old-1']);
+  });
+
   it('壊れた写真(base64の中身が壊れている)を含むファイルは、確認より前に中断して何も変わらない', async () => {
     const { savePatient, listPatients } = await import('../src/db');
     const { createPatient } = await import('../src/patient');
@@ -2530,5 +2790,41 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
 
     expect(confirmSpy.mock.calls[0]![0]).toContain('写真1枚');
     expect(confirmSpy.mock.calls[0]![0]).not.toContain('写真2枚');
+  });
+
+  it('確認後、書き込みが始まってから失敗すると、生のエラーではなく案内文を出し、画面を最新の内容に合わせる(Minor 9)', async () => {
+    const db = await import('../src/db');
+    const { serializeBackup } = await import('../src/backup');
+    const { createPatient } = await import('../src/patient');
+    const existing = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(existing);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="import-input"]')).not.toBeNull());
+
+    const fromFile = createPatient('鈴木 花子', '大阪市北区2-2');
+    const text = serializeBackup({ patients: [fromFile], photos: null, spots: [], meta: {} });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+    const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+
+    // 訪問先の入れ替え(replaceAllPatients)は成功して書き込みが始まった後、
+    // お役立ち地点の書き込み(putSpots)で技術的な(利用者に見せたくない)エラーが起きたとする。
+    vi.spyOn(db, 'putSpots').mockRejectedValueOnce(new TypeError('Failed to execute structuredClone'));
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
+
+    await waitFor(() =>
+      expect(el('.message')?.textContent).toBe('取り込みの途中で失敗しました。画面を最新の内容に合わせました。'),
+    );
+    expect(el('.message')?.textContent).not.toContain('structuredClone');
+
+    // 実際に途中まで書き込まれた内容(訪問先の入れ替えは成功している)に画面が合っている。
+    expect((await db.listPatients()).map((p) => p.id)).toEqual([fromFile.id]);
   });
 });

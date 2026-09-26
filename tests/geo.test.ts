@@ -50,6 +50,16 @@ describe('startMeasuring', () => {
     startMeasuring(undefined, (u) => updates.push(u));
     expect(updates[0]).toEqual({ kind: 'error', message: 'この端末では位置情報を使えません。' });
   });
+  it('良い値の後に一時的なエラーが来たら、エラーにせずその値のままdoneにする', () => {
+    const { geo, emit, fail } = fakeGeo();
+    const updates: MeasureUpdate[] = [];
+    startMeasuring(geo, (u) => updates.push(u));
+    emit(35, 139, 40); // fair(20mより悪い)なので、まだ自動では終わらない。
+    fail(2); // POSITION_UNAVAILABLEなど、車が少し動いた程度の一時的な失敗。
+    expect(updates.map((u) => u.kind)).toEqual(['reading', 'done']);
+    expect(updates.at(-1)).toEqual({ kind: 'done', best: { lat: 35, lng: 139, accuracy: 40 } });
+    expect(geo.clearWatch).toHaveBeenCalledWith(7);
+  });
   it('止めた後は何も出さない', () => {
     const { geo, emit } = fakeGeo();
     const updates: MeasureUpdate[] = [];

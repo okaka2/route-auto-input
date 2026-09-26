@@ -57,6 +57,12 @@ export function startMeasuring(
 
   const handleError: PositionErrorCallback = (error) => {
     if (stopped) return;
+    // すでに良い値を持っているなら、一時的な失敗(車が少し動いた、電波が瞬間途切れたなど)で
+    // それまでの結果を無駄にしない。エラーにせず、その値のままdoneにして読み終わる。
+    if (best !== null) {
+      finish();
+      return;
+    }
     stop();
     const message = error.code === error.PERMISSION_DENIED ? PERMISSION_DENIED_MESSAGE : OTHER_ERROR_MESSAGE;
     onUpdate({ kind: 'error', message });

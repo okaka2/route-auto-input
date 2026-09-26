@@ -5,6 +5,7 @@ import { renderSettings, type SettingsHandlers, type SettingsInfo } from '../src
 
 const handlers = (): SettingsHandlers => ({
   onExport: vi.fn(),
+  onIncludePhotosChange: vi.fn(),
   onImport: vi.fn(),
   onThemeChange: vi.fn(),
   onBack: vi.fn(),
@@ -21,6 +22,7 @@ const info = (): SettingsInfo => ({
   office: null,
   spots: [],
   photoBytes: 0,
+  includePhotos: true,
 });
 
 const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: string): T =>
@@ -99,6 +101,20 @@ describe('renderSettings: 書き出し', () => {
     q<HTMLInputElement>(element, 'include-photos').checked = false;
     q<HTMLButtonElement>(element, 'export-button').click();
     expect(spies.onExport).toHaveBeenCalledWith(false);
+  });
+
+  it('チェックを変えるたび onIncludePhotosChange を呼ぶ(Minor 7)', () => {
+    const spies = handlers();
+    const element = renderSettings(createInitialState([]), { ...info(), photoBytes: 1000 }, spies);
+    const checkbox = q<HTMLInputElement>(element, 'include-photos');
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event('change'));
+    expect(spies.onIncludePhotosChange).toHaveBeenCalledWith(false);
+  });
+
+  it('info.includePhotosがfalseなら、チェックは外れた状態で出る(Minor 7)', () => {
+    const element = renderSettings(createInitialState([]), { ...info(), photoBytes: 1000, includePhotos: false }, handlers());
+    expect(q<HTMLInputElement>(element, 'include-photos').checked).toBe(false);
   });
 });
 
