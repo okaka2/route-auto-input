@@ -21,14 +21,25 @@ export type TransferPayload = {
 
 const PARSE_ERROR_MESSAGE = '引き継ぎのファイルの中身を読めませんでした。';
 
+/**
+ * 送る側で項目を絞ってから書き出す。呼び出し元のオブジェクトに実行時だけ紛れ込んだ
+ * 余計なプロパティ(意図しない参照など)がそのままファイルに入らないよう、
+ * backup.ts の変換関数(toPatient・toBackupPhoto・toSpot)を通して、知っている項目だけを拾い直す。
+ */
 export function serializePayload(payload: Omit<TransferPayload, 'kind' | 'v'>): string {
+  const patients = payload.patients.map((patient, index) => toPatient(patient, index));
+  const photos =
+    payload.photos === null
+      ? null
+      : payload.photos.map((photo) => toBackupPhoto(photo)).filter((photo): photo is BackupPhoto => photo !== null);
+  const spots = payload.spots.map((spot) => toSpot(spot)).filter((spot): spot is Spot => spot !== null);
   const data: TransferPayload = {
     kind: 'houmon-transfer-payload',
     v: 1,
     sentAt: payload.sentAt,
-    patients: [...payload.patients],
-    photos: payload.photos === null ? null : [...payload.photos],
-    spots: [...payload.spots],
+    patients,
+    photos,
+    spots,
   };
   return JSON.stringify(data, null, 2);
 }
@@ -64,6 +75,14 @@ export function parsePayload(text: string): TransferPayload {
     throw new Error(PARSE_ERROR_MESSAGE);
   }
 
+  const seenIds = new Set<string>();
+  for (const patient of patients) {
+    if (seenIds.has(patient.id)) {
+      throw new Error(PARSE_ERROR_MESSAGE);
+    }
+    seenIds.add(patient.id);
+  }
+
   const photos = Array.isArray(record.photos)
     ? record.photos.map((item) => toBackupPhoto(item)).filter((item): item is BackupPhoto => item !== null)
     : null;
@@ -86,7 +105,11 @@ export function describeRecipients(patients: readonly Patient[]): string {
 
 export type Conflict = { incoming: Patient; existing: Patient };
 
-/** 正規化した名前「と」住所が両方一致する人を、同じ人とみなす(normalize.ts)。 */
+/**
+ * 正規化した名前「と」住所が両方一致する人を、同じ人とみなす(normalize.ts)。
+ * 1件の送られてきた人が、手元の複数の人と一致することがあるが、その場合は
+ * existing に並んでいる先頭の人と組にする。
+ */
 export function findConflicts(
   incoming: readonly Patient[],
   existing: readonly Patient[],
@@ -113,7 +136,13 @@ export type ConflictChoice = 'overwrite' | 'addNew' | 'skip';
 export type ImportPlan = {
   /** 保存する訪問先(上書きは手元の id、新規は新しい id)。 */
   put: Patient[];
-  /** 保存先の id → 写真(新しい id を振った Photo)。写真を含めないなら空。 */
+  /**
+   * 保存先の id → 写真(新しい id を振った Photo)。
+   * 写真を含めないファイル(photos: null)なら、常に空。
+   * 写真を含めていても、その人に送られてきた写真が0枚(壊れていて捨てられた場合を含む)なら
+   * エントリを作らない(送る側の「写真無し」は削除の指示ではないため、手元の写真をそのまま残す。
+   * 上書き・新規のどちらでも同じ)。1枚以上あるときだけ、最大 MAX_PHOTOS_PER_PATIENT 枚を入れる。
+   */
   photosByPatient: Map<string, Photo[]>;
   /** 手元に同じ id が無いものだけ。 */
   spots: Spot[];
@@ -139,6 +168,11 @@ function addAsNew(incoming: Patient, id: string, now: string): Patient {
   return { ...incoming, id, createdAt: now, updatedAt: now };
 }
 
+/**
+ * 送られてきた内容から、実際に保存する形(ImportPlan)を組み立てる。
+ * 衝突(findConflicts)ごとに choices の選択(無ければ'skip')にしたがい、
+ * 手元の同じ人を複数回上書きしないよう、2件目以降のoverwriteは'addNew'として扱う。
+ */
 export function planImport(
   payload: TransferPayload,
   decodedPhotos: Photo[] | null,
@@ -152,6 +186,9 @@ export function planImport(
   const { conflicts, fresh } = findConflicts(payload.patients, existing);
   const put: Patient[] = [];
   const photosByPatient = new Map<string, Photo[]>();
+  // 同じ手元の人を、複数の送られてきた人でそれぞれ上書きしてしまうと、
+  // 後から処理した方だけが残って前の内容が消えてしまう。2件目以降は「別に追加」として扱う。
+  const overwrittenExistingIds = new Set<string>();
 
   const assignPhotos = (targetId: string, incomingId: string): void => {
     if (decodedPhotos === null) {
@@ -161,15 +198,22 @@ export function planImport(
       .filter((photo) => photo.patientId === incomingId)
       .slice(0, MAX_PHOTOS_PER_PATIENT)
       .map((photo) => ({ ...photo, id: newId(), patientId: targetId }));
+    // 送られてきた写真が0枚(壊れて捨てられた場合を含む)なら、手元の写真に触れない。
+    if (photos.length === 0) {
+      return;
+    }
     photosByPatient.set(targetId, photos);
   };
 
   for (const conflict of conflicts) {
-    const choice = choices.get(conflict.incoming.id) ?? 'skip';
-    if (choice === 'skip') {
+    const rawChoice = choices.get(conflict.incoming.id) ?? 'skip';
+    if (rawChoice === 'skip') {
       continue;
     }
+    const choice: ConflictChoice =
+      rawChoice === 'overwrite' && overwrittenExistingIds.has(conflict.existing.id) ? 'addNew' : rawChoice;
     if (choice === 'overwrite') {
+      overwrittenExistingIds.add(conflict.existing.id);
       put.push(overwritePatient(conflict.existing, conflict.incoming, nowIso));
       assignPhotos(conflict.existing.id, conflict.incoming.id);
     } else {

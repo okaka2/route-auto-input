@@ -72,23 +72,54 @@ describe('serializePayload / parsePayload', () => {
     expect(payload.spots).toEqual(spots);
   });
 
+  it('余計なプロパティは書き出しに含めない(送る側で項目を絞る)', () => {
+    const basePatient = yamada();
+    const patientWithExtra = { ...basePatient, secretField: 'top-secret-value' } as Patient;
+    const text = serializePayload(emptyPayload([patientWithExtra]));
+    expect(text).not.toContain('secretField');
+    expect(text).not.toContain('top-secret-value');
+    const payload = parsePayload(text);
+    expect(payload.patients).toEqual([basePatient]);
+  });
+
   it('JSONとして壊れていれば例外を投げる', () => {
     expect(() => parsePayload('{ not json')).toThrow('引き継ぎのファイルの中身を読めませんでした。');
   });
 
   it('kindやvが違えば例外を投げる', () => {
     const patients = samplePatients();
-    const text = JSON.stringify({ kind: 'other', v: 1, sentAt: '', patients, photos: null, spots: [] });
+    const text = JSON.stringify({
+      kind: 'other',
+      v: 1,
+      sentAt: '2026-09-02T09:00:00.000Z',
+      patients,
+      photos: null,
+      spots: [],
+    });
     expect(() => parsePayload(text)).toThrow('引き継ぎのファイルの中身を読めませんでした。');
     const text2 = JSON.stringify({
       kind: 'houmon-transfer-payload',
       v: 2,
-      sentAt: '',
+      sentAt: '2026-09-02T09:00:00.000Z',
       patients,
       photos: null,
       spots: [],
     });
     expect(() => parsePayload(text2)).toThrow('引き継ぎのファイルの中身を読めませんでした。');
+  });
+
+  it('訪問先のidが重複していれば例外を投げる', () => {
+    const patients = samplePatients();
+    const duplicated = [patients[0]!, { ...patients[1]!, id: patients[0]!.id }];
+    const text = JSON.stringify({
+      kind: 'houmon-transfer-payload',
+      v: 1,
+      sentAt: '2026-09-02T09:00:00.000Z',
+      patients: duplicated,
+      photos: null,
+      spots: [],
+    });
+    expect(() => parsePayload(text)).toThrow('引き継ぎのファイルの中身を読めませんでした。');
   });
 
   it('patientsが配列でなければ例外を投げる', () => {
@@ -330,6 +361,115 @@ describe('planImport', () => {
     const photos = plan.photosByPatient.get('existing-1');
     expect(photos).toHaveLength(1);
     expect(photos?.[0]!.patientId).toBe('existing-1');
+  });
+
+  it('写真を含むファイルでも、その人に送られてきた写真が0枚なら上書きで手元の写真を消さない', () => {
+    seq = 0;
+    const existingPatient: Patient = { ...yamada(), id: 'existing-1' };
+    const incoming: Patient = { ...yamada(), id: 'incoming-1' };
+    // decodedPhotosには写真があるが、他の人(other-1)のものだけで、incoming-1の分はない。
+    const decoded = [decodedPhoto('other-1', 'photo-other')];
+    const payload = makePayload([incoming], [backupPhoto('other-1', 'photo-other')]);
+    const plan = planImport(
+      payload,
+      decoded,
+      [existingPatient],
+      new Set(),
+      new Map([[incoming.id, 'overwrite']]),
+      newId,
+      now,
+    );
+    expect(plan.photosByPatient.has('existing-1')).toBe(false);
+  });
+
+  it('上書きで2枚送られてくれば、付け替えた2枚がphotosByPatientに入る', () => {
+    seq = 0;
+    const existingPatient: Patient = { ...yamada(), id: 'existing-1' };
+    const incoming: Patient = { ...yamada(), id: 'incoming-1' };
+    const decoded = [decodedPhoto(incoming.id, 'photo-a'), decodedPhoto(incoming.id, 'photo-b')];
+    const payload = makePayload(
+      [incoming],
+      decoded.map((p) => backupPhoto(incoming.id, p.id)),
+    );
+    const plan = planImport(
+      payload,
+      decoded,
+      [existingPatient],
+      new Set(),
+      new Map([[incoming.id, 'overwrite']]),
+      newId,
+      now,
+    );
+    const photos = plan.photosByPatient.get('existing-1');
+    expect(photos).toHaveLength(2);
+    expect(photos?.every((photo) => photo.patientId === 'existing-1')).toBe(true);
+  });
+
+  it('別に追加(衝突あり)でも、新しいidで写真のpatientIdが付け替わる', () => {
+    seq = 0;
+    const existingPatient: Patient = { ...yamada(), id: 'existing-1' };
+    const incoming: Patient = { ...yamada(), id: 'incoming-1' };
+    const decoded = [decodedPhoto(incoming.id, 'photo-a')];
+    const payload = makePayload([incoming], [backupPhoto(incoming.id, 'photo-a')]);
+    const plan = planImport(
+      payload,
+      decoded,
+      [existingPatient],
+      new Set(),
+      new Map([[incoming.id, 'addNew']]),
+      newId,
+      now,
+    );
+    const targetId = plan.put[0]!.id;
+    expect(targetId).not.toBe('existing-1');
+    const photos = plan.photosByPatient.get(targetId);
+    expect(photos).toHaveLength(1);
+    expect(photos?.[0]!.patientId).toBe(targetId);
+  });
+
+  it('上書きでも、送られてきた写真が3枚を超えれば先頭3枚だけ入る', () => {
+    seq = 0;
+    const existingPatient: Patient = { ...yamada(), id: 'existing-1' };
+    const incoming: Patient = { ...yamada(), id: 'incoming-1' };
+    const decoded = [
+      decodedPhoto(incoming.id, 'p1'),
+      decodedPhoto(incoming.id, 'p2'),
+      decodedPhoto(incoming.id, 'p3'),
+      decodedPhoto(incoming.id, 'p4'),
+    ];
+    const payload = makePayload(
+      [incoming],
+      decoded.map((p) => backupPhoto(incoming.id, p.id)),
+    );
+    const plan = planImport(
+      payload,
+      decoded,
+      [existingPatient],
+      new Set(),
+      new Map([[incoming.id, 'overwrite']]),
+      newId,
+      now,
+    );
+    expect(plan.photosByPatient.get('existing-1')).toHaveLength(3);
+  });
+
+  it('同じ手元の人を2人分の送られてきた人で上書きしようとすると、2件目は別に追加になる', () => {
+    seq = 0;
+    const existingPatient: Patient = { ...yamada(), id: 'existing-1' };
+    const incomingA: Patient = { ...yamada(), id: 'incoming-a' };
+    const incomingB: Patient = { ...yamada(), id: 'incoming-b' };
+    const payload = makePayload([incomingA, incomingB]);
+    const choices: ReadonlyMap<string, ConflictChoice> = new Map([
+      [incomingA.id, 'overwrite'],
+      [incomingB.id, 'overwrite'],
+    ]);
+    const plan = planImport(payload, null, [existingPatient], new Set(), choices, newId, now);
+    expect(plan.put).toHaveLength(2);
+    const overwritten = plan.put.find((patient) => patient.id === 'existing-1');
+    const addedAsNew = plan.put.find((patient) => patient.id !== 'existing-1');
+    expect(overwritten).toBeDefined();
+    expect(addedAsNew).toBeDefined();
+    expect(addedAsNew?.createdAt).toBe(now.toISOString());
   });
 
   it('写真は最大3枚(送られた順)しか入らない', () => {
