@@ -1,6 +1,7 @@
+import type { DbImportPlan } from './db';
 import type { Office, RouteEnd, RouteEnds, RouteStart } from './routePlan';
 import { SPOT_KINDS } from './spots';
-import type { GeoLocation, Parking, ParkingType, Patient, Spot, SpotKind } from './types';
+import type { GeoLocation, Parking, ParkingType, Patient, Photo, Spot, SpotKind } from './types';
 import { isDateKey, PARKING_OPTIONS } from './visitInfo';
 
 const PARKING_TYPES: ParkingType[] = PARKING_OPTIONS.map((option) => option.value).filter(
@@ -80,6 +81,23 @@ export function parseBackup(text: string): BackupContent {
   const meta = toMeta(record.meta);
 
   return { patients, photos, spots, meta };
+}
+
+/**
+ * バックアップを「入れ替える」ときの、applyImport への計画。写真がnull(書き出す側で
+ * 外した、または旧version 1のバックアップ)なら、既存の写真には一切触れない(消さない)。
+ * 写真があれば、ファイルの訪問先ぶんの手元の写真をいったん全部消してから入れる
+ * (同じidだけ上書きすると、ファイルの写真のidが既存と違うとき上限を超えて残ってしまうため)。
+ */
+export function planBackupReplace(content: BackupContent, decodedPhotos: Photo[] | null): DbImportPlan {
+  return {
+    replaceAll: true,
+    patients: content.patients,
+    replacePhotosOf: decodedPhotos === null ? [] : content.patients.map((patient) => patient.id),
+    photos: decodedPhotos ?? [],
+    spots: content.spots,
+    meta: content.meta,
+  };
 }
 
 export function toPatient(item: unknown, index: number): Patient {

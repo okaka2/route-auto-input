@@ -3,6 +3,7 @@ import { deleteDB, openDB } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addPhoto,
+  applyImport,
   clearHistory,
   closeDbForTest,
   countPhotosByPatient,
@@ -12,7 +13,6 @@ import {
   deletePatient,
   deletePatients,
   deletePhoto,
-  deletePhotosOf,
   deleteSpot,
   getHistory,
   getMeta,
@@ -25,16 +25,14 @@ import {
   mergePatients,
   mergePhotosCapped,
   putHistory,
-  putPhotos,
   putSpot,
   putSpots,
-  replaceAllPatients,
-  replacePhotosFor,
   savePatient,
   setDbBlockingHandler,
   setMeta,
   updateHistory,
   withDb,
+  type DbImportPlan,
   type HistoryEntry,
 } from '../src/db';
 import { createPatient, updatePatientFields } from '../src/patient';
@@ -45,6 +43,32 @@ import type { Photo, Spot } from '../src/types';
 beforeEach(async () => {
   await closeDbForTest();
   await deleteDB('route-auto-input');
+});
+
+const photo = (patientId: string, createdAt: string, id = `photo-${patientId}-${createdAt}`): Photo => ({
+  id,
+  patientId,
+  blob: new Blob(['x'], { type: 'image/jpeg' }),
+  createdAt,
+});
+
+const spot = (kind: Spot['kind'], id = `spot-${kind}`): Spot => ({
+  id,
+  kind,
+  note: 'メモ',
+  location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-09-20T00:00:00.000Z', source: 'gps' },
+  createdAt: '2026-09-20T00:00:00.000Z',
+});
+
+/** applyImportに渡す最小限の計画。テストごとに変えたいところだけ上書きする。 */
+const importPlan = (overrides: Partial<DbImportPlan> = {}): DbImportPlan => ({
+  replaceAll: false,
+  patients: [],
+  replacePhotosOf: [],
+  photos: [],
+  spots: [],
+  meta: {},
+  ...overrides,
 });
 
 describe('患者の保存と取得', () => {
@@ -71,35 +95,133 @@ describe('患者の保存と取得', () => {
     expect(stored[0]?.name).toBe('山田 花子');
   });
 
-  it('削除できる', async () => {
+  it('削除できる(写真も同じトランザクションで消える)', async () => {
     const patient = createPatient('山田', '東京都');
     await savePatient(patient);
+    await addPhoto(photo(patient.id, '2026-09-20T00:00:00.000Z', 'a'));
     await deletePatient(patient.id);
     expect(await listPatients()).toEqual([]);
+    expect(await listPhotos(patient.id)).toEqual([]);
   });
 
-  it('複数件まとめて削除できる', async () => {
+  it('複数件まとめて削除できる(それぞれの写真も消える。対象外の写真は残る)', async () => {
     const a = createPatient('山田', '東京都');
     const b = createPatient('鈴木', '大阪府');
     const c = createPatient('田中', '京都府');
     await savePatient(a);
     await savePatient(b);
     await savePatient(c);
+    await addPhoto(photo(a.id, '2026-09-20T00:00:00.000Z', 'photo-a'));
+    await addPhoto(photo(c.id, '2026-09-20T00:00:00.000Z', 'photo-c'));
+    await addPhoto(photo(b.id, '2026-09-20T00:00:00.000Z', 'photo-b'));
     await deletePatients([a.id, c.id]);
     expect((await listPatients()).map((p) => p.name)).toEqual(['鈴木']);
+    expect(await listPhotos(a.id)).toEqual([]);
+    expect(await listPhotos(c.id)).toEqual([]);
+    expect(await listPhotos(b.id)).toHaveLength(1);
   });
 });
 
-describe('インポート', () => {
-  it('replaceAllPatientsは既存データを消してから入れ替える', async () => {
+describe('applyImport(入れ替え・追加を1つのトランザクションで書く)', () => {
+  it('入れ替え(replaceAll)は、前の訪問先を消してファイルの訪問先だけにする', async () => {
     await savePatient(createPatient('既存', '東京都'));
     const imported = [createPatient('取込1', '大阪府'), createPatient('取込2', '京都府')];
-    await replaceAllPatients(imported);
+    await applyImport(importPlan({ replaceAll: true, patients: imported }));
     const stored = await listPatients();
     expect(stored).toHaveLength(2);
     expect(stored.map((p) => p.name).sort()).toEqual(['取込1', '取込2']);
   });
 
+  it('入れ替えで写真がnullのとき(replacePhotosOf/photosが空)は、残る人の手元の写真に触れない', async () => {
+    const kept = createPatient('残る人', '東京都');
+    await savePatient(kept);
+    await addPhoto(photo(kept.id, '2026-09-20T00:00:00.000Z', 'mine'));
+    await applyImport(importPlan({ replaceAll: true, patients: [kept] }));
+    expect((await listPhotos(kept.id)).map((p) => p.id)).toEqual(['mine']);
+  });
+
+  it('入れ替えで写真があるときは、持ち主のいなくなった写真も含めて消し、ファイルの写真だけが入る', async () => {
+    const gone = createPatient('消える人', '東京都');
+    const kept = createPatient('残る人', '大阪府');
+    await savePatient(gone);
+    await savePatient(kept);
+    await addPhoto(photo(gone.id, '2026-09-20T00:00:00.000Z', 'old-gone'));
+    await addPhoto(photo(kept.id, '2026-09-20T00:00:00.000Z', 'old-kept'));
+
+    await applyImport(
+      importPlan({
+        replaceAll: true,
+        patients: [kept],
+        replacePhotosOf: [kept.id],
+        photos: [photo(kept.id, '2026-09-21T00:00:00.000Z', 'new-kept')],
+      }),
+    );
+
+    expect(await listPhotos(gone.id)).toEqual([]);
+    expect((await listPhotos(kept.id)).map((p) => p.id)).toEqual(['new-kept']);
+  });
+
+  it('追加(replaceAll:false)は、同じidを上書きし、replacePhotosOfの人だけ写真が入れ替わる', async () => {
+    const existing = createPatient('既存', '東京都');
+    await savePatient(existing);
+    await addPhoto(photo(existing.id, '2026-09-20T00:00:00.000Z', 'old'));
+    const untouched = createPatient('触れない人', '京都府');
+    await savePatient(untouched);
+    await addPhoto(photo(untouched.id, '2026-09-20T00:00:00.000Z', 'untouched'));
+
+    await applyImport(
+      importPlan({
+        replaceAll: false,
+        patients: [updatePatientFields(existing, '更新後', '大阪府')],
+        replacePhotosOf: [existing.id],
+        photos: [photo(existing.id, '2026-09-21T00:00:00.000Z', 'new')],
+      }),
+    );
+
+    const stored = await listPatients();
+    expect(stored).toHaveLength(2);
+    expect(stored.find((p) => p.id === existing.id)?.name).toBe('更新後');
+    expect((await listPhotos(existing.id)).map((p) => p.id)).toEqual(['new']);
+    expect((await listPhotos(untouched.id)).map((p) => p.id)).toEqual(['untouched']);
+  });
+
+  it('spots・metaも同じ呼び出しで書ける', async () => {
+    await applyImport(
+      importPlan({
+        spots: [spot('toilet', 'a')],
+        meta: { office: { name: '本店', address: '東京都中央区1-1' }, routeEnds: { start: 'office', end: 'last' } },
+      }),
+    );
+    expect(await listSpots()).toHaveLength(1);
+    expect(await getMeta('office')).toEqual({ name: '本店', address: '東京都中央区1-1' });
+    expect(await getMeta('routeEnds')).toEqual({ start: 'office', end: 'last' });
+  });
+
+  it('途中で失敗させたら(keyPathの無い値でputが失敗)、何も変わらずapplyImportはreject', async () => {
+    const existing = createPatient('既存', '東京都');
+    await savePatient(existing);
+    await addPhoto(photo(existing.id, '2026-09-20T00:00:00.000Z', 'existing-photo'));
+    await putSpot(spot('toilet', 'existing-spot'));
+    await setMeta('office', { name: '本店', address: '東京都中央区1-1' });
+
+    const badPlan = importPlan({
+      replaceAll: true,
+      // 最後の要素がkeyPath(id)を持たないため、そこでputが失敗しトランザクションごと中断される。
+      patients: [createPatient('取込1', '大阪府'), {} as unknown as ReturnType<typeof createPatient>],
+      spots: [spot('rest', 'new-spot')],
+      meta: { office: { name: '新事業所', address: '大阪府大阪市1-1' } },
+    });
+
+    await expect(applyImport(badPlan)).rejects.toThrow();
+
+    expect(await listPatients()).toEqual([existing]);
+    expect((await listPhotos(existing.id)).map((p) => p.id)).toEqual(['existing-photo']);
+    expect((await listSpots()).map((s) => s.id)).toEqual(['existing-spot']);
+    expect(await getMeta('office')).toEqual({ name: '本店', address: '東京都中央区1-1' });
+  });
+});
+
+describe('インポート(mergePatients・mergePhotosCapped・putSpots。Task 4でmergeを足したらplanBackupMerge経由でも使う)', () => {
   it('mergePatientsは既存データを残したまま追加する', async () => {
     const existing = createPatient('既存', '東京都');
     await savePatient(existing);
@@ -171,13 +293,6 @@ describe('history', () => {
   });
 });
 
-const photo = (patientId: string, createdAt: string, id = `photo-${patientId}-${createdAt}`): Photo => ({
-  id,
-  patientId,
-  blob: new Blob(['x'], { type: 'image/jpeg' }),
-  createdAt,
-});
-
 describe('写真', () => {
   it('追加した写真を一覧できる(登録した順=古い順。idの並びとは無関係)', async () => {
     // idはUUIDなので、並び順がidの辞書順(z, a, m)になっていたら誤り。
@@ -225,63 +340,22 @@ describe('写真', () => {
     expect(counts).toEqual(new Map([['p1', 2], ['p2', 1]]));
   });
 
-  it('deletePhotosOfで、指定した訪問先ぶんだけ削除する', async () => {
+  it('listAllPhotosは全件を返す(バックアップの書き出し用)', async () => {
     await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
     await addPhoto(photo('p2', '2026-09-20T00:00:00.000Z', 'b'));
-    await addPhoto(photo('p3', '2026-09-20T00:00:00.000Z', 'c'));
-    await deletePhotosOf(['p1', 'p2']);
-    expect(await listPhotos('p1')).toEqual([]);
-    expect(await listPhotos('p2')).toEqual([]);
-    expect(await listPhotos('p3')).toHaveLength(1);
+    expect(await listAllPhotos()).toHaveLength(2);
   });
 
-  it('listAllPhotosは全件、putPhotosは上書きで取り込む(バックアップ用)', async () => {
-    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
-    expect(await listAllPhotos()).toHaveLength(1);
-    const updated = { ...photo('p1', '2026-09-20T00:00:00.000Z', 'a'), createdAt: '2026-09-25T00:00:00.000Z' };
-    await putPhotos([updated, photo('p2', '2026-09-20T00:00:00.000Z', 'b')]);
-    const all = await listAllPhotos();
-    expect(all).toHaveLength(2);
-    expect(all.find((p) => p.id === 'a')?.createdAt).toBe('2026-09-25T00:00:00.000Z');
-  });
-
-  it('deleteOrphanPhotosで、名簿に無い訪問先の写真だけ消し、消した件数を返す', async () => {
-    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
+  it('deleteOrphanPhotosで、名簿に無い訪問先の写真だけ消し、消した件数を返す(名簿も同じトランザクションの中で読む)', async () => {
+    const kept = createPatient('残る人', '東京都');
+    await savePatient(kept);
+    await addPhoto(photo(kept.id, '2026-09-20T00:00:00.000Z', 'a'));
     await addPhoto(photo('gone', '2026-09-20T00:00:00.000Z', 'b'));
-    const removed = await deleteOrphanPhotos(new Set(['p1']));
+    const removed = await deleteOrphanPhotos();
     expect(removed).toBe(1);
     const remaining = await listAllPhotos();
     expect(remaining.map((p) => p.id)).toEqual(['a']);
-    expect(remaining[0]?.patientId).toBe('p1');
-  });
-
-  it('replacePhotosForで、指定した訪問先の写真をすべて入れ替える(既存を消してから新しい写真を入れる)', async () => {
-    // p1は3枚(上限いっぱい)、p2は1枚。p1だけ入れ替える。
-    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'old-a'));
-    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z', 'old-b'));
-    await addPhoto(photo('p1', '2026-09-22T00:00:00.000Z', 'old-c'));
-    await addPhoto(photo('p2', '2026-09-20T00:00:00.000Z', 'kept'));
-
-    await replacePhotosFor(
-      ['p1'],
-      [
-        photo('p1', '2026-09-23T00:00:00.000Z', 'new-a'),
-        photo('p1', '2026-09-24T00:00:00.000Z', 'new-b'),
-        photo('p1', '2026-09-25T00:00:00.000Z', 'new-c'),
-      ],
-    );
-
-    const p1Photos = await listPhotos('p1');
-    expect(p1Photos.map((p) => p.id)).toEqual(['new-a', 'new-b', 'new-c']);
-    expect(await listPhotos('p2')).toHaveLength(1);
-  });
-
-  it('replacePhotosForは、対象に含まれない訪問先の写真には触れない', async () => {
-    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
-    await addPhoto(photo('p2', '2026-09-20T00:00:00.000Z', 'b'));
-    await replacePhotosFor(['p1'], []);
-    expect(await listPhotos('p1')).toEqual([]);
-    expect(await listPhotos('p2')).toHaveLength(1);
+    expect(remaining[0]?.patientId).toBe(kept.id);
   });
 
   it('mergePhotosCappedは、既存を残したまま訪問先ごとの上限までしか追加せず、同じidは上書きする', async () => {
@@ -311,14 +385,6 @@ describe('写真', () => {
     expect(p1Photos).toHaveLength(3);
     expect(p1Photos.find((p) => p.id === 'a')?.createdAt).toBe('2026-09-25T00:00:00.000Z');
   });
-});
-
-const spot = (kind: Spot['kind'], id = `spot-${kind}`): Spot => ({
-  id,
-  kind,
-  note: 'メモ',
-  location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-09-20T00:00:00.000Z', source: 'gps' },
-  createdAt: '2026-09-20T00:00:00.000Z',
 });
 
 describe('地点(Spot)', () => {

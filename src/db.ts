@@ -168,39 +168,117 @@ export async function savePatient(patient: Patient): Promise<void> {
   await withDb((db) => db.put(STORE, patient));
 }
 
+/** 訪問先とその写真を、1つのトランザクションで消す。 */
 export async function deletePatient(id: string): Promise<void> {
-  await withDb((db) => db.delete(STORE, id));
+  await deletePatients([id]);
 }
 
-/** 複数件まとめて削除する。 */
+/** 複数件まとめて、その写真もあわせて、1つのトランザクションで消す。 */
 export async function deletePatients(ids: readonly string[]): Promise<void> {
   await withDb(async (db) => {
-    const tx = db.transaction(STORE, 'readwrite');
+    const tx = db.transaction([STORE, PHOTOS_STORE], 'readwrite');
+    const patientsStore = tx.objectStore(STORE);
+    const photoIndex = tx.objectStore(PHOTOS_STORE).index('patientId');
     for (const id of ids) {
-      await tx.store.delete(id);
+      await patientsStore.delete(id);
+      for (const key of await photoIndex.getAllKeys(id)) {
+        await tx.objectStore(PHOTOS_STORE).delete(key);
+      }
     }
     await tx.done;
   });
 }
 
-/** 既存データを全消去してから入れ替える。 */
-export async function replaceAllPatients(patients: readonly Patient[]): Promise<void> {
-  await withDb(async (db) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    await tx.store.clear();
-    for (const patient of patients) {
-      await tx.store.put(patient);
-    }
-    await tx.done;
-  });
-}
-
-/** 既存データを残したまま、同じidは上書きして取り込む。 */
+/** 既存データを残したまま、同じidは上書きして取り込む。(Task 4でmergeを足したらplanBackupMerge経由でも使う。) */
 export async function mergePatients(patients: readonly Patient[]): Promise<void> {
   await withDb(async (db) => {
     const tx = db.transaction(STORE, 'readwrite');
     for (const patient of patients) {
       await tx.store.put(patient);
+    }
+    await tx.done;
+  });
+}
+
+/** バックアップの読み込み・引き継ぎの受け取りを1回で書くための計画。 */
+export type DbImportPlan = {
+  /** true なら訪問先を全部消してから patients を入れる(バックアップの入れ替え)。持ち主のいなくなった写真も同じ中で消す。 */
+  replaceAll: boolean;
+  /** 保存する訪問先(同じ id は上書き)。 */
+  patients: readonly Patient[];
+  /** 手元の写真を先に全部消す訪問先の id(入れ替え・受け取りの上書き)。 */
+  replacePhotosOf: readonly string[];
+  /** 入れる写真(Blob は書き込みの前に全部作っておく)。 */
+  photos: readonly Photo[];
+  spots: readonly Spot[];
+  meta: { office?: Office; routeEnds?: RouteEnds };
+};
+
+/**
+ * patients・photos・spots・meta を1つの readwrite トランザクションで書く。途中で失敗したら
+ * (put が keyPath の無い値などで例外を投げるなど)そこで tx.abort() し、何も変わらないまま
+ * reject する。put の例外はIDBの request の失敗ではなく同期の例外なので、abort を呼ばない限り
+ * それまでに済ませた書き込みがそのままコミットされてしまう(捨てないためにここで abort する)。
+ * 順番: (replaceAllなら)訪問先を clear → patients を put → replacePhotosOf の写真を消す →
+ * photos を put → (replaceAllなら)名簿に無い写真を消す → spots を put → meta を put。
+ */
+export async function applyImport(plan: DbImportPlan): Promise<void> {
+  await withDb(async (db) => {
+    const tx = db.transaction([STORE, PHOTOS_STORE, SPOTS_STORE, META_STORE], 'readwrite');
+    // 下のtryが失敗してtx.abort()した場合、tx.doneはAbortErrorで拒否される。そちらは使わず
+    // 元の例外を投げ直すので、ここで受け止めて「誰も処理しなかった拒否」にはしない。
+    const aborted = tx.done.catch(() => undefined);
+    try {
+      const patientsStore = tx.objectStore(STORE);
+      const photosStore = tx.objectStore(PHOTOS_STORE);
+      const spotsStore = tx.objectStore(SPOTS_STORE);
+      const metaStore = tx.objectStore(META_STORE);
+
+      if (plan.replaceAll) {
+        await patientsStore.clear();
+      }
+      for (const patient of plan.patients) {
+        await patientsStore.put(patient);
+      }
+
+      const photoIndex = photosStore.index('patientId');
+      for (const patientId of new Set(plan.replacePhotosOf)) {
+        for (const key of await photoIndex.getAllKeys(patientId)) {
+          await photosStore.delete(key);
+        }
+      }
+      for (const photo of plan.photos) {
+        await photosStore.put(photo);
+      }
+
+      if (plan.replaceAll) {
+        const validPatientIds = new Set(plan.patients.map((patient) => patient.id));
+        let cursor = await photosStore.openCursor();
+        while (cursor) {
+          if (!validPatientIds.has(cursor.value.patientId)) {
+            await cursor.delete();
+          }
+          cursor = await cursor.continue();
+        }
+      }
+
+      for (const spot of plan.spots) {
+        await spotsStore.put(spot);
+      }
+      if (plan.meta.office !== undefined) {
+        await metaStore.put(plan.meta.office, 'office');
+      }
+      if (plan.meta.routeEnds !== undefined) {
+        await metaStore.put(plan.meta.routeEnds, 'routeEnds');
+      }
+    } catch (error) {
+      try {
+        tx.abort();
+      } catch {
+        // すでに終わっている(コミット・中断済み)なら、これ以上できることはない。
+      }
+      await aborted;
+      throw error;
     }
     await tx.done;
   });
@@ -290,56 +368,9 @@ export async function deletePhoto(id: string): Promise<void> {
   await withDb((db) => db.delete(PHOTOS_STORE, id));
 }
 
-/** 訪問先を削除するときにあわせて呼ぶ。指定した訪問先ぶんの写真をすべて消す。 */
-export async function deletePhotosOf(patientIds: readonly string[]): Promise<void> {
-  await withDb(async (db) => {
-    const tx = db.transaction(PHOTOS_STORE, 'readwrite');
-    const index = tx.store.index('patientId');
-    for (const patientId of patientIds) {
-      for (const key of await index.getAllKeys(patientId)) {
-        await tx.store.delete(key);
-      }
-    }
-    await tx.done;
-  });
-}
-
 /** バックアップの書き出し用。 */
 export async function listAllPhotos(): Promise<Photo[]> {
   return withDb((db) => db.getAll(PHOTOS_STORE));
-}
-
-/** バックアップの読み込み用(同じidは上書き)。 */
-export async function putPhotos(photos: readonly Photo[]): Promise<void> {
-  await withDb(async (db) => {
-    const tx = db.transaction(PHOTOS_STORE, 'readwrite');
-    for (const photo of photos) {
-      await tx.store.put(photo);
-    }
-    await tx.done;
-  });
-}
-
-/**
- * バックアップの「入れ替える」読み込み用。指定した訪問先ぶんの写真を、1つの読み書き
- * トランザクションの中で、すべて消してから新しい写真を入れる(putPhotosは同じidだけ
- * 上書きするので、ファイルの写真のidが既存と違えば、上限(MAX_PHOTOS_PER_PATIENT)を
- * 超えて残ってしまう。先に全部消すことでそれを防ぐ)。対象に含まれない訪問先の写真には触れない。
- */
-export async function replacePhotosFor(patientIds: readonly string[], photos: readonly Photo[]): Promise<void> {
-  await withDb(async (db) => {
-    const tx = db.transaction(PHOTOS_STORE, 'readwrite');
-    const index = tx.store.index('patientId');
-    for (const patientId of new Set(patientIds)) {
-      for (const key of await index.getAllKeys(patientId)) {
-        await tx.store.delete(key);
-      }
-    }
-    for (const photo of photos) {
-      await tx.store.put(photo);
-    }
-    await tx.done;
-  });
 }
 
 /**
@@ -373,11 +404,17 @@ export async function mergePhotosCapped(photos: readonly Photo[]): Promise<void>
   });
 }
 
-/** 名簿に無い訪問先を指す、孤立した写真を消す(バックアップの読み込み後の片付けなど)。消した件数を返す。 */
-export async function deleteOrphanPhotos(validPatientIds: ReadonlySet<string>): Promise<number> {
+/**
+ * 名簿に無い訪問先を指す、孤立した写真を消す(起動時の片付けなど)。名簿も同じ
+ * トランザクションの中で読むので、この最中に他の書き込みが割り込んで矛盾することはない。
+ * 消した件数を返す。
+ */
+export async function deleteOrphanPhotos(): Promise<number> {
   return withDb(async (db) => {
-    const tx = db.transaction(PHOTOS_STORE, 'readwrite');
-    let cursor = await tx.store.openCursor();
+    const tx = db.transaction([STORE, PHOTOS_STORE], 'readwrite');
+    const validPatientIds = new Set(await tx.objectStore(STORE).getAllKeys());
+    const photosStore = tx.objectStore(PHOTOS_STORE);
+    let cursor = await photosStore.openCursor();
     let removed = 0;
     while (cursor) {
       if (!validPatientIds.has(cursor.value.patientId)) {

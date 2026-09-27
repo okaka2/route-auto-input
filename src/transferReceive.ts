@@ -5,7 +5,7 @@
  * main.ts が持つ状態は AppContext 経由でしか触らない。
  */
 import type { AppContext } from './appContext';
-import { getMeta, mergePatients, putSpots, replacePhotosFor } from './db';
+import { applyImport, getMeta } from './db';
 import { dataUrlToBlob } from './photoCodec';
 import { describeRecipients } from './recipients';
 import {
@@ -341,11 +341,14 @@ export function createReceiveSteps(ctx: AppContext): ReceiveSteps {
       const added = plan.put.length - overwritten;
 
       writeStarted = true;
-      await mergePatients(plan.put);
-      for (const [patientId, photos] of plan.photosByPatient) {
-        await replacePhotosFor([patientId], photos);
-      }
-      await putSpots(plan.spots);
+      await applyImport({
+        replaceAll: false,
+        patients: plan.put,
+        replacePhotosOf: [...plan.photosByPatient.keys()],
+        photos: [...plan.photosByPatient.values()].flat(),
+        spots: plan.spots,
+        meta: {},
+      });
       if (overwritten > 0) {
         // 上書きで住所などが変わると、開いたルートの印は古くなる(backupFlow.ts と同じ扱い)。
         ctx.clearOpenedRoutes();

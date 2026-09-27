@@ -2122,6 +2122,29 @@ describe('訪問済みと時刻・履歴のコピー・古い履歴の削除', (
     await waitFor(async () => expect(await db.listHistory()).toEqual([]));
   });
 
+  it('起動時に、名簿に無い訪問先を指す持ち主のいない写真を片付ける', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+    await db.addPhoto({
+      id: 'kept',
+      patientId: patient.id,
+      blob: new Blob(['x'], { type: 'image/jpeg' }),
+      createdAt: '2026-09-20T00:00:00.000Z',
+    });
+    await db.addPhoto({
+      id: 'orphan',
+      patientId: 'gone',
+      blob: new Blob(['x'], { type: 'image/jpeg' }),
+      createdAt: '2026-09-20T00:00:00.000Z',
+    });
+    await db.closeDbForTest();
+
+    await import('../src/main');
+    await waitFor(async () => expect((await db.listAllPhotos()).map((p) => p.id)).toEqual(['kept']));
+  });
+
   it('履歴の「コピー」を押すと、訪問した時刻と名前がクリップボードにコピーされる', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -2686,17 +2709,21 @@ describe('写真', () => {
     expect(el('.message')?.textContent).not.toContain('createImageBitmap');
   });
 
-  it('訪問先の削除で写真の削除(deletePhotosOf)が失敗しても、削除自体は成功として扱う', async () => {
+  it('訪問先を消すと写真も消える', async () => {
     const db = await import('../src/db');
     const { createPatient } = await import('../src/patient');
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
     await db.savePatient(patient);
+    await db.addPhoto({
+      id: 'photo-1',
+      patientId: patient.id,
+      blob: new Blob(['x'], { type: 'image/jpeg' }),
+      createdAt: '2026-09-20T00:00:00.000Z',
+    });
 
     await import('../src/main');
     await waitFor(() => expect(rows()).toHaveLength(1));
     dismissInstallNotice();
-
-    vi.spyOn(db, 'deletePhotosOf').mockRejectedValueOnce(new Error('boom'));
 
     el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
     el<HTMLButtonElement>('[data-testid="dialog-delete"]')!.click();
@@ -2704,6 +2731,7 @@ describe('写真', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(0));
     expect(el('.message')?.textContent).toContain('削除しました');
+    expect(await db.listPhotos(patient.id)).toEqual([]);
   });
 });
 
@@ -3364,9 +3392,9 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
     const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
 
-    // 訪問先の入れ替え(replaceAllPatients)は成功して書き込みが始まった後、
-    // お役立ち地点の書き込み(putSpots)で技術的な(利用者に見せたくない)エラーが起きたとする。
-    vi.spyOn(db, 'putSpots').mockRejectedValueOnce(new TypeError('Failed to execute structuredClone'));
+    // 訪問先・写真・地点・metaは1つのトランザクション(applyImport)で書くので、
+    // その途中で技術的な(利用者に見せたくない)エラーが起きれば、何も変わらない。
+    vi.spyOn(db, 'applyImport').mockRejectedValueOnce(new TypeError('Failed to execute structuredClone'));
 
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
@@ -3376,8 +3404,8 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
     );
     expect(el('.message')?.textContent).not.toContain('structuredClone');
 
-    // 実際に途中まで書き込まれた内容(訪問先の入れ替えは成功している)に画面が合っている。
-    expect((await db.listPatients()).map((p) => p.id)).toEqual([fromFile.id]);
+    // applyImportが失敗しているので、訪問先の件数は変わらない(既存のままで、ファイルの内容は入らない)。
+    expect((await db.listPatients()).map((p) => p.id)).toEqual([existing.id]);
   });
 });
 

@@ -84,6 +84,22 @@ describe('createBackupFlow', () => {
       text: 'バックアップのファイルの写真が壊れています。',
     });
   });
+
+  it('入れ替え(replace)は、applyImportが1回だけ呼ばれる', async () => {
+    const db = await import('../src/db');
+    const applyImportSpy = vi.spyOn(db, 'applyImport');
+    const fromFile = createPatient('鈴木 花子', '大阪市北区2-2');
+    const text = serializeBackup({ patients: [fromFile], photos: null, spots: [], meta: {} });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+
+    const ctx = createFakeContext();
+    const flow = createBackupFlow(ctx);
+
+    await flow.handleImport(file, 'replace');
+
+    expect(applyImportSpy).toHaveBeenCalledTimes(1);
+    expect(await db.listPatients()).toEqual([fromFile]);
+  });
 });
 
 describe('createBackupFlow: 引き継ぎのファイルの見分け', () => {

@@ -1,16 +1,6 @@
 import type { AppContext } from './appContext';
-import { parseBackup, serializeBackup } from './backup';
-import {
-  deleteOrphanPhotos,
-  listAllPhotos,
-  listPatients,
-  mergePatients,
-  mergePhotosCapped,
-  putSpots,
-  replaceAllPatients,
-  replacePhotosFor,
-  setMeta,
-} from './db';
+import { parseBackup, planBackupReplace, serializeBackup } from './backup';
+import { applyImport, deleteOrphanPhotos, listAllPhotos, mergePatients, mergePhotosCapped, putSpots, setMeta } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
 import { blobToDataUrl, dataUrlToBlob } from './photoCodec';
 import { isEncryptedFileText } from './transferFormat';
@@ -128,38 +118,40 @@ export function createBackupFlow(
 
       writeStarted = true;
       if (mode === 'replace') {
-        await replaceAllPatients(content.patients);
+        // 訪問先・写真・地点・meta を1つのトランザクションで書く(applyImportが名簿に
+        // 無くなった写真も同じ中で消す)。書き込みが成功してから、まとめて画面の状態に反映する。
+        await applyImport(planBackupReplace(content, decodedPhotos));
+        if (content.meta.office !== undefined) {
+          const office = content.meta.office;
+          ctx.setRouteContext({ ...ctx.getRouteContext(), office });
+          ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), office });
+        }
+        if (content.meta.routeEnds !== undefined) {
+          ctx.setRouteContext({ ...ctx.getRouteContext(), ends: content.meta.routeEnds });
+        }
       } else {
         await mergePatients(content.patients);
-      }
-      // 写真がnullのとき(書き出す側で外した、または旧version 1のバックアップ)は、
-      // 既存の写真に一切触れない(消さない)。
-      if (decodedPhotos !== null) {
-        if (mode === 'replace') {
-          // putPhotosは同じidだけ上書きするので、ファイルの写真のidが既存と違うと
-          // 上限(MAX_PHOTOS_PER_PATIENT)を超えて残ってしまう。入れ替えでは、
-          // ファイルに含まれる訪問先ぶんの写真をいったんすべて消してから入れる。
-          await replacePhotosFor([...fileIds], decodedPhotos);
-        } else {
-          // 追加では、既存の写真を残したまま、訪問先ごとの上限を超えないぶんだけ足す。
+        // 写真がnullのとき(書き出す側で外した、または旧version 1のバックアップ)は、
+        // 既存の写真に一切触れない(消さない)。追加では、既存の写真を残したまま、
+        // 訪問先ごとの上限を超えないぶんだけ足す。
+        if (decodedPhotos !== null) {
           await mergePhotosCapped(decodedPhotos);
         }
-      }
-      await putSpots(content.spots);
-      if (content.meta.office !== undefined) {
-        const office = content.meta.office;
-        await setMeta('office', office);
-        ctx.setRouteContext({ ...ctx.getRouteContext(), office });
-        ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), office });
-      }
-      if (content.meta.routeEnds !== undefined) {
-        const routeEnds = content.meta.routeEnds;
-        await setMeta('routeEnds', routeEnds);
-        ctx.setRouteContext({ ...ctx.getRouteContext(), ends: routeEnds });
+        await putSpots(content.spots);
+        if (content.meta.office !== undefined) {
+          const office = content.meta.office;
+          await setMeta('office', office);
+          ctx.setRouteContext({ ...ctx.getRouteContext(), office });
+          ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), office });
+        }
+        if (content.meta.routeEnds !== undefined) {
+          const routeEnds = content.meta.routeEnds;
+          await setMeta('routeEnds', routeEnds);
+          ctx.setRouteContext({ ...ctx.getRouteContext(), ends: routeEnds });
+        }
+        await deleteOrphanPhotos();
       }
       ctx.clearOpenedRoutes();
-      const importedPatients = await listPatients();
-      await deleteOrphanPhotos(new Set(importedPatients.map((patient) => patient.id)));
       await ctx.loadSpots();
       await ctx.loadPhotoCounts();
       await ctx.loadPhotoBytes();

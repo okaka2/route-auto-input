@@ -613,14 +613,14 @@ describe('createTransferFlow: 受け取り(パスワード)', () => {
         photos: [{ id: 'ph1', patientId: patient.id, dataUrl: 'data:image/jpeg;base64,@@@@', createdAt: 't' }],
       }),
     );
-    const mergeSpy = vi.spyOn(db, 'mergePatients');
+    const applyImportSpy = vi.spyOn(db, 'applyImport');
     flow.updateReceivePassword('abcdef');
 
     await flow.submitReceivePassword();
 
     expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', error: '引き継ぎのファイルの写真が壊れています。' });
     await flow.confirmReceive();
-    expect(mergeSpy).not.toHaveBeenCalled();
+    expect(applyImportSpy).not.toHaveBeenCalled();
   });
 
   it('復号の途中でダイアログが閉じられたら、あとから状態を書き換えない', async () => {
@@ -960,7 +960,7 @@ describe('createTransferFlow: 受け取り(確認・同じ人・取り込み)', 
     const { ctx, getState } = createFakeContext();
     const flow = createTransferFlow(ctx);
     await openAndUnlock(flow, { patients: [createPatient('山田 太郎', '東京都千代田区1-1')] });
-    vi.spyOn(db, 'mergePatients').mockRejectedValue(new Error('boom'));
+    vi.spyOn(db, 'applyImport').mockRejectedValue(new Error('boom'));
 
     await flow.confirmReceive();
 
@@ -973,12 +973,12 @@ describe('createTransferFlow: 受け取り(確認・同じ人・取り込み)', 
     const { ctx } = createFakeContext();
     const flow = createTransferFlow(ctx);
     await openAndUnlock(flow, { spots: [SPOT] });
-    const mergeSpy = vi.spyOn(db, 'mergePatients');
+    const applyImportSpy = vi.spyOn(db, 'applyImport');
 
     flow.discardReceive();
     await flow.confirmReceive();
 
-    expect(mergeSpy).not.toHaveBeenCalled();
+    expect(applyImportSpy).not.toHaveBeenCalled();
     expect(await db.listSpots()).toHaveLength(0);
   });
 
@@ -986,11 +986,11 @@ describe('createTransferFlow: 受け取り(確認・同じ人・取り込み)', 
     const { ctx } = createFakeContext();
     const flow = createTransferFlow(ctx);
     await openAndUnlock(flow, { patients: [createPatient('山田 太郎', '東京都千代田区1-1')] });
-    const mergeSpy = vi.spyOn(db, 'mergePatients');
+    const applyImportSpy = vi.spyOn(db, 'applyImport');
 
     await Promise.all([flow.confirmReceive(), flow.confirmReceive()]);
 
-    expect(mergeSpy).toHaveBeenCalledTimes(1);
+    expect(applyImportSpy).toHaveBeenCalledTimes(1);
     expect(await db.listPatients()).toHaveLength(1);
   });
 });

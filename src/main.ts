@@ -9,10 +9,10 @@ import {
   countPhotosByPatient,
   deleteHistoryBefore,
   deleteMeta,
+  deleteOrphanPhotos,
   deletePatient,
   deletePatients,
   deletePhoto,
-  deletePhotosOf,
   deleteSpot,
   getMeta,
   listAllPhotos,
@@ -946,12 +946,6 @@ async function handleDelete(id: string): Promise<void> {
   setState(closeDialog(state));
   try {
     await deletePatient(id);
-    try {
-      await deletePhotosOf([id]);
-    } catch {
-      // 写真を消せなくても、訪問先自体の削除は済んでいるので、これ全体を失敗として扱わない
-      // (孤立した写真は残るが、消えたはずのデータとして扱われるよりまし)。
-    }
     await loadPhotoCounts();
     await loadPhotoBytes();
     await reloadPatients({ kind: 'info', text: '削除しました。' });
@@ -992,11 +986,6 @@ async function handleConfirmDeleteSelected(): Promise<void> {
   setState(closeDialog(state));
   try {
     await deletePatients(ids);
-    try {
-      await deletePhotosOf(ids);
-    } catch {
-      // 写真を消せなくても、訪問先自体の削除は済んでいるので、これ全体を失敗として扱わない。
-    }
     await loadPhotoCounts();
     await loadPhotoBytes();
     await reloadPatients({ kind: 'info', text: `${ids.length}件を削除しました。` });
@@ -1945,11 +1934,25 @@ function render(): void {
  */
 type WindowWithStartup = typeof window & { __routeAutoInputStartup?: Promise<void> };
 
+/** 名簿の読み直しのあと、名簿に無い訪問先を指す孤立した写真を片付ける。失敗しても無視する。 */
+async function cleanUpOrphanPhotos(): Promise<void> {
+  let removed = 0;
+  try {
+    removed = await deleteOrphanPhotos();
+  } catch {
+    // 起動時の片付けなので、失敗しても起動は続ける。
+  }
+  if (removed > 0) {
+    await loadPhotoCounts();
+    await loadPhotoBytes();
+  }
+}
+
 /** ロック画面を通過してから、いつもどおりアプリ本体を描画・読み込みする。 */
 function startApp(): void {
   render();
   const startup = Promise.allSettled([
-    reloadPatients(),
+    reloadPatients().then(() => cleanUpOrphanPhotos()),
     loadSettingsInfo(),
     loadRouteContext(),
     deleteHistoryBefore(keepFromDate(new Date())).catch(() => undefined).then(() => loadHistory()),
