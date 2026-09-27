@@ -131,8 +131,43 @@ describe('一覧の上部の文字の大きさ', () => {
   });
 });
 
+/**
+ * source の position にある '{' から、対応する '}' までの中身を取り出す(入れ子のルール
+ * (@media の中の .selector { ... } など)があっても、最初に出てくる '}' で切ってしまわないように、
+ * 深さを数えて対応する閉じ括弧を探す)。
+ */
+function blockAt(source: string, openBraceIndex: number): string {
+  let depth = 0;
+  for (let i = openBraceIndex; i < source.length; i += 1) {
+    if (source[i] === '{') {
+      depth += 1;
+    } else if (source[i] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(openBraceIndex + 1, i);
+      }
+    }
+  }
+  throw new Error('波括弧が閉じていない');
+}
+
 describe('選択バー', () => {
-  it('狭い画面では、選択件数の下にボタンの行が回り込む(flex-wrap: wrap)', () => {
+  it('通常の幅では1行に収まる(.selection-actionsはflex-basis: 100%にしない)', () => {
+    const start = css.indexOf('.selection-actions {');
+    expect(start, '.selection-actions が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).not.toContain('100%');
+  });
+
+  it('狭い画面(30rem以下)では、選択件数の下にボタンの行が回り込み、選択バーの高さもその分広げる', () => {
+    const mediaStart = css.indexOf('@media (max-width: 30rem)');
+    expect(mediaStart, '@media (max-width: 30rem) が styles.css にない').toBeGreaterThanOrEqual(0);
+    const mediaBlock = blockAt(css, css.indexOf('{', mediaStart));
+    expect(mediaBlock).toMatch(/--selbar-h:\s*7\.5rem/);
+    expect(mediaBlock).toMatch(/\.selection-actions\s*\{[^}]*flex:\s*1 1 100%/s);
+  });
+
+  it('狭い画面でも通常の幅でも、選択件数の下にボタンの行が回り込めるようにしておく(flex-wrap: wrap)', () => {
     expect(css).toMatch(/\.selection-bar\s*\{[^}]*flex-wrap:\s*wrap/s);
   });
 });

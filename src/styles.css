@@ -404,23 +404,41 @@ a.disabled {
   white-space: nowrap;
 }
 
-/*
- * 削除・送る・訪問順を決める、の3つのボタン。狭い画面(375px幅など)では
- * 「N件選択中」と横並びだと収まらないことがあるため、flex-basis: 100% で
- * 常にこのグループだけで1行の幅いっぱいを使うようにし(.selection-barのflex-wrap:
- * wrapで「N件選択中」の下の行に回る)、3つのボタンはflex: 1で均等に幅を分け合う。
- */
+/* 削除・送る・訪問順を決める、の3つのボタン。通常の幅では「N件選択中」と同じ行に収まる
+ * 大きさのまま(flex: 0 0 auto)。狭い画面向けの折り返しは、下の @media を参照。 */
 .selection-actions {
   display: flex;
   align-items: center;
-  flex: 1 1 100%;
+  flex: 0 0 auto;
   gap: 0.5rem;
 }
 
 .selection-actions button {
-  flex: 1;
   padding: 0 0.625rem;
   white-space: nowrap;
+}
+
+/*
+ * 狭い画面(375px幅など、30rem=480px以下)では、削除・送る・訪問順を決めるの3つが
+ * 「N件選択中」と横並びだと収まらないことがあるため、.selection-actionsをflex-basis: 100%
+ * にして常にこのグループだけで1行の幅いっぱいを使い(.selection-barのflex-wrap: wrapで
+ * 「N件選択中」の下の行に回る)、3つのボタンはflex: 1で均等に幅を分け合う。
+ * 2行ぶんの高さになる分、--selbar-h(.app-shell.with-selectionのpadding-bottomが使う)も
+ * 広げて、固定バーが一覧の最後の行に重ならないようにする
+ * (件数の行 2.75rem + 行間 0.5rem + ボタンの行 2.75rem + 上下の余白 0.5rem×2 = 7.5rem)。
+ */
+@media (max-width: 30rem) {
+  :root {
+    --selbar-h: 7.5rem;
+  }
+
+  .selection-actions {
+    flex: 1 1 100%;
+  }
+
+  .selection-actions button {
+    flex: 1;
+  }
 }
 
 .segmented {
