@@ -8,6 +8,7 @@ import * as db from '../src/db';
 import { closeDbForTest, getMeta, setMeta } from '../src/db';
 import * as fileIo from '../src/fileIo';
 import { createPatient } from '../src/patient';
+import * as photoCodec from '../src/photoCodec';
 import { DEFAULT_ROUTE_ENDS } from '../src/routePlan';
 import { createInitialState } from '../src/state';
 import { createTransferFlow } from '../src/transferFlow';
@@ -215,7 +216,7 @@ describe('createTransferFlow: submitSend', () => {
     expect(ctx.confirm).not.toHaveBeenCalled();
   });
 
-  it('合言葉を使う設定だが、まだ保存されていなければエラーにする', async () => {
+  it('合言葉を使う設定だが、まだ保存されていなければ、チェックを外してエラーにする', async () => {
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
     const { ctx, getDialog } = createFakeContext({ patients: [patient], hasSharedSecret: false });
     const flow = createTransferFlow(ctx);
@@ -224,7 +225,9 @@ describe('createTransferFlow: submitSend', () => {
 
     await flow.submitSend();
 
-    expect(getDialog()?.error).toBe('送るファイルを作れませんでした。');
+    expect(getDialog()?.error).toBe('事業所の合言葉が見つかりません。パスワードを入力してください。');
+    expect(getDialog()?.useSharedSecret).toBe(false);
+    expect(ctx.setSettingsInfo).toHaveBeenCalledWith(expect.objectContaining({ hasSharedSecret: false }));
     expect(ctx.confirm).not.toHaveBeenCalled();
   });
 
@@ -256,6 +259,9 @@ describe('createTransferFlow: submitSend', () => {
 
     expect(getDialog()?.phase).toBe('done');
     expect(getDialog()?.shared).toBe(true);
+    // 送り終えたら、パスワードは画面(state)に残さない。
+    expect(getDialog()?.password).toBe('');
+    expect(getDialog()?.passwordConfirm).toBe('');
     expect(shareSpy).toHaveBeenCalledTimes(1);
     const file = shareSpy.mock.calls[0]![0];
     expect(file.name).toMatch(/^訪問先の引き継ぎ_\d{4}-\d{2}-\d{2}\.txt$/);
@@ -293,9 +299,12 @@ describe('createTransferFlow: submitSend', () => {
 
     expect(getDialog()?.phase).toBe('form');
     expect(getDialog()?.error).toBeNull();
+    // 取りやめてformに戻ったときは、入力し直さずに済むようパスワードを残す。
+    expect(getDialog()?.password).toBe('abcdef');
+    expect(getDialog()?.passwordConfirm).toBe('abcdef');
   }, 10_000);
 
-  it('saveAsSharedがオンなら、成功後に合言葉として保存する', async () => {
+  it('saveAsSharedがオンなら、成功後に合言葉として保存し、hasSharedSecretも立てる', async () => {
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
     const { ctx } = createFakeContext({ patients: [patient] });
     vi.spyOn(fileIo, 'shareOrDownloadFile').mockResolvedValue('shared');
@@ -306,6 +315,8 @@ describe('createTransferFlow: submitSend', () => {
     await flow.submitSend();
 
     expect(await getMeta('sharedSecret')).toBe('abcdef');
+    expect(ctx.setSettingsInfo).toHaveBeenCalledWith(expect.objectContaining({ hasSharedSecret: true }));
+    expect(ctx.getSettingsInfo().hasSharedSecret).toBe(true);
   }, 10_000);
 
   it('合言葉を使うときは、保存済みの合言葉で暗号化する(入力欄のpasswordは使わない)', async () => {
@@ -343,6 +354,71 @@ describe('createTransferFlow: submitSend', () => {
     const payload = parsePayload(await decryptText(await file.text(), 'abcdef'));
     expect(payload.photos).toHaveLength(1);
     expect(payload.photos![0]!.patientId).toBe(patient.id);
+  }, 10_000);
+
+  it('2人のうち1人だけ送るときは、送る相手の写真だけを含める(相手ではない人の写真は問い合わせもしない)', async () => {
+    const sent = createPatient('山田 太郎', '東京都千代田区1-1');
+    const other = createPatient('鈴木 花子', '東京都千代田区2-2');
+    const listPhotosSpy = vi.spyOn(db, 'listPhotos').mockImplementation(async (patientId: string) => {
+      if (patientId === sent.id) {
+        return [{ id: 'photo-1', patientId: sent.id, blob: new Blob(['x'], { type: 'image/jpeg' }), createdAt: 't1' }];
+      }
+      if (patientId === other.id) {
+        return [{ id: 'photo-2', patientId: other.id, blob: new Blob(['y'], { type: 'image/jpeg' }), createdAt: 't2' }];
+      }
+      return [];
+    });
+    const { ctx } = createFakeContext({ patients: [sent, other] });
+    const shareSpy = vi.spyOn(fileIo, 'shareOrDownloadFile').mockResolvedValue('shared');
+    const flow = createTransferFlow(ctx);
+    await flow.openSend([sent.id]);
+    flow.updateSendDraft({ password: 'abcdef', passwordConfirm: 'abcdef' });
+
+    await flow.submitSend();
+
+    expect(listPhotosSpy).toHaveBeenCalledTimes(1);
+    expect(listPhotosSpy).toHaveBeenCalledWith(sent.id);
+    const file = shareSpy.mock.calls[0]![0];
+    const payload = parsePayload(await decryptText(await file.text(), 'abcdef'));
+    expect(payload.patients).toHaveLength(1);
+    expect(payload.photos).toHaveLength(1);
+    expect(payload.photos![0]!.patientId).toBe(sent.id);
+  }, 10_000);
+
+  it('写真のBlobをdata URLに変換できなければ、汎用のエラー文を出し、共有/ダウンロードはしない', async () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    vi.spyOn(db, 'listPhotos').mockResolvedValue([
+      { id: 'photo-1', patientId: patient.id, blob: new Blob(['x'], { type: 'image/jpeg' }), createdAt: 't1' },
+    ]);
+    vi.spyOn(photoCodec, 'blobToDataUrl').mockRejectedValue(new Error('写真を読み込めませんでした。'));
+    const { ctx, getDialog } = createFakeContext({ patients: [patient] });
+    const shareSpy = vi.spyOn(fileIo, 'shareOrDownloadFile');
+    const flow = createTransferFlow(ctx);
+    await flow.openSend([patient.id]);
+    flow.updateSendDraft({ password: 'abcdef', passwordConfirm: 'abcdef' });
+
+    await flow.submitSend();
+
+    expect(getDialog()?.phase).toBe('form');
+    expect(getDialog()?.error).toBe('送るファイルを作れませんでした。');
+    expect(shareSpy).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it('「写真も含める」を外すと、写真は問い合わせず、payloadのphotosはnullになる', async () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const listPhotosSpy = vi.spyOn(db, 'listPhotos');
+    const { ctx } = createFakeContext({ patients: [patient] });
+    const shareSpy = vi.spyOn(fileIo, 'shareOrDownloadFile').mockResolvedValue('shared');
+    const flow = createTransferFlow(ctx);
+    await flow.openSend([patient.id]);
+    flow.updateSendDraft({ includePhotos: false, password: 'abcdef', passwordConfirm: 'abcdef' });
+
+    await flow.submitSend();
+
+    expect(listPhotosSpy).not.toHaveBeenCalled();
+    const file = shareSpy.mock.calls[0]![0];
+    const payload = parsePayload(await decryptText(await file.text(), 'abcdef'));
+    expect(payload.photos).toBeNull();
   }, 10_000);
 
   it('地点だけを送るときは、patients は空でspotsが入る', async () => {

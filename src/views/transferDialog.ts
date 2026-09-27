@@ -117,13 +117,14 @@ export function renderTransferSendDialog(
     confirmInput.addEventListener('input', () => handlers.onSendDraft({ passwordConfirm: confirmInput.value }));
 
     elements.push(labelled('パスワード', passwordInput), labelled('確認のパスワード', confirmInput));
+    // すでに合言葉がある(が、このダイアログではオフにして別のパスワードを入力している)ときは、
+    // 「保存する」ではなく「変える」という文言にする(何が起きるかを正しく伝えるため)。
+    const saveAsSharedLabel = hasSharedSecret
+      ? '事業所の合言葉を、このパスワードに変える'
+      : 'この合言葉を事業所の合言葉として保存する';
     elements.push(
-      checkboxLabel(
-        'transfer-save-shared',
-        'この合言葉を事業所の合言葉として保存する',
-        dialog.saveAsShared,
-        working,
-        (checked) => handlers.onSendDraft({ saveAsShared: checked }),
+      checkboxLabel('transfer-save-shared', saveAsSharedLabel, dialog.saveAsShared, working, (checked) =>
+        handlers.onSendDraft({ saveAsShared: checked }),
       ),
     );
   }
@@ -160,6 +161,8 @@ function checkboxLabel(
   checkbox.dataset.testid = testid;
   checkbox.addEventListener('change', () => onChange(checkbox.checked));
   const label = document.createElement('label');
+  // .transfer-options の中と外、どちらの場所でも同じ見た目(タップ領域44px以上)にする。
+  label.className = 'transfer-check';
   label.append(checkbox, document.createTextNode(` ${text}`));
   return label;
 }

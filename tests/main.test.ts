@@ -1852,6 +1852,115 @@ describe('送る', () => {
     const payload = parsePayload(await decryptText(await file.text(), 'abcdef'));
     expect(payload.patients).toHaveLength(2);
   }, 10_000);
+
+  it('合言葉として保存して送ったあと、同じセッションでもう一度送ると「事業所の合言葉を使う」が出てチェックされている', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+    fillPassword('abcdef');
+    el<HTMLInputElement>('[data-testid="transfer-save-shared"]')!.click();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    await waitFor(() => expect(el('[data-testid="transfer-done-text"]')).not.toBeNull());
+    expect(await db.getMeta('sharedSecret')).toBe('abcdef');
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-use-shared"]')).not.toBeNull());
+    expect(el<HTMLInputElement>('[data-testid="transfer-use-shared"]')!.checked).toBe(true);
+    expect(el('[data-testid="transfer-password"]')).toBeNull();
+  }, 10_000);
+
+  it('送信中(working)はEscキーで閉じない', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+    let resolveShare: () => void = () => {};
+    const sharePromise = new Promise<void>((resolve) => {
+      resolveShare = resolve;
+    });
+    const share = vi.fn().mockReturnValue(sharePromise);
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+    fillPassword('abcdef');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    // 共有メニュー(navigator.share)が呼ばれた時点で、暗号化が終わりworking中になっている。
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    expect(el<HTMLButtonElement>('[data-testid="transfer-send-button"]')?.disabled).toBe(true);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(el('[data-testid="dialog"]')).not.toBeNull();
+
+    // 背景(overlay)を押しても、working中は閉じない。
+    el('[data-testid="dialog-overlay"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(el('[data-testid="dialog"]')).not.toBeNull();
+
+    resolveShare();
+    await waitFor(() => expect(el('[data-testid="transfer-done-text"]')).not.toBeNull());
+  }, 10_000);
+
+  it('選択バーの「送る」から開いた送るダイアログを閉じると、フォーカスが「送る」ボタンへ戻る', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${patient.id}"]`)!.click();
+    await waitFor(() => expect(el('[data-testid="send-selected-button"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="send-selected-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(el('[data-testid="send-selected-button"]'));
+  });
+
+  it('設定の「お役立ち地点を送る」から開いた送るダイアログを閉じると、フォーカスが「お役立ち地点を送る」ボタンへ戻る', async () => {
+    const db = await import('../src/db');
+    await db.putSpot({
+      id: 'spot-1',
+      kind: 'toilet',
+      note: 'きれいなトイレ',
+      location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' },
+      createdAt: '2026-09-22T00:00:00.000Z',
+    });
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="send-spots-button"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="send-spots-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(el('[data-testid="send-spots-button"]'));
+  });
 });
 
 describe('履歴から選ぶ', () => {

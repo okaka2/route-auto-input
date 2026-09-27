@@ -185,10 +185,17 @@ let deletingSelected = false;
 let savingSpot = false;
 
 // 「⋯」から開いたダイアログを、編集・複製・削除以外で閉じたとき、フォーカスを戻す行のid。
-// お役立ち地点の登録ダイアログを閉じたときは SPOT_RETURN_ID を入れ、地図の画面の
-// 「今いる場所をお役立ち地点に登録」ボタンへフォーカスを戻す。
+// 特定の行に紐づかない入口(お役立ち地点の登録・選択バー/設定からの「送る」)から開いたときは、
+// 下のRETURN_TARGETSにあるキーを入れておくと、閉じたときにそのtestidのボタンへフォーカスを戻す。
 let dialogReturnId: string | null = null;
 const SPOT_RETURN_ID = '__spot-add';
+const SEND_SELECTED_RETURN_ID = '__send-selected';
+const SEND_SPOTS_RETURN_ID = '__send-spots';
+const RETURN_TARGETS: Record<string, string> = {
+  [SPOT_RETURN_ID]: 'spot-add-button',
+  [SEND_SELECTED_RETURN_ID]: 'send-selected-button',
+  [SEND_SPOTS_RETURN_ID]: 'send-spots-button',
+};
 
 // 位置を測っている最中なら、止めるための関数。測っていなければ null。
 // 止める場所はsetState一箇所にまとめる(下記参照)。
@@ -988,7 +995,17 @@ function openMenu(id: string): void {
   setState(openRowMenu(state, id));
 }
 
+/**
+ * Escキー・背景クリック・「やめる」共通の「閉じる」。送るダイアログが送信中(working)の間は、
+ * 暗号化・共有/ダウンロードの途中で状態を消してしまわないよう、閉じない
+ * (「やめる」ボタン自体もworking中は押せなくしてあるが、Escキーや背景クリックはボタンの
+ * disabledに関係なく効いてしまうため、ここでも防ぐ)。
+ */
 function closeAnyDialog(): void {
+  const dialog = state.dialog;
+  if (dialog?.kind === 'transferSend' && dialog.phase === 'working') {
+    return;
+  }
   setState(closeDialog(state));
 }
 
@@ -1671,6 +1688,7 @@ function renderScreen(): HTMLElement {
           void handleDeleteSpot(id);
         },
         onSendSpots: () => {
+          dialogReturnId = SEND_SPOTS_RETURN_ID;
           void transferFlow.openSend([], { spotsOnly: true });
         },
         onSharedSecretDraftChange: (value) => {
@@ -1724,6 +1742,7 @@ function renderApp(): HTMLElement {
             onDeleteSelected: handleRequestDeleteSelected,
             onShowSelected: () => setState(setListFilter(state, 'selected')),
             onSend: () => {
+              dialogReturnId = SEND_SELECTED_RETURN_ID;
               void transferFlow.openSend(state.selectedIds);
             },
           })
@@ -1854,9 +1873,9 @@ function render(): void {
     dialog.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
     return;
   }
-  if (hadDialog && dialogReturnId === SPOT_RETURN_ID) {
-    // 地図の画面の「今いる場所をお役立ち地点に登録」から開いた(特定の行に紐づかない)。
-    root!.querySelector<HTMLElement>('[data-testid="spot-add-button"]')?.focus();
+  if (hadDialog && dialogReturnId !== null && dialogReturnId in RETURN_TARGETS) {
+    // 特定の行に紐づかない入口(お役立ち地点の登録・選択バー/設定からの「送る」)から開いた。
+    root!.querySelector<HTMLElement>(`[data-testid="${RETURN_TARGETS[dialogReturnId]}"]`)?.focus();
     dialogReturnId = null;
     return;
   }

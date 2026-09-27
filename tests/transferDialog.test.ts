@@ -129,6 +129,28 @@ describe('renderTransferSendDialog: 出し分け', () => {
     expect(q(elements, 'transfer-use-shared')).not.toBeNull();
     expect(q(elements, 'transfer-password')).not.toBeNull();
   });
+
+  it('チェックボックスのラベルはすべて.transfer-optionsの中/外を問わず.transfer-checkクラスを持つ(タップ領域44px)', () => {
+    const elements = render(baseDialog(), { hasPhotoCandidates: true, spotCount: 3, hasSharedSecret: false });
+    for (const testid of ['transfer-include-photos', 'transfer-include-spots', 'transfer-save-shared']) {
+      const checkbox = q<HTMLInputElement>(elements, testid)!;
+      const label = checkbox.closest('label');
+      expect(label?.className, testid).toBe('transfer-check');
+    }
+  });
+
+  it('合言葉が保存されていなければ、保存用チェックは「この合言葉を事業所の合言葉として保存する」', () => {
+    const elements = render(baseDialog(), { hasSharedSecret: false });
+    const label = q<HTMLInputElement>(elements, 'transfer-save-shared')!.closest('label');
+    expect(label?.textContent).toContain('この合言葉を事業所の合言葉として保存する');
+  });
+
+  it('合言葉が保存されている(がオフにしている)ときは、保存用チェックは「事業所の合言葉を、このパスワードに変える」', () => {
+    const elements = render(baseDialog({ useSharedSecret: false }), { hasSharedSecret: true });
+    const label = q<HTMLInputElement>(elements, 'transfer-save-shared')!.closest('label');
+    expect(label?.textContent).toContain('事業所の合言葉を、このパスワードに変える');
+    expect(q<HTMLInputElement>(elements, 'transfer-save-shared')!.checked).toBe(false);
+  });
 });
 
 describe('renderTransferSendDialog: エラー・working・done', () => {

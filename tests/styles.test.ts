@@ -130,3 +130,9 @@ describe('一覧の上部の文字の大きさ', () => {
     expect(css).toMatch(/body\s*\{[^}]*font-size:\s*1rem/s);
   });
 });
+
+describe('選択バー', () => {
+  it('狭い画面では、選択件数の下にボタンの行が回り込む(flex-wrap: wrap)', () => {
+    expect(css).toMatch(/\.selection-bar\s*\{[^}]*flex-wrap:\s*wrap/s);
+  });
+});

@@ -386,6 +386,7 @@ a.disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--gap);
   min-height: var(--selbar-h);
   padding: 0.5rem calc(var(--gap) + env(safe-area-inset-right)) 0.5rem
@@ -400,17 +401,26 @@ a.disabled {
   color: var(--text);
   font-weight: 600;
   padding: 0 0.5rem;
+  white-space: nowrap;
 }
 
+/*
+ * 削除・送る・訪問順を決める、の3つのボタン。狭い画面(375px幅など)では
+ * 「N件選択中」と横並びだと収まらないことがあるため、flex-basis: 100% で
+ * 常にこのグループだけで1行の幅いっぱいを使うようにし(.selection-barのflex-wrap:
+ * wrapで「N件選択中」の下の行に回る)、3つのボタンはflex: 1で均等に幅を分け合う。
+ */
 .selection-actions {
   display: flex;
   align-items: center;
+  flex: 1 1 100%;
   gap: 0.5rem;
 }
 
-/* 削除・送る・訪問順を決める、の3つが375px幅でも収まるよう、送るボタンだけ左右の余白を詰める。 */
-.selection-actions .send-button {
-  padding: 0 0.75rem;
+.selection-actions button {
+  flex: 1;
+  padding: 0 0.625rem;
+  white-space: nowrap;
 }
 
 .segmented {
@@ -636,7 +646,12 @@ button.select-all {
   margin: 0.75rem 0;
 }
 
-.transfer-options label {
+/*
+ * チェックボックスのラベル。.transfer-optionsの中(写真も含める・お役立ち地点も含める・
+ * 事業所の合言葉を使う)だけでなく、その外にある「この合言葉を事業所の合言葉として保存する」
+ * にも同じ見た目(タップ領域44px以上)を与えるため、共通クラスにしてある。
+ */
+.transfer-check {
   display: flex;
   align-items: center;
   gap: 0.5rem;

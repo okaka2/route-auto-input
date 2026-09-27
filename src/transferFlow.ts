@@ -19,6 +19,7 @@ const NOTHING_TO_SEND_MESSAGE = '送るものがありません。';
 const BUILD_FAILED_MESSAGE = '送るファイルを作れませんでした。';
 const PASSWORD_TOO_SHORT_MESSAGE = `パスワードは${MIN_PASSWORD_LENGTH}文字以上にしてください。`;
 const PASSWORD_MISMATCH_MESSAGE = '確認のパスワードが一致しません。';
+const SHARED_SECRET_MISSING_MESSAGE = '事業所の合言葉が見つかりません。パスワードを入力してください。';
 
 /**
  * 「送る」の入口(一覧の「⋯」・選択バー・設定のお役立ち地点)からダイアログを開き、
@@ -81,7 +82,11 @@ export function createTransferFlow(ctx: AppContext): {
         shared = undefined;
       }
       if (shared === undefined) {
-        setDialog({ ...dialog, error: BUILD_FAILED_MESSAGE });
+        // 設定を開いた後に他の端末/タブで合言葉が消えた場合など、useSharedSecretは
+        // 立っているのに実体が無いことがある。チェックを外し、画面をその実態に合わせたうえで、
+        // 入力で送り直せるように促す(hasSharedSecretもfalseにして、設定画面などの表示も揃える)。
+        ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), hasSharedSecret: false });
+        setDialog({ ...dialog, useSharedSecret: false, error: SHARED_SECRET_MISSING_MESSAGE });
         return null;
       }
       return shared;
@@ -160,11 +165,17 @@ export function createTransferFlow(ctx: AppContext): {
       if (dialog.saveAsShared) {
         try {
           await setMeta('sharedSecret', password);
+          // 設定画面などが「合言葉が保存されている」を正しく反映できるよう、この場で伝える
+          // (settingsInfoを読み直すまで待つと、次に送るダイアログを開いたときに
+          // 「事業所の合言葉を使う」がまだ出ない、という食い違いが起きる)。
+          ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), hasSharedSecret: true });
         } catch {
           // 保存できなくても、送信自体は成功しているので、下の成功表示は変えない。
         }
       }
-      setDialog({ ...current, phase: 'done', shared: result === 'shared', error: null });
+      // パスワードは送り終えたら画面に残さない(doneの後にもう一度送る場合は入力し直す)。
+      // 取りやめてformに戻ったとき(上のcancelled)は、入力し直さずに済むよう残す。
+      setDialog({ ...current, phase: 'done', shared: result === 'shared', error: null, password: '', passwordConfirm: '' });
     } catch {
       const current = ctx.getState().dialog;
       if (current?.kind === 'transferSend') {
