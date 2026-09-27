@@ -13,6 +13,11 @@ const handlers = (): SettingsHandlers => ({
   onClearOffice: vi.fn(),
   onClearHistory: vi.fn(),
   onDeleteSpot: vi.fn(),
+  onSharedSecretDraftChange: vi.fn(),
+  onSharedSecretSave: vi.fn(),
+  onSharedSecretChange: vi.fn(),
+  onSharedSecretClear: vi.fn(),
+  onSharedSecretCancel: vi.fn(),
 });
 
 const info = (): SettingsInfo => ({
@@ -23,6 +28,9 @@ const info = (): SettingsInfo => ({
   spots: [],
   photoBytes: 0,
   includePhotos: true,
+  hasSharedSecret: false,
+  sharedSecretDraft: '',
+  sharedSecretEditing: false,
 });
 
 const q = <T extends HTMLElement = HTMLElement>(element: HTMLElement, testid: string): T =>
@@ -167,10 +175,18 @@ describe('renderSettings: 言葉と並び', () => {
     expect(element.textContent).not.toContain('エクスポート');
     expect(element.textContent).not.toContain('インポート');
   });
-  it('見出しの順は 出発地・帰着地 → バックアップ → お役立ち地点 → データの保存状態 → 表示 → このアプリについて', () => {
+  it('見出しの順は 出発地・帰着地 → バックアップ → お役立ち地点 → 事業所の合言葉 → データの保存状態 → 表示 → このアプリについて', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
     const headings = [...element.querySelectorAll('h2')].map((h) => h.textContent);
-    expect(headings).toEqual(['出発地・帰着地', 'バックアップ', 'お役立ち地点', 'データの保存状態', '表示', 'このアプリについて']);
+    expect(headings).toEqual([
+      '出発地・帰着地',
+      'バックアップ',
+      'お役立ち地点',
+      '事業所の合言葉',
+      'データの保存状態',
+      '表示',
+      'このアプリについて',
+    ]);
   });
   it('最後のバックアップが無ければ「まだありません」、あれば日付と何日前か', () => {
     const none = renderSettings(createInitialState([]), info(), handlers());
@@ -246,5 +262,68 @@ describe('renderSettings: 出発地・帰着地', () => {
   it('説明に、訪問順の画面で出発・帰着を選べることを書く', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
     expect(element.textContent).toContain('訪問順の画面で');
+  });
+});
+
+describe('renderSettings: 事業所の合言葉', () => {
+  it('未設定なら、入力欄(type=password、autocomplete=new-password)と「保存」を出す', () => {
+    const element = renderSettings(createInitialState([]), info(), handlers());
+    const input = q<HTMLInputElement>(element, 'shared-secret-input');
+    expect(input.type).toBe('password');
+    expect(input.autocomplete).toBe('new-password');
+    expect(q(element, 'shared-secret-save').textContent).toBe('保存');
+    expect(element.querySelector('[data-testid="shared-secret-status"]')).toBeNull();
+    expect(element.querySelector('[data-testid="shared-secret-change"]')).toBeNull();
+    expect(element.querySelector('[data-testid="shared-secret-clear"]')).toBeNull();
+  });
+
+  it('説明に6文字以上と書く(禁止語は使わない)', () => {
+    const element = renderSettings(createInitialState([]), info(), handlers());
+    expect(element.textContent).toContain('6文字以上');
+  });
+
+  it('入力欄の初期値はinfo.sharedSecretDraftで、入力するたびonSharedSecretDraftChange(Minor 7と同じやり方)', () => {
+    const spies = handlers();
+    const element = renderSettings(createInitialState([]), { ...info(), sharedSecretDraft: 'たね' }, spies);
+    const input = q<HTMLInputElement>(element, 'shared-secret-input');
+    expect(input.value).toBe('たね');
+    input.value = 'たねひみつ';
+    input.dispatchEvent(new Event('input'));
+    expect(spies.onSharedSecretDraftChange).toHaveBeenCalledWith('たねひみつ');
+  });
+
+  it('「保存」を押すと、入力欄の今の値でonSharedSecretSaveが呼ばれる', () => {
+    const spies = handlers();
+    const element = renderSettings(createInitialState([]), info(), spies);
+    const input = q<HTMLInputElement>(element, 'shared-secret-input');
+    input.value = 'ひみつのあいことば';
+    q<HTMLButtonElement>(element, 'shared-secret-save').click();
+    expect(spies.onSharedSecretSave).toHaveBeenCalledWith('ひみつのあいことば');
+  });
+
+  it('設定済み(編集していない)なら「設定されています」と「変える」「消す」を出し、入力欄も合言葉そのものも出さない', () => {
+    const spies = handlers();
+    const element = renderSettings(createInitialState([]), { ...info(), hasSharedSecret: true }, spies);
+    expect(q(element, 'shared-secret-status').textContent).toBe('設定されています');
+    expect(element.querySelector('[data-testid="shared-secret-input"]')).toBeNull();
+    q<HTMLButtonElement>(element, 'shared-secret-change').click();
+    expect(spies.onSharedSecretChange).toHaveBeenCalled();
+    q<HTMLButtonElement>(element, 'shared-secret-clear').click();
+    expect(spies.onSharedSecretClear).toHaveBeenCalled();
+  });
+
+  it('設定済みで「変える」を押した後(sharedSecretEditing)は、入力欄と「保存」「やめる」を出す', () => {
+    const spies = handlers();
+    const element = renderSettings(
+      createInitialState([]),
+      { ...info(), hasSharedSecret: true, sharedSecretEditing: true },
+      spies,
+    );
+    expect(q(element, 'shared-secret-input')).not.toBeNull();
+    expect(q(element, 'shared-secret-save')).not.toBeNull();
+    expect(element.querySelector('[data-testid="shared-secret-status"]')).toBeNull();
+    expect(element.querySelector('[data-testid="shared-secret-change"]')).toBeNull();
+    q<HTMLButtonElement>(element, 'shared-secret-cancel').click();
+    expect(spies.onSharedSecretCancel).toHaveBeenCalled();
   });
 });

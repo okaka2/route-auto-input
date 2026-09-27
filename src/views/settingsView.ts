@@ -1,5 +1,6 @@
 import { APP_NAME, APP_VERSION } from '../appInfo';
 import { formatLastBackup } from '../backupReminder';
+import { MIN_PASSWORD_LENGTH } from '../crypto';
 import { formatDateOnly } from '../format';
 import type { Office } from '../routePlan';
 import { spotLabel } from '../spots';
@@ -24,6 +25,15 @@ export type SettingsInfo = {
    * チェックの状態が消えないようにする(Minor 7)。
    */
   includePhotos: boolean;
+  /** 事業所の合言葉が設定済みか。合言葉そのものの文字列はここに入れない。 */
+  hasSharedSecret: boolean;
+  /**
+   * 合言葉欄の入力中の値。includePhotosと同じやり方で、再描画をまたいでも消えないよう
+   * main.ts側の変数で持つ(Task 4)。
+   */
+  sharedSecretDraft: string;
+  /** 設定済みのときに「変える」を押して入力欄を出しているか(未設定なら常に入力欄を出す)。 */
+  sharedSecretEditing: boolean;
 };
 
 export type SettingsHandlers = {
@@ -38,9 +48,18 @@ export type SettingsHandlers = {
   onClearHistory(): void;
   /** お役立ち地点の一覧の「削除」。確認してから消す。 */
   onDeleteSpot(id: string): void;
+  /** 合言葉欄の入力のたび呼ばれる。draftだけの変更なので再描画はしない(includePhotosと同じ)。 */
+  onSharedSecretDraftChange(value: string): void;
+  onSharedSecretSave(value: string): void;
+  /** 「変える」。入力欄を出す。 */
+  onSharedSecretChange(): void;
+  /** 「消す」。確認してから消す。 */
+  onSharedSecretClear(): void;
+  /** 入力欄を出した後の「やめる」。入力欄を引っ込める。 */
+  onSharedSecretCancel(): void;
 };
 
-/** 設定画面。出発地・帰着地 → バックアップ → データの保存状態 → 表示 → このアプリについて の順。 */
+/** 設定画面。出発地・帰着地 → バックアップ → お役立ち地点 → 事業所の合言葉 → データの保存状態 → 表示 → このアプリについて の順。 */
 export function renderSettings(
   state: AppState,
   info: SettingsInfo,
@@ -61,6 +80,7 @@ export function renderSettings(
     renderOffice(info, handlers),
     renderBackup(info, handlers, now),
     renderSpots(info, handlers),
+    renderSharedSecret(info, handlers),
     renderProtection(info, handlers),
     renderTheme(info, handlers),
     renderAbout(),
@@ -191,6 +211,51 @@ function formatPhotoBytes(bytes: number): string {
     return '約0.1MB未満';
   }
   return `約${mb.toFixed(1)}MB`;
+}
+
+/**
+ * 「事業所の合言葉」: 引き継ぎファイルの暗号化・復号に自動で使うパスワード。
+ * 未設定、または「変える」を押した直後は入力欄を出す。設定済みで入力欄を出していないときは
+ * 「設定されています」とだけ表示し、合言葉そのものの文字列は画面に出さない。
+ */
+function renderSharedSecret(info: SettingsInfo, handlers: SettingsHandlers): HTMLElement {
+  const card = section('事業所の合言葉');
+  const note = document.createElement('p');
+  note.textContent =
+    '引き継ぎのファイルを送るとき・受け取るときに、自動で使うパスワードです。' +
+    `事業所の人どうしで同じものにしておくと、毎回入力しなくて済みます。${MIN_PASSWORD_LENGTH}文字以上。`;
+  card.append(note);
+
+  const editing = !info.hasSharedSecret || info.sharedSecretEditing;
+  if (editing) {
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.autocomplete = 'new-password';
+    input.value = info.sharedSecretDraft;
+    input.dataset.testid = 'shared-secret-input';
+    input.addEventListener('input', () => handlers.onSharedSecretDraftChange(input.value));
+    const buttons = document.createElement('div');
+    buttons.className = 'office-buttons';
+    buttons.append(button('shared-secret-save', '保存', 'primary', () => handlers.onSharedSecretSave(input.value)));
+    if (info.hasSharedSecret) {
+      buttons.append(button('shared-secret-cancel', 'やめる', '', () => handlers.onSharedSecretCancel()));
+    }
+    card.append(labelled('合言葉', input), buttons);
+  } else {
+    const status = document.createElement('p');
+    const value = document.createElement('strong');
+    value.dataset.testid = 'shared-secret-status';
+    value.textContent = '設定されています';
+    status.append(value);
+    const buttons = document.createElement('div');
+    buttons.className = 'office-buttons';
+    buttons.append(
+      button('shared-secret-change', '変える', '', () => handlers.onSharedSecretChange()),
+      button('shared-secret-clear', '消す', 'danger', () => handlers.onSharedSecretClear()),
+    );
+    card.append(status, buttons);
+  }
+  return card;
 }
 
 function renderProtection(info: SettingsInfo, handlers: SettingsHandlers): HTMLElement {

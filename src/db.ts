@@ -18,6 +18,8 @@ export type MetaValues = {
   lastBackupAt: string;
   office: Office;
   routeEnds: RouteEnds;
+  /** 引き継ぎファイルの暗号化・復号に自動で使う、事業所内で共有するパスワード。 */
+  sharedSecret: string;
 };
 
 /** 訪問の履歴。日付ごとに、選んだ人の順番と訪問済み時刻を保存する。 */

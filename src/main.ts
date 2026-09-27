@@ -2,6 +2,7 @@ import './styles.css';
 import type { AppContext } from './appContext';
 import { MAX_STOPS_PER_ROUTE } from './config';
 import { createBackupFlow } from './backupFlow';
+import { MIN_PASSWORD_LENGTH } from './crypto';
 import {
   addPhoto,
   clearHistory,
@@ -237,6 +238,9 @@ let settingsInfo: Omit<SettingsInfo, 'spots'> = {
   office: null,
   photoBytes: 0,
   includePhotos: true,
+  hasSharedSecret: false,
+  sharedSecretDraft: '',
+  sharedSecretEditing: false,
 };
 
 // 出発・帰着の選び方と事業所。起動時に loadRouteContext() で読み直す(Task 3 が使う)。
@@ -391,12 +395,19 @@ function requestProtectionOnce(): void {
  */
 async function loadSettingsInfo(): Promise<void> {
   try {
-    const [lastBackupAt, persisted, photoBytes] = await Promise.all([
+    const [lastBackupAt, persisted, photoBytes, sharedSecret] = await Promise.all([
       getMeta('lastBackupAt'),
       isStoragePersisted(),
       sumPhotoBytes(),
+      getMeta('sharedSecret'),
     ]);
-    settingsInfo = { ...settingsInfo, lastBackupAt: lastBackupAt ?? null, persisted, photoBytes };
+    settingsInfo = {
+      ...settingsInfo,
+      lastBackupAt: lastBackupAt ?? null,
+      persisted,
+      photoBytes,
+      hasSharedSecret: sharedSecret !== undefined,
+    };
   } catch {
     // 読み込みに失敗しても、アプリを止めない。今のsettingsInfoをそのまま使う
     // (お知らせはsettingsLoadedがtrueになった時点でlastBackupAt: nullとして出る)。
@@ -591,6 +602,33 @@ async function handleClearOffice(): Promise<void> {
     setState(withMessage(state, { kind: 'info', text: '事業所を消しました。' }));
   } catch {
     setState(withMessage(state, { kind: 'error', text: '事業所を消せませんでした。' }));
+  }
+}
+
+/** 設定の「事業所の合言葉」の「保存」。6文字未満なら保存せずメッセージだけ出す。 */
+async function handleSaveSharedSecret(value: string): Promise<void> {
+  if (value.trim().length < MIN_PASSWORD_LENGTH) {
+    setState(withMessage(state, { kind: 'error', text: `${MIN_PASSWORD_LENGTH}文字以上にしてください。` }));
+    return;
+  }
+  try {
+    await setMeta('sharedSecret', value);
+    settingsInfo = { ...settingsInfo, hasSharedSecret: true, sharedSecretDraft: '', sharedSecretEditing: false };
+    setState(withMessage(state, { kind: 'info', text: '事業所の合言葉を保存しました。' }));
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: '事業所の合言葉を保存できませんでした。' }));
+  }
+}
+
+/** 設定の「事業所の合言葉」の「消す」。確認してから消す。 */
+async function handleClearSharedSecret(): Promise<void> {
+  if (!window.confirm('事業所の合言葉を消しますか?')) return;
+  try {
+    await deleteMeta('sharedSecret');
+    settingsInfo = { ...settingsInfo, hasSharedSecret: false, sharedSecretDraft: '', sharedSecretEditing: false };
+    setState(withMessage(state, { kind: 'info', text: '事業所の合言葉を消しました。' }));
+  } catch {
+    setState(withMessage(state, { kind: 'error', text: '事業所の合言葉を消せませんでした。' }));
   }
 }
 
@@ -1624,6 +1662,24 @@ function renderScreen(): HTMLElement {
         },
         onDeleteSpot: (id) => {
           void handleDeleteSpot(id);
+        },
+        onSharedSecretDraftChange: (value) => {
+          // draftだけの変更なので再描画はしない(onIncludePhotosChangeと同じ)。
+          settingsInfo = { ...settingsInfo, sharedSecretDraft: value };
+        },
+        onSharedSecretSave: (value) => {
+          void handleSaveSharedSecret(value);
+        },
+        onSharedSecretChange: () => {
+          settingsInfo = { ...settingsInfo, sharedSecretEditing: true, sharedSecretDraft: '' };
+          render();
+        },
+        onSharedSecretClear: () => {
+          void handleClearSharedSecret();
+        },
+        onSharedSecretCancel: () => {
+          settingsInfo = { ...settingsInfo, sharedSecretEditing: false, sharedSecretDraft: '' };
+          render();
         },
       });
     case 'history':

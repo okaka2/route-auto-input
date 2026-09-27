@@ -1536,6 +1536,90 @@ describe('事業所の登録', () => {
   });
 });
 
+describe('事業所の合言葉', () => {
+  it('保存するとDBに残り、画面には「設定されています」とだけ出て、合言葉そのものはどこにも出ない', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="shared-secret-input"]')).not.toBeNull());
+    const input = el<HTMLInputElement>('[data-testid="shared-secret-input"]')!;
+    input.value = 'ひみつのあいことば';
+    input.dispatchEvent(new Event('input'));
+    el<HTMLButtonElement>('[data-testid="shared-secret-save"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('事業所の合言葉を保存しました'));
+    const db = await import('../src/db');
+    expect(await db.getMeta('sharedSecret')).toBe('ひみつのあいことば');
+    expect(el('[data-testid="shared-secret-status"]')?.textContent).toBe('設定されています');
+    expect(document.body.innerHTML).not.toContain('ひみつのあいことば');
+  });
+
+  it('6文字未満なら保存せず「6文字以上にしてください。」を出す', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="shared-secret-input"]')).not.toBeNull());
+    const input = el<HTMLInputElement>('[data-testid="shared-secret-input"]')!;
+    input.value = 'abcd';
+    input.dispatchEvent(new Event('input'));
+    el<HTMLButtonElement>('[data-testid="shared-secret-save"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('6文字以上にしてください'));
+    const db = await import('../src/db');
+    expect(await db.getMeta('sharedSecret')).toBeUndefined();
+  });
+
+  it('「変える」で入力欄を出して保存し直せる。「やめる」は保存せず引っ込める', async () => {
+    const { setMeta, closeDbForTest } = await import('../src/db');
+    await setMeta('sharedSecret', 'もとのあいことば');
+    await closeDbForTest();
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="shared-secret-status"]')?.textContent).toBe('設定されています'));
+
+    el<HTMLButtonElement>('[data-testid="shared-secret-change"]')!.click();
+    await waitFor(() => expect(el('[data-testid="shared-secret-input"]')).not.toBeNull());
+    expect(el('[data-testid="shared-secret-cancel"]')).not.toBeNull();
+
+    el<HTMLButtonElement>('[data-testid="shared-secret-cancel"]')!.click();
+    await waitFor(() => expect(el('[data-testid="shared-secret-status"]')?.textContent).toBe('設定されています'));
+    const db = await import('../src/db');
+    expect(await db.getMeta('sharedSecret')).toBe('もとのあいことば');
+
+    el<HTMLButtonElement>('[data-testid="shared-secret-change"]')!.click();
+    await waitFor(() => expect(el('[data-testid="shared-secret-input"]')).not.toBeNull());
+    const input = el<HTMLInputElement>('[data-testid="shared-secret-input"]')!;
+    input.value = 'あたらしいあいことば';
+    input.dispatchEvent(new Event('input'));
+    el<HTMLButtonElement>('[data-testid="shared-secret-save"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('事業所の合言葉を保存しました'));
+    expect(await db.getMeta('sharedSecret')).toBe('あたらしいあいことば');
+  });
+
+  it('「消す」は確認してから消す(cancel/confirm)', async () => {
+    const { setMeta, closeDbForTest } = await import('../src/db');
+    await setMeta('sharedSecret', 'きえるあいことば');
+    await closeDbForTest();
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="shared-secret-clear"]')).not.toBeNull());
+
+    const db = await import('../src/db');
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    el<HTMLButtonElement>('[data-testid="shared-secret-clear"]')!.click();
+    expect(window.confirm).toHaveBeenCalledWith('事業所の合言葉を消しますか?');
+    expect(await db.getMeta('sharedSecret')).toBe('きえるあいことば');
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="shared-secret-clear"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('事業所の合言葉を消しました'));
+    expect(await db.getMeta('sharedSecret')).toBeUndefined();
+    expect(el('[data-testid="shared-secret-input"]')).not.toBeNull();
+  });
+});
+
 describe('履歴から選ぶ', () => {
   it('地図を開くと今日の記録ができ、履歴の画面から同じ人を選び直せる', async () => {
     await import('../src/main');

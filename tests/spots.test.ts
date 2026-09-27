@@ -304,6 +304,11 @@ describe('設定画面: お役立ち地点', () => {
       onClearOffice: vi.fn(),
       onClearHistory: vi.fn(),
       onDeleteSpot: vi.fn(),
+      onSharedSecretDraftChange: vi.fn(),
+      onSharedSecretSave: vi.fn(),
+      onSharedSecretChange: vi.fn(),
+      onSharedSecretClear: vi.fn(),
+      onSharedSecretCancel: vi.fn(),
     };
   }
   const info = (spots: Spot[]): SettingsInfo => ({
@@ -314,6 +319,9 @@ describe('設定画面: お役立ち地点', () => {
     spots,
     photoBytes: 0,
     includePhotos: true,
+    hasSharedSecret: false,
+    sharedSecretDraft: '',
+    sharedSecretEditing: false,
   });
 
   it('空なら案内文を出す', () => {
