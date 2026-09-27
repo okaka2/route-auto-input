@@ -4,6 +4,8 @@ export type SelectionBarHandlers = {
   onDeleteSelected(): void;
   /** 「N件選択中」を押したとき。一覧を「選択中」の表示に切り替える。 */
   onShowSelected(): void;
+  /** 選択中の全員を送るダイアログを開く。 */
+  onSend(): void;
 };
 
 /**
@@ -38,6 +40,13 @@ export function renderSelectionBar(
   deleteButton.textContent = '削除';
   deleteButton.addEventListener('click', () => handlers.onDeleteSelected());
 
+  const sendButton = document.createElement('button');
+  sendButton.type = 'button';
+  sendButton.className = 'send-button';
+  sendButton.dataset.testid = 'send-selected-button';
+  sendButton.textContent = '送る';
+  sendButton.addEventListener('click', () => handlers.onSend());
+
   const next = document.createElement('button');
   next.type = 'button';
   next.className = 'primary';
@@ -47,7 +56,7 @@ export function renderSelectionBar(
 
   const actions = document.createElement('div');
   actions.className = 'selection-actions';
-  actions.append(deleteButton, next);
+  actions.append(deleteButton, sendButton, next);
 
   bar.append(label, actions);
   return bar;

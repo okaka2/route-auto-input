@@ -408,6 +408,11 @@ a.disabled {
   gap: 0.5rem;
 }
 
+/* 削除・送る・訪問順を決める、の3つが375px幅でも収まるよう、送るボタンだけ左右の余白を詰める。 */
+.selection-actions .send-button {
+  padding: 0 0.75rem;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -617,6 +622,25 @@ button.select-all {
 .sheet-buttons button {
   flex: 1;
   min-height: var(--tap-primary);
+}
+
+/* ===== 送るダイアログ ===== */
+.transfer-warning {
+  font-weight: 700;
+}
+
+.transfer-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.transfer-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap-min);
 }
 
 /* ===== 位置の登録ダイアログ ===== */

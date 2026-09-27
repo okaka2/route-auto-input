@@ -76,6 +76,22 @@ export type SpotDialog = {
   note: string;
 };
 
+/** 送るダイアログ。patientIds が空なら、お役立ち地点だけを送る。 */
+export type TransferSendDialog = {
+  kind: 'transferSend';
+  patientIds: string[]; // 空ならお役立ち地点だけを送る
+  includePhotos: boolean; // 既定 true(写真がある人がいるときだけ選べる)
+  includeSpots: boolean; // 既定: patientIds が空なら true、そうでなければ false
+  useSharedSecret: boolean; // 合言葉が保存されていれば既定 true
+  password: string;
+  passwordConfirm: string;
+  saveAsShared: boolean; // 「この合言葉を事業所の合言葉として保存する」
+  phase: 'form' | 'working' | 'done';
+  error: string | null;
+  /** phase: 'done' のときだけ意味を持つ。共有できた(true)かダウンロードした(false)かで、文言を出し分ける。 */
+  shared: boolean;
+};
+
 /** 開いているダイアログ。1件向けは対象の訪問先のidを、複数選択の一括削除は件数を持たない(state.selectedIdsを見る)。 */
 export type Dialog =
   | { kind: 'rowMenu'; id: string }
@@ -91,7 +107,8 @@ export type Dialog =
     }
   | LocationDialog
   | SpotDialog
-  | { kind: 'photos'; patientId: string; urls: string[]; index: number };
+  | { kind: 'photos'; patientId: string; urls: string[]; index: number }
+  | TransferSendDialog;
 
 export type AppState = {
   screen: Screen;

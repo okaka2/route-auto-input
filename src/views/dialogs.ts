@@ -1,7 +1,8 @@
 import { installSteps } from '../installHint';
 import { installPlatform } from '../platform';
-import type { AppState, Dialog, Patient, SpotKind } from '../types';
+import type { AppState, Dialog, Patient, SpotKind, TransferSendDialog } from '../types';
 import { renderLocationDialog, renderSpotDialog } from './locationDialog';
+import { renderTransferSendDialog } from './transferDialog';
 
 export type DialogHandlers = {
   onEdit(id: string): void;
@@ -22,6 +23,8 @@ export type DialogHandlers = {
   onOpenExisting(id: string): void;
   /** 一覧の「⋯」: 位置の登録・確認ダイアログを開く。 */
   onOpenLocation(id: string): void;
+  /** 一覧の「⋯」: 送るダイアログを開く。 */
+  onOpenSend(id: string): void;
   /** 位置の登録: 今いる場所の測定を始める/やり直す。 */
   onStartMeasuring(): void;
   /** 位置の登録: 測った位置で登録する。 */
@@ -44,6 +47,17 @@ export type DialogHandlers = {
   onSaveSpot(): void;
   /** 写真のダイアログ: 前/次へ切り替える(表示中のindexを変える)。 */
   onPhotoIndex(index: number): void;
+  /** 送るダイアログ: 入力欄・チェックボックスの変更。 */
+  onSendDraft(
+    patch: Partial<
+      Pick<
+        TransferSendDialog,
+        'includePhotos' | 'includeSpots' | 'useSharedSecret' | 'password' | 'passwordConfirm' | 'saveAsShared'
+      >
+    >,
+  ): void;
+  /** 送るダイアログ: 「送る」を押した。 */
+  onSubmit(): void;
   onClose(): void;
 };
 
@@ -58,7 +72,11 @@ export type DialogHandlers = {
  * フォーカスの移動(開いたら最初のボタン、閉じたら「⋯」へ戻す)と、Escキーで閉じる処理は、
  * 画面全体を描き直す main.ts の側で行う。ここではTabキーの巡回だけを面倒みる。
  */
-export function renderDialog(state: AppState, handlers: DialogHandlers): HTMLElement | null {
+export function renderDialog(
+  state: AppState,
+  handlers: DialogHandlers,
+  extra: { photoCounts?: ReadonlyMap<string, number>; spotCount?: number; hasSharedSecret?: boolean } = {},
+): HTMLElement | null {
   const dialog = state.dialog;
   if (dialog === null) {
     return null;
@@ -75,6 +93,19 @@ export function renderDialog(state: AppState, handlers: DialogHandlers): HTMLEle
     content = renderPhotos(dialog, handlers);
   } else if (dialog.kind === 'spot') {
     content = renderSpotDialog(dialog, handlers);
+  } else if (dialog.kind === 'transferSend') {
+    const patients = dialog.patientIds
+      .map((id) => state.patients.find((patient) => patient.id === id))
+      .filter((patient): patient is Patient => patient !== undefined);
+    const hasPhotoCandidates = patients.some((patient) => (extra.photoCounts?.get(patient.id) ?? 0) > 0);
+    content = renderTransferSendDialog(
+      dialog,
+      patients,
+      hasPhotoCandidates,
+      extra.spotCount ?? 0,
+      extra.hasSharedSecret ?? false,
+      handlers,
+    );
   } else {
     const patient = state.patients.find((item) => item.id === dialog.id);
     if (patient === undefined) {
@@ -129,6 +160,11 @@ function renderMenu(patient: Patient, handlers: DialogHandlers): HTMLElement[] {
       testid: 'dialog-location',
       label: patient.location ? '位置を確かめる・やり直す' : '位置を登録',
       onClick: () => handlers.onOpenLocation(patient.id),
+    },
+    {
+      testid: 'dialog-send',
+      label: 'この訪問先を送る',
+      onClick: () => handlers.onOpenSend(patient.id),
     },
     {
       testid: 'dialog-delete',

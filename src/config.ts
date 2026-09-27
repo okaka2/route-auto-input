@@ -14,3 +14,11 @@ export const MAX_SELECTION = 30;
 
 /** 訪問先1件につき登録できる写真の枚数。 */
 export const MAX_PHOTOS_PER_PATIENT = 3;
+
+/**
+ * 引き継ぎファイルの暗号化・事業所の合言葉に使う、パスワードの最短の長さ。
+ * crypto.ts ではなくここに置くことで、暗号化(Web Crypto)そのものを使わない画面
+ * (設定・送るダイアログの文言・検証)が、暗号化のコードを読み込まずに済むようにする
+ * (crypto.tsの中身はビルドで別チャンクに分かれる)。
+ */
+export const MIN_PASSWORD_LENGTH = 6;

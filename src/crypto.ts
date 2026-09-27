@@ -6,7 +6,8 @@
 
 export const TRANSFER_FORMAT = 'houmon-transfer';
 export const PBKDF2_ITERATIONS = 200_000;
-export const MIN_PASSWORD_LENGTH = 6;
+// パスワードの最短の長さ(MIN_PASSWORD_LENGTH)は config.ts にある(このファイルが
+// 別チャンクに分かれるようにするため。config.ts のコメントを参照)。
 
 /** ホスト側の異常なファイルで止まらないように、回数の上限を決めておく。 */
 const MAX_ITERATIONS = 10_000_000;

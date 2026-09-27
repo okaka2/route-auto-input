@@ -10,7 +10,7 @@ import {
   setSearchQuery,
   toggleSelection,
 } from '../src/state';
-import type { AppState, LocationDialog, Patient, Spot, SpotDialog } from '../src/types';
+import type { AppState, LocationDialog, Patient, Spot, SpotDialog, TransferSendDialog } from '../src/types';
 import { validatePatientInput, validateSelection } from '../src/validation';
 import { googleMapsProvider } from '../src/mapProviders';
 import type { HistoryEntry } from '../src/db';
@@ -60,6 +60,7 @@ const dialogHandlers = {
   onSaveAnyway: noop,
   onOpenExisting: noop,
   onOpenLocation: noop,
+  onOpenSend: noop,
   onStartMeasuring: noop,
   onSaveMeasured: noop,
   onPasteChange: noop,
@@ -71,6 +72,8 @@ const dialogHandlers = {
   onComposingChange: noop,
   onSaveSpot: noop,
   onPhotoIndex: noop,
+  onSendDraft: noop,
+  onSubmit: noop,
   onClose: noop,
 };
 
@@ -289,6 +292,7 @@ describe('画面の文言(禁止語が出ない)', () => {
       onClearOffice: noop,
       onClearHistory: noop,
       onDeleteSpot: noop,
+      onSendSpots: noop,
       onSharedSecretDraftChange: noop,
       onSharedSecretSave: noop,
       onSharedSecretChange: noop,
@@ -375,7 +379,7 @@ describe('画面の文言(禁止語が出ない)', () => {
     expectClean('タブ', renderTabBar('list', true, { onSelect: noop }).outerHTML);
     expectClean(
       '選択バー',
-      renderSelectionBar(3, { onNext: noop, onDeleteSelected: noop, onShowSelected: noop })!.outerHTML,
+      renderSelectionBar(3, { onNext: noop, onDeleteSelected: noop, onShowSelected: noop, onSend: noop })!.outerHTML,
     );
   });
 
@@ -503,6 +507,44 @@ describe('画面の文言(禁止語が出ない)', () => {
     spotPhases.forEach((phase, index) => {
       expectClean(`お役立ち地点の登録#${index}`, renderDialog(withState(phase), dialogHandlers)!.outerHTML);
     });
+  });
+
+  it('送るダイアログ: 全phase・地点だけ/訪問先あり・写真候補あり/なし・合言葉あり/なし', () => {
+    const patients = places(2);
+    const withDialog = (dialog: TransferSendDialog): AppState => ({ ...createInitialState(patients), dialog });
+    const base = (overrides: Partial<TransferSendDialog> = {}): TransferSendDialog => ({
+      kind: 'transferSend',
+      patientIds: [patients[0]!.id],
+      includePhotos: true,
+      includeSpots: false,
+      useSharedSecret: false,
+      password: '',
+      passwordConfirm: '',
+      saveAsShared: false,
+      phase: 'form',
+      error: null,
+      shared: false,
+      ...overrides,
+    });
+    const cases: [
+      string,
+      TransferSendDialog,
+      { photoCounts?: Map<string, number>; spotCount?: number; hasSharedSecret?: boolean },
+    ][] = [
+      ['通常', base(), {}],
+      ['写真候補あり', base(), { photoCounts: new Map([[patients[0]!.id, 1]]) }],
+      ['地点あり(訪問先を送る)', base(), { spotCount: 2 }],
+      ['合言葉あり(オン)', base({ useSharedSecret: true }), { hasSharedSecret: true }],
+      ['合言葉ありだがオフ', base({ useSharedSecret: false }), { hasSharedSecret: true }],
+      ['地点だけを送る', base({ patientIds: [], includeSpots: true }), {}],
+      ['送信中', base({ phase: 'working' }), {}],
+      ['完了(共有できた)', base({ phase: 'done', shared: true }), {}],
+      ['完了(保存した)', base({ phase: 'done', shared: false }), {}],
+      ['エラーあり', base({ error: 'パスワードは6文字以上にしてください。' }), {}],
+    ];
+    for (const [label, dialog, extra] of cases) {
+      expectClean(`送るダイアログ(${label})`, renderDialog(withDialog(dialog), dialogHandlers, extra)!.outerHTML);
+    }
   });
 
   it('検証メッセージ', () => {

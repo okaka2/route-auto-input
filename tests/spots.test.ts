@@ -112,6 +112,7 @@ function dialogHandlers(): DialogHandlers {
     onSaveAnyway: vi.fn(),
     onOpenExisting: vi.fn(),
     onOpenLocation: vi.fn(),
+    onOpenSend: vi.fn(),
     onStartMeasuring: vi.fn(),
     onSaveMeasured: vi.fn(),
     onPasteChange: vi.fn(),
@@ -123,6 +124,8 @@ function dialogHandlers(): DialogHandlers {
     onComposingChange: vi.fn(),
     onSaveSpot: vi.fn(),
     onPhotoIndex: vi.fn(),
+    onSendDraft: vi.fn(),
+    onSubmit: vi.fn(),
     onClose: vi.fn(),
   };
 }
@@ -304,6 +307,7 @@ describe('設定画面: お役立ち地点', () => {
       onClearOffice: vi.fn(),
       onClearHistory: vi.fn(),
       onDeleteSpot: vi.fn(),
+      onSendSpots: vi.fn(),
       onSharedSecretDraftChange: vi.fn(),
       onSharedSecretSave: vi.fn(),
       onSharedSecretChange: vi.fn(),
@@ -342,5 +346,24 @@ describe('設定画面: お役立ち地点', () => {
     expect(el.textContent).toContain('トイレ・メモ(9/25 登録)');
     q<HTMLButtonElement>(el, 'spot-delete')!.click();
     expect(spies.onDeleteSpot).toHaveBeenCalledWith('s1');
+  });
+
+  it('地点が1件以上あれば「お役立ち地点を送る」を出し、押すと onSendSpots が呼ばれる', () => {
+    const spot: Spot = {
+      id: 's1',
+      kind: 'toilet',
+      note: '',
+      location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-09-25T00:00:00.000Z', source: 'gps' },
+      createdAt: '2026-09-25T00:00:00.000Z',
+    };
+    const spies = settingsHandlers();
+    const el = renderSettings(createInitialState([]), info([spot]), spies);
+    q<HTMLButtonElement>(el, 'send-spots-button')!.click();
+    expect(spies.onSendSpots).toHaveBeenCalledTimes(1);
+  });
+
+  it('地点が0件なら「お役立ち地点を送る」を出さない', () => {
+    const el = renderSettings(createInitialState([]), info([]), settingsHandlers());
+    expect(q(el, 'send-spots-button')).toBeNull();
   });
 });

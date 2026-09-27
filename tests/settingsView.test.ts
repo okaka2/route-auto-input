@@ -13,6 +13,7 @@ const handlers = (): SettingsHandlers => ({
   onClearOffice: vi.fn(),
   onClearHistory: vi.fn(),
   onDeleteSpot: vi.fn(),
+  onSendSpots: vi.fn(),
   onSharedSecretDraftChange: vi.fn(),
   onSharedSecretSave: vi.fn(),
   onSharedSecretChange: vi.fn(),

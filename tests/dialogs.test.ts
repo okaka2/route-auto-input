@@ -21,6 +21,7 @@ const handlers = (): DialogHandlers => ({
   onSaveAnyway: vi.fn(),
   onOpenExisting: vi.fn(),
   onOpenLocation: vi.fn(),
+  onOpenSend: vi.fn(),
   onStartMeasuring: vi.fn(),
   onSaveMeasured: vi.fn(),
   onPasteChange: vi.fn(),
@@ -32,6 +33,8 @@ const handlers = (): DialogHandlers => ({
   onComposingChange: vi.fn(),
   onSaveSpot: vi.fn(),
   onPhotoIndex: vi.fn(),
+  onSendDraft: vi.fn(),
+  onSubmit: vi.fn(),
   onClose: vi.fn(),
 });
 
@@ -62,13 +65,24 @@ describe('renderDialog: 「⋯」メニュー', () => {
     expect(open().querySelector('#dialog-title')?.textContent).toBe('山田 太郎');
   });
 
-  it('編集・複製して登録・位置を登録・削除・キャンセルの5つのボタンを、この順に出す', () => {
+  it('編集・複製して登録・位置を登録・送る・削除・キャンセルの6つのボタンを、この順に出す', () => {
     const element = open();
-    const labels = ['dialog-edit', 'dialog-duplicate', 'dialog-location', 'dialog-delete', 'dialog-cancel'].map(
-      (testid) => button(element, testid).textContent,
-    );
-    expect(labels).toEqual(['編集', '複製して登録', '位置を登録', '削除', 'キャンセル']);
-    expect([...element.querySelectorAll('button')]).toHaveLength(5);
+    const labels = [
+      'dialog-edit',
+      'dialog-duplicate',
+      'dialog-location',
+      'dialog-send',
+      'dialog-delete',
+      'dialog-cancel',
+    ].map((testid) => button(element, testid).textContent);
+    expect(labels).toEqual(['編集', '複製して登録', '位置を登録', 'この訪問先を送る', '削除', 'キャンセル']);
+    expect([...element.querySelectorAll('button')]).toHaveLength(6);
+  });
+
+  it('送るを押すと、訪問先のidつきで onOpenSend が呼ばれる', () => {
+    const spies = handlers();
+    button(open(spies), 'dialog-send').click();
+    expect(spies.onOpenSend).toHaveBeenCalledWith(patient.id);
   });
 
   it('削除ボタンは赤(danger)で表示する', () => {

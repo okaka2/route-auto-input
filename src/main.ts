@@ -1,8 +1,8 @@
 import './styles.css';
 import type { AppContext } from './appContext';
-import { MAX_STOPS_PER_ROUTE } from './config';
+import { MAX_STOPS_PER_ROUTE, MIN_PASSWORD_LENGTH } from './config';
 import { createBackupFlow } from './backupFlow';
-import { MIN_PASSWORD_LENGTH } from './crypto';
+import { createTransferFlow } from './transferFlow';
 import {
   addPhoto,
   clearHistory,
@@ -659,6 +659,12 @@ function setState(next: AppState, options?: { render?: boolean }): void {
   const previousDialog = state.dialog;
   const previousScreen = state.screen;
   state = next;
+  // 設定画面を離れるときは、合言葉の入力中の内容(sharedSecretDraft)と「変える」で
+  // 出した入力欄(sharedSecretEditing)を引きずらない。次に設定画面を開いたときに
+  // 前回の入力が残っていたり、未設定なのに入力欄が引っ込んだままになるのを防ぐ。
+  if (next.screen.name !== 'settings' && (settingsInfo.sharedSecretDraft !== '' || settingsInfo.sharedSecretEditing)) {
+    settingsInfo = { ...settingsInfo, sharedSecretDraft: '', sharedSecretEditing: false };
+  }
   if (stopMeasuring !== null) {
     const stillSameMeasuring =
       previousDialog !== null &&
@@ -790,6 +796,7 @@ const ctx: AppContext = {
   confirm: (question) => window.confirm(question),
 };
 const backupFlow = createBackupFlow(ctx);
+const transferFlow = createTransferFlow(ctx);
 
 function currentEditingPatient(): Patient | null {
   const screen = state.screen;
@@ -1663,6 +1670,9 @@ function renderScreen(): HTMLElement {
         onDeleteSpot: (id) => {
           void handleDeleteSpot(id);
         },
+        onSendSpots: () => {
+          void transferFlow.openSend([], { spotsOnly: true });
+        },
         onSharedSecretDraftChange: (value) => {
           // draftだけの変更なので再描画はしない(onIncludePhotosChangeと同じ)。
           settingsInfo = { ...settingsInfo, sharedSecretDraft: value };
@@ -1713,6 +1723,9 @@ function renderApp(): HTMLElement {
             onNext: handleNext,
             onDeleteSelected: handleRequestDeleteSelected,
             onShowSelected: () => setState(setListFilter(state, 'selected')),
+            onSend: () => {
+              void transferFlow.openSend(state.selectedIds);
+            },
           })
         : null;
     // 固定バーに、内容の最後が隠れないよう、余白を取るクラスを付ける。
@@ -1759,6 +1772,9 @@ function renderApp(): HTMLElement {
       void loadFormPhotos(id);
     },
     onOpenLocation: openLocation,
+    onOpenSend: (id) => {
+      void transferFlow.openSend([id]);
+    },
     onStartMeasuring: () => {
       void startMeasure();
     },
@@ -1778,8 +1794,12 @@ function renderApp(): HTMLElement {
       void saveSpot();
     },
     onPhotoIndex: setPhotoIndex,
+    onSendDraft: (patch) => transferFlow.updateSendDraft(patch),
+    onSubmit: () => {
+      void transferFlow.submitSend();
+    },
     onClose: closeAnyDialog,
-  });
+  }, { photoCounts, spotCount: spots.length, hasSharedSecret: settingsInfo.hasSharedSecret });
   if (dialog) {
     shell.append(dialog);
   }

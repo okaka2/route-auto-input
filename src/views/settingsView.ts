@@ -1,6 +1,6 @@
 import { APP_NAME, APP_VERSION } from '../appInfo';
 import { formatLastBackup } from '../backupReminder';
-import { MIN_PASSWORD_LENGTH } from '../crypto';
+import { MIN_PASSWORD_LENGTH } from '../config';
 import { formatDateOnly } from '../format';
 import type { Office } from '../routePlan';
 import { spotLabel } from '../spots';
@@ -48,6 +48,8 @@ export type SettingsHandlers = {
   onClearHistory(): void;
   /** お役立ち地点の一覧の「削除」。確認してから消す。 */
   onDeleteSpot(id: string): void;
+  /** お役立ち地点だけを送るダイアログを開く。 */
+  onSendSpots(): void;
   /** 合言葉欄の入力のたび呼ばれる。draftだけの変更なので再描画はしない(includePhotosと同じ)。 */
   onSharedSecretDraftChange(value: string): void;
   onSharedSecretSave(value: string): void;
@@ -109,7 +111,7 @@ function renderSpots(info: SettingsInfo, handlers: SettingsHandlers): HTMLElemen
     item.append(text, button('spot-delete', '削除', 'danger', () => handlers.onDeleteSpot(spot.id)));
     list.append(item);
   }
-  card.append(list);
+  card.append(list, button('send-spots-button', 'お役立ち地点を送る', '', () => handlers.onSendSpots()));
   return card;
 }
 

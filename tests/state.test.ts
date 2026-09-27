@@ -380,6 +380,46 @@ describe('ダイアログの状態', () => {
     const next = withPatients(opened, [patients[1]!]);
     expect(next.dialog).toBeNull();
   });
+
+  function transferDialog(patientIds: string[]) {
+    return {
+      kind: 'transferSend' as const,
+      patientIds,
+      includePhotos: true,
+      includeSpots: patientIds.length === 0,
+      useSharedSecret: false,
+      password: '',
+      passwordConfirm: '',
+      saveAsShared: false,
+      phase: 'form' as const,
+      error: null,
+      shared: false,
+    };
+  }
+
+  it('送るダイアログは、対象の訪問先が1人でも残っていれば、消えた人だけpatientIdsから外して開いたまま', () => {
+    const patients = makePatients(3);
+    const dialog = transferDialog([patients[0]!.id, patients[1]!.id]);
+    const opened = { ...createInitialState(patients), dialog };
+    const next = withPatients(opened, [patients[0]!, patients[2]!]);
+    expect(next.dialog).toEqual({ ...dialog, patientIds: [patients[0]!.id] });
+  });
+
+  it('送るダイアログは、対象の訪問先が全員いなくなれば閉じる', () => {
+    const patients = makePatients(2);
+    const dialog = transferDialog([patients[0]!.id]);
+    const opened = { ...createInitialState(patients), dialog };
+    const next = withPatients(opened, [patients[1]!]);
+    expect(next.dialog).toBeNull();
+  });
+
+  it('送るダイアログは、お役立ち地点だけ(patientIdsが空)なら、読み直しでは閉じない', () => {
+    const patients = makePatients(2);
+    const dialog = transferDialog([]);
+    const opened = { ...createInitialState(patients), dialog };
+    const next = withPatients(opened, []);
+    expect(next.dialog).toEqual(dialog);
+  });
 });
 
 describe('hasSelection', () => {

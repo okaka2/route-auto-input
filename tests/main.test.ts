@@ -1620,6 +1620,240 @@ describe('事業所の合言葉', () => {
   });
 });
 
+describe('送る', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function fillPassword(password: string): void {
+    const input = el<HTMLInputElement>('[data-testid="transfer-password"]')!;
+    input.value = password;
+    input.dispatchEvent(new Event('input'));
+    const confirmInput = el<HTMLInputElement>('[data-testid="transfer-password-confirm"]')!;
+    confirmInput.value = password;
+    confirmInput.dispatchEvent(new Event('input'));
+  }
+
+  it('一覧の「⋯」から1人を送ると、共有の偽物に渡ったFileが暗号化されており、同じパスワードで名前・メモ・位置・写真が読める', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = {
+      ...createPatient('山田 太郎', '東京都千代田区1-1'),
+      note: '駐車場は裏手にあります',
+      location: {
+        lat: 35.68,
+        lng: 139.76,
+        accuracy: 10,
+        recordedAt: '2026-09-22T00:00:00.000Z',
+        source: 'gps' as const,
+      },
+    };
+    await db.savePatient(patient);
+    // fake-indexeddb はBlobをstructuredCloneすると中身が失われることがあるため、
+    // 本物のBlobを持つ写真をlistPhotosの戻りとして直接与える(バックアップの結合テストと同じやり方)。
+    vi.spyOn(db, 'listPhotos').mockResolvedValue([
+      { id: 'photo-1', patientId: patient.id, blob: new Blob(['x'], { type: 'image/jpeg' }), createdAt: 't1' },
+    ]);
+
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+
+    fillPassword('abcdef');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const file = share.mock.calls[0]![0].files[0] as File;
+    expect(file.type).toBe('text/plain');
+    const text = await file.text();
+    expect(text).not.toContain('山田 太郎');
+
+    const { decryptText } = await import('../src/crypto');
+    const { parsePayload } = await import('../src/transfer');
+    const payload = parsePayload(await decryptText(text, 'abcdef'));
+    expect(payload.patients).toHaveLength(1);
+    expect(payload.patients[0]!.name).toBe('山田 太郎');
+    expect(payload.patients[0]!.note).toBe('駐車場は裏手にあります');
+    expect(payload.patients[0]!.location?.lat).toBe(35.68);
+    expect(payload.photos).toHaveLength(1);
+
+    await waitFor(() => expect(el('[data-testid="transfer-done-text"]')?.textContent).toBe('送りました。'));
+  }, 10_000);
+
+  it('パスワードが6文字未満なら、送らずエラーを出す', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+    const share = vi.fn();
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+    fillPassword('abc');
+
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    expect(el('.message')?.textContent).toContain('6文字以上にしてください');
+    expect(share).not.toHaveBeenCalled();
+  });
+
+  it('確認用パスワードが一致しなければ、送らずエラーを出す', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+    el<HTMLInputElement>('[data-testid="transfer-password"]')!.value = 'abcdef';
+    el('[data-testid="transfer-password"]')!.dispatchEvent(new Event('input'));
+    el<HTMLInputElement>('[data-testid="transfer-password-confirm"]')!.value = 'abcdeg';
+    el('[data-testid="transfer-password-confirm"]')!.dispatchEvent(new Event('input'));
+
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    expect(el('.message')?.textContent).toContain('確認のパスワードが一致しません');
+  });
+
+  it('確認で「キャンセル」なら、何も送らずformのまま', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+    const share = vi.fn();
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+    fillPassword('abcdef');
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    // パスワードの判定(getMeta呼び出し等)がPromiseを1回挟むため、確認ダイアログの
+    // window.confirm はクリックと同じタックでは呼ばれない。呼ばれるまで待つ。
+    await waitFor(() => expect(window.confirm).toHaveBeenCalled());
+    expect(share).not.toHaveBeenCalled();
+    expect(el('[data-testid="transfer-send-button"]')).not.toBeNull();
+  });
+
+  it('事業所の合言葉が保存されていれば、それを使って送れる(パスワード欄は出ない)', async () => {
+    const db = await import('../src/db');
+    await db.setMeta('sharedSecret', 'jimusho-no-aikotoba');
+    await db.closeDbForTest();
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-use-shared"]')).not.toBeNull());
+    expect(el<HTMLInputElement>('[data-testid="transfer-use-shared"]')!.checked).toBe(true);
+    expect(el('[data-testid="transfer-password"]')).toBeNull();
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const file = share.mock.calls[0]![0].files[0] as File;
+    const { decryptText } = await import('../src/crypto');
+    await expect(decryptText(await file.text(), 'jimusho-no-aikotoba')).resolves.toEqual(expect.any(String));
+  }, 10_000);
+
+  it('設定のお役立ち地点から、地点だけを送れる', async () => {
+    const db = await import('../src/db');
+    await db.putSpot({
+      id: 'spot-1',
+      kind: 'toilet',
+      note: 'きれいなトイレ',
+      location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-09-22T00:00:00.000Z', source: 'gps' },
+      createdAt: '2026-09-22T00:00:00.000Z',
+    });
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="send-spots-button"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="send-spots-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+    expect(el('#dialog-title')?.textContent).toBe('お役立ち地点を送る');
+    fillPassword('abcdef');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const file = share.mock.calls[0]![0].files[0] as File;
+    const { decryptText } = await import('../src/crypto');
+    const { parsePayload } = await import('../src/transfer');
+    const payload = parsePayload(await decryptText(await file.text(), 'abcdef'));
+    expect(payload.patients).toHaveLength(0);
+    expect(payload.spots).toHaveLength(1);
+    expect(payload.spots[0]!.note).toBe('きれいなトイレ');
+  }, 10_000);
+
+  it('選択バーの「送る」で、選択中の全員を送れる', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const a = createPatient('山田 太郎', '東京都千代田区1-1');
+    const b = createPatient('鈴木 花子', '東京都千代田区2-2');
+    await db.savePatient(a);
+    await db.savePatient(b);
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${a.id}"]`)!.click();
+    el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${b.id}"]`)!.click();
+
+    await waitFor(() => expect(el('[data-testid="send-selected-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="send-selected-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+    expect(el('#dialog-title')?.textContent).toBe('山田 太郎様ほか1人を送る');
+    fillPassword('abcdef');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const file = share.mock.calls[0]![0].files[0] as File;
+    const { decryptText } = await import('../src/crypto');
+    const { parsePayload } = await import('../src/transfer');
+    const payload = parsePayload(await decryptText(await file.text(), 'abcdef'));
+    expect(payload.patients).toHaveLength(2);
+  }, 10_000);
+});
+
 describe('履歴から選ぶ', () => {
   it('地図を開くと今日の記録ができ、履歴の画面から同じ人を選び直せる', async () => {
     await import('../src/main');

@@ -58,6 +58,18 @@ function keepDialog(
     // お役立ち地点は特定の訪問先に紐づかないので、読み直しでは閉じない。
     return dialog;
   }
+  if (dialog.kind === 'transferSend') {
+    // お役立ち地点だけを送る(patientIdsが空)なら、閉じない。訪問先を送るときは、
+    // 消えた分をpatientIdsから外し、1人も残らなければ閉じる。
+    if (dialog.patientIds.length === 0) {
+      return dialog;
+    }
+    const patientIds = dialog.patientIds.filter((id) => existingIds.has(id));
+    if (patientIds.length === 0) {
+      return null;
+    }
+    return patientIds.length === dialog.patientIds.length ? dialog : { ...dialog, patientIds };
+  }
   return existingIds.has(dialog.id) ? dialog : null;
 }
 

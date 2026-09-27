@@ -5,6 +5,7 @@ const handlers = (): SelectionBarHandlers => ({
   onNext: vi.fn(),
   onDeleteSelected: vi.fn(),
   onShowSelected: vi.fn(),
+  onSend: vi.fn(),
 });
 
 describe('renderSelectionBar', () => {
@@ -48,8 +49,19 @@ describe('renderSelectionBar', () => {
 
   it('「N件選択中」を押すと onShowSelected が呼ばれる', () => {
     const onShowSelected = vi.fn();
-    const bar = renderSelectionBar(2, { onNext: vi.fn(), onDeleteSelected: vi.fn(), onShowSelected })!;
+    const bar = renderSelectionBar(2, { onNext: vi.fn(), onDeleteSelected: vi.fn(), onShowSelected, onSend: vi.fn() })!;
     bar.querySelector<HTMLButtonElement>('[data-testid="selection-count"]')!.click();
     expect(onShowSelected).toHaveBeenCalled();
+  });
+
+  it('削除と訪問順を決めるの間に「送る」のボタンを出し、押すと onSend が呼ばれる', () => {
+    const spies = handlers();
+    const element = renderSelectionBar(2, spies)!;
+    const testids = [...element.querySelectorAll<HTMLButtonElement>('button')].map((b) => b.dataset.testid);
+    expect(testids).toEqual(['selection-count', 'delete-selected-button', 'send-selected-button', 'next-button']);
+    const button = element.querySelector<HTMLButtonElement>('[data-testid="send-selected-button"]')!;
+    expect(button.textContent).toBe('送る');
+    button.click();
+    expect(spies.onSend).toHaveBeenCalledTimes(1);
   });
 });
