@@ -127,3 +127,15 @@ describe('encryptText / decryptText / isEncryptedFileText', () => {
     },
   );
 });
+
+describe('transferFormat(crypto.ts を読み込まずに見分けるための小さなモジュール)', () => {
+  it('crypto.ts と同じ見分け方・目印を出す', async () => {
+    const format = await import('../src/transferFormat');
+    const cryptoModule = await import('../src/crypto');
+    expect(format.isEncryptedFileText).toBe(cryptoModule.isEncryptedFileText);
+    expect(format.TRANSFER_FORMAT).toBe(cryptoModule.TRANSFER_FORMAT);
+    expect(format.isEncryptedFileText(await encryptText('x', 'abcdef', 1000))).toBe(true);
+    expect(format.isEncryptedFileText('{"kind":"route-auto-input-backup"}')).toBe(false);
+    expect(format.isEncryptedFileText('not json')).toBe(false);
+  });
+});

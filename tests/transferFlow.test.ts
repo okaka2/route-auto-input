@@ -3,7 +3,7 @@ import { deleteDB } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppContext } from '../src/appContext';
 import { MIN_PASSWORD_LENGTH } from '../src/config';
-import { decryptText } from '../src/crypto';
+import { decryptText, encryptText } from '../src/crypto';
 import * as db from '../src/db';
 import { closeDbForTest, getMeta, setMeta } from '../src/db';
 import * as fileIo from '../src/fileIo';
@@ -12,8 +12,8 @@ import * as photoCodec from '../src/photoCodec';
 import { DEFAULT_ROUTE_ENDS } from '../src/routePlan';
 import { createInitialState } from '../src/state';
 import { createTransferFlow } from '../src/transferFlow';
-import { parsePayload } from '../src/transfer';
-import type { AppState, Patient, Spot, TransferSendDialog } from '../src/types';
+import { parsePayload, serializePayload } from '../src/transfer';
+import type { AppState, Patient, Spot, TransferReceiveDialog, TransferSendDialog } from '../src/types';
 
 beforeEach(async () => {
   await closeDbForTest();
@@ -471,4 +471,330 @@ describe('createTransferFlow: submitSend', () => {
     expect(getDialog()?.phase).toBe('form');
     expect(getDialog()?.error).toBe('送るファイルを作れませんでした。');
   }, 10_000);
+});
+
+// ===== 受け取り =====
+
+const SPOT: Spot = {
+  id: 'spot-1',
+  kind: 'toilet',
+  note: 'きれいなトイレ',
+  location: { lat: 35, lng: 139, accuracy: null, recordedAt: '2026-09-01T00:00:00.000Z', source: 'gps' },
+  createdAt: '2026-09-01T00:00:00.000Z',
+};
+
+/** テスト用の引き継ぎファイル(回数を少なくして速くする)。 */
+async function makeTransferFile(
+  password: string,
+  content: { patients?: Patient[]; photos?: { id: string; patientId: string; dataUrl: string; createdAt: string }[] | null; spots?: Spot[] },
+): Promise<string> {
+  const plain = serializePayload({
+    sentAt: '2026-09-27T00:00:00.000Z',
+    patients: content.patients ?? [],
+    photos: content.photos ?? null,
+    spots: content.spots ?? [],
+  });
+  return encryptText(plain, password, 1000);
+}
+
+const receiveDialogOf = (state: AppState): TransferReceiveDialog | null =>
+  state.dialog?.kind === 'transferReceive' ? state.dialog : null;
+
+describe('createTransferFlow: 受け取り(パスワード)', () => {
+  it('合言葉が無ければ、パスワードの画面で開く', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    const text = await makeTransferFile('abcdef', { patients: [createPatient('山田 太郎', '東京都千代田区1-1')] });
+
+    await flow.openReceive(text);
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', error: null, password: '', fileText: text });
+  });
+
+  it('パスワード違いならエラーを出してやり直せる。合えば確認へ進み、打ったパスワードは残さない', async () => {
+    const patient = { ...createPatient('山田 太郎', '東京都千代田区1-1'), note: '裏口から' };
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await flow.openReceive(await makeTransferFile('abcdef', { patients: [patient], spots: [SPOT] }));
+
+    flow.updateReceivePassword('wrong-one');
+    expect(ctx.setState).toHaveBeenLastCalledWith(expect.anything(), { render: false });
+    await flow.submitReceivePassword();
+    expect(receiveDialogOf(getState())).toMatchObject({
+      phase: 'password',
+      password: '',
+      error: 'パスワードが違うか、ファイルが壊れています。何度でもやり直せます。',
+    });
+
+    flow.updateReceivePassword('abcdef');
+    await flow.submitReceivePassword();
+    const dialog = receiveDialogOf(getState())!;
+    expect(dialog).toMatchObject({ phase: 'confirm', password: '', error: null });
+    expect(dialog.summary).toBe('山田 太郎様・お役立ち地点1件');
+    // 復号した中身(メモなど)は state に入れない。
+    expect(JSON.stringify(getState())).not.toContain('裏口から');
+  });
+
+  it('空のパスワードでは開かず、案内を出す', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await flow.openReceive(await makeTransferFile('abcdef', { spots: [SPOT] }));
+
+    await flow.submitReceivePassword();
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', error: 'パスワードを入れてください。' });
+  });
+
+  it('合言葉が保存されていて、それで開ければ、パスワードの画面を飛ばして確認へ進む', async () => {
+    await setMeta('sharedSecret', 'jimusho-aikotoba');
+    const { ctx, getState } = createFakeContext({ hasSharedSecret: true });
+    const flow = createTransferFlow(ctx);
+
+    await flow.openReceive(await makeTransferFile('jimusho-aikotoba', { spots: [SPOT] }));
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'confirm', summary: 'お役立ち地点1件' });
+    // 途中で「少しお待ちください」(working)を出していた。
+    const phases = vi
+      .mocked(ctx.setState)
+      .mock.calls.map(([next]) => (next.dialog?.kind === 'transferReceive' ? next.dialog.phase : null));
+    expect(phases).toContain('working');
+  });
+
+  it('合言葉が違えば、エラーを出さずにパスワードの画面にする', async () => {
+    await setMeta('sharedSecret', 'jimusho-aikotoba');
+    const { ctx, getState } = createFakeContext({ hasSharedSecret: true });
+    const flow = createTransferFlow(ctx);
+
+    await flow.openReceive(await makeTransferFile('betsu-no-password', { spots: [SPOT] }));
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', error: null });
+  });
+
+  it('追加するものが無いファイルは、その旨を出す', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await flow.openReceive(await makeTransferFile('abcdef', {}));
+    flow.updateReceivePassword('abcdef');
+
+    await flow.submitReceivePassword();
+
+    expect(receiveDialogOf(getState())).toMatchObject({
+      phase: 'password',
+      error: 'このファイルには追加するものがありません。',
+    });
+  });
+
+  it('写真が壊れていれば、その旨を出し、何も書き込まない', async () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await flow.openReceive(
+      await makeTransferFile('abcdef', {
+        patients: [patient],
+        photos: [{ id: 'ph1', patientId: patient.id, dataUrl: 'data:image/jpeg;base64,@@@@', createdAt: 't' }],
+      }),
+    );
+    const mergeSpy = vi.spyOn(db, 'mergePatients');
+    flow.updateReceivePassword('abcdef');
+
+    await flow.submitReceivePassword();
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', error: '引き継ぎのファイルの写真が壊れています。' });
+    await flow.confirmReceive();
+    expect(mergeSpy).not.toHaveBeenCalled();
+  });
+
+  it('復号の途中でダイアログが閉じられたら、あとから状態を書き換えない', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await flow.openReceive(await makeTransferFile('abcdef', { spots: [SPOT] }));
+    flow.updateReceivePassword('abcdef');
+
+    const pending = flow.submitReceivePassword();
+    // main.ts の setState と同じく、閉じたら discardReceive を呼ぶ。
+    ctx.setState({ ...getState(), dialog: null });
+    flow.discardReceive();
+    await pending;
+
+    expect(getState().dialog).toBeNull();
+  });
+});
+
+describe('createTransferFlow: 受け取り(確認・同じ人・取り込み)', () => {
+  async function openAndUnlock(
+    flow: ReturnType<typeof createTransferFlow>,
+    content: Parameters<typeof makeTransferFile>[1],
+  ): Promise<void> {
+    await flow.openReceive(await makeTransferFile('abcdef', content));
+    flow.updateReceivePassword('abcdef');
+    await flow.submitReceivePassword();
+  }
+
+  it('同じ人がいなければ、新しい id で追加し、写真・位置・メモも入る', async () => {
+    const incoming = {
+      ...createPatient('山田 太郎', '東京都千代田区1-1'),
+      note: '裏口から',
+      location: { lat: 35.1, lng: 139.1, accuracy: 5, recordedAt: '2026-09-01T00:00:00.000Z', source: 'gps' as const },
+    };
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await openAndUnlock(flow, {
+      patients: [incoming],
+      photos: [{ id: 'ph1', patientId: incoming.id, dataUrl: 'data:image/jpeg;base64,eA==', createdAt: 't1' }],
+    });
+
+    await flow.confirmReceive();
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'done', result: '1人を追加しました。', error: null });
+    const saved = await db.listPatients();
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.id).not.toBe(incoming.id);
+    expect(saved[0]!.note).toBe('裏口から');
+    expect(saved[0]!.location?.lat).toBe(35.1);
+    const photos = await db.listPhotos(saved[0]!.id);
+    expect(photos).toHaveLength(1);
+    expect(photos[0]!.id).not.toBe('ph1');
+    expect(ctx.loadSpots).toHaveBeenCalled();
+    expect(ctx.loadPhotoCounts).toHaveBeenCalled();
+    expect(ctx.loadPhotoBytes).toHaveBeenCalled();
+    expect(ctx.reloadPatients).toHaveBeenCalled();
+  });
+
+  it('お役立ち地点だけのファイルも取り込める', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await openAndUnlock(flow, { spots: [SPOT] });
+
+    await flow.confirmReceive();
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'done', result: 'お役立ち地点1件を追加しました。' });
+    expect(await db.listSpots()).toHaveLength(1);
+  });
+
+  it('同じ人が2人いれば1人ずつ聞き、「上書き」と「この人は追加しない」に従う(地点と新しい人も入る)', async () => {
+    const first = createPatient('山田 太郎', '東京都千代田区1-1');
+    const second = createPatient('鈴木 花子', '大阪府大阪市2-2');
+    await db.savePatient(first);
+    await db.savePatient(second);
+    const incomingFirst = { ...createPatient('山田 太郎', '東京都千代田区1-1'), note: '新しいメモ' };
+    const incomingSecond = { ...createPatient('鈴木 花子', '大阪府大阪市2-2'), note: '入らないメモ' };
+    const fresh = createPatient('佐藤 次郎', '京都府京都市3-3');
+    const { ctx, getState } = createFakeContext({ patients: [first, second] });
+    const flow = createTransferFlow(ctx);
+    await openAndUnlock(flow, { patients: [incomingFirst, incomingSecond, fresh], spots: [SPOT] });
+    expect(receiveDialogOf(getState())?.summary).toBe('山田 太郎様ほか2人・お役立ち地点1件');
+
+    await flow.confirmReceive();
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'conflict', conflictIndex: 0 });
+    expect(receiveDialogOf(getState())?.conflicts).toEqual([
+      {
+        incomingName: '山田 太郎',
+        incomingAddress: '東京都千代田区1-1',
+        existingName: '山田 太郎',
+        existingAddress: '東京都千代田区1-1',
+      },
+      {
+        incomingName: '鈴木 花子',
+        incomingAddress: '大阪府大阪市2-2',
+        existingName: '鈴木 花子',
+        existingAddress: '大阪府大阪市2-2',
+      },
+    ]);
+
+    await flow.chooseConflict('overwrite');
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'conflict', conflictIndex: 1 });
+    await flow.chooseConflict('skip');
+
+    expect(receiveDialogOf(getState())).toMatchObject({
+      phase: 'done',
+      result: '1人とお役立ち地点1件を追加し、1人を上書きしました。',
+    });
+    const saved = await db.listPatients();
+    expect(saved).toHaveLength(3);
+    expect(saved.find((p) => p.id === first.id)?.note).toBe('新しいメモ');
+    expect(saved.find((p) => p.id === second.id)?.note).toBeUndefined();
+    expect(saved.some((p) => p.name === '佐藤 次郎' && p.id !== fresh.id)).toBe(true);
+    expect(ctx.clearOpenedRoutes).toHaveBeenCalled();
+  });
+
+  it('全員「この人は追加しない」で地点も無ければ「追加したものはありません。」', async () => {
+    const existing = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(existing);
+    const { ctx, getState } = createFakeContext({ patients: [existing] });
+    const flow = createTransferFlow(ctx);
+    await openAndUnlock(flow, { patients: [createPatient('山田 太郎', '東京都千代田区1-1')] });
+
+    await flow.confirmReceive();
+    await flow.chooseConflict('skip');
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'done', result: '追加したものはありません。' });
+    expect(await db.listPatients()).toHaveLength(1);
+  });
+
+  it('「別に追加」は新しい id で足す', async () => {
+    const existing = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(existing);
+    const { ctx, getState } = createFakeContext({ patients: [existing] });
+    const flow = createTransferFlow(ctx);
+    await openAndUnlock(flow, { patients: [createPatient('山田 太郎', '東京都千代田区1-1')] });
+
+    await flow.confirmReceive();
+    await flow.chooseConflict('addNew');
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'done', result: '1人を追加しました。' });
+    expect(await db.listPatients()).toHaveLength(2);
+  });
+
+  it('写真を含まないファイルで上書きしても、手元の写真は残る', async () => {
+    const existing = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(existing);
+    await db.addPhoto({ id: 'mine', patientId: existing.id, blob: new Blob(['x'], { type: 'image/jpeg' }), createdAt: 't' });
+    const { ctx } = createFakeContext({ patients: [existing] });
+    const flow = createTransferFlow(ctx);
+    await openAndUnlock(flow, { patients: [createPatient('山田 太郎', '東京都千代田区1-1')], photos: null });
+
+    await flow.confirmReceive();
+    await flow.chooseConflict('overwrite');
+
+    const photos = await db.listPhotos(existing.id);
+    expect(photos.map((photo) => photo.id)).toEqual(['mine']);
+  });
+
+  it('書き込みの途中で失敗したら「取り込めませんでした。」とし、画面を読み直す', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await openAndUnlock(flow, { patients: [createPatient('山田 太郎', '東京都千代田区1-1')] });
+    vi.spyOn(db, 'mergePatients').mockRejectedValue(new Error('boom'));
+
+    await flow.confirmReceive();
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'done', error: '取り込めませんでした。', result: null });
+    expect(ctx.reloadPatients).toHaveBeenCalled();
+    expect(ctx.loadSpots).toHaveBeenCalled();
+  });
+
+  it('閉じたあと(discardReceive)は、確認の「追加する」が来ても何もしない', async () => {
+    const { ctx } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await openAndUnlock(flow, { spots: [SPOT] });
+    const mergeSpy = vi.spyOn(db, 'mergePatients');
+
+    flow.discardReceive();
+    await flow.confirmReceive();
+
+    expect(mergeSpy).not.toHaveBeenCalled();
+    expect(await db.listSpots()).toHaveLength(0);
+  });
+
+  it('「追加する」を連打しても、二重に取り込まない', async () => {
+    const { ctx } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await openAndUnlock(flow, { patients: [createPatient('山田 太郎', '東京都千代田区1-1')] });
+    const mergeSpy = vi.spyOn(db, 'mergePatients');
+
+    await Promise.all([flow.confirmReceive(), flow.confirmReceive()]);
+
+    expect(mergeSpy).toHaveBeenCalledTimes(1);
+    expect(await db.listPatients()).toHaveLength(1);
+  });
 });

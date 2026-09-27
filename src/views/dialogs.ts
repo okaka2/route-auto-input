@@ -1,8 +1,9 @@
 import { installSteps } from '../installHint';
 import { installPlatform } from '../platform';
+import type { ConflictChoice } from '../transfer';
 import type { AppState, Dialog, Patient, SpotKind, TransferSendDialog } from '../types';
 import { renderLocationDialog, renderSpotDialog } from './locationDialog';
-import { renderTransferSendDialog } from './transferDialog';
+import { renderTransferReceiveDialog, renderTransferSendDialog } from './transferDialog';
 
 export type DialogHandlers = {
   onEdit(id: string): void;
@@ -58,6 +59,14 @@ export type DialogHandlers = {
   ): void;
   /** 送るダイアログ: 「送る」を押した。 */
   onSubmit(): void;
+  /** 受け取りのダイアログ: パスワード欄の入力。 */
+  onReceivePassword(password: string): void;
+  /** 受け取りのダイアログ: 「開く」(またはEnterキー)。 */
+  onReceiveSubmit(): void;
+  /** 受け取りのダイアログ: 確認で「追加する」。 */
+  onReceiveConfirm(): void;
+  /** 受け取りのダイアログ: 同じ人をどうするか選んだ。 */
+  onReceiveConflict(choice: ConflictChoice): void;
   onClose(): void;
 };
 
@@ -106,6 +115,8 @@ export function renderDialog(
       extra.hasSharedSecret ?? false,
       handlers,
     );
+  } else if (dialog.kind === 'transferReceive') {
+    content = renderTransferReceiveDialog(dialog, handlers);
   } else {
     const patient = state.patients.find((item) => item.id === dialog.id);
     if (patient === undefined) {

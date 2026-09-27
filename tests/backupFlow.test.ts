@@ -85,3 +85,34 @@ describe('createBackupFlow', () => {
     });
   });
 });
+
+describe('createBackupFlow: 引き継ぎのファイルの見分け', () => {
+  it('引き継ぎのファイルなら、確認も書き込みもせずに hooks.onTransferFile へ渡す(入れ替えを選んでいても)', async () => {
+    const db = await import('../src/db');
+    const existing = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(existing);
+    const text = JSON.stringify({ format: 'houmon-transfer', v: 1, iter: 1000, salt: 'AA==', iv: 'AA==', data: 'AA==' });
+    const onTransferFile = vi.fn();
+    const ctx = createFakeContext();
+    const flow = createBackupFlow(ctx, { onTransferFile });
+
+    await flow.handleImport(new File([text], 'transfer.txt', { type: 'text/plain' }), 'replace');
+
+    expect(onTransferFile).toHaveBeenCalledWith(text);
+    expect(ctx.confirm).not.toHaveBeenCalled();
+    expect(ctx.showMessage).not.toHaveBeenCalled();
+    expect(await db.listPatients()).toHaveLength(1);
+  });
+
+  it('普通のバックアップは hooks.onTransferFile へ渡さず、今までどおり確認する', async () => {
+    const text = serializeBackup({ patients: [], photos: null, spots: [], meta: {} });
+    const onTransferFile = vi.fn();
+    const ctx = createFakeContext();
+    const flow = createBackupFlow(ctx, { onTransferFile });
+
+    await flow.handleImport(new File([text], 'backup.json', { type: 'application/json' }), 'merge');
+
+    expect(onTransferFile).not.toHaveBeenCalled();
+    expect(ctx.confirm).toHaveBeenCalledTimes(1);
+  });
+});

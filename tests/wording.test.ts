@@ -10,7 +10,15 @@ import {
   setSearchQuery,
   toggleSelection,
 } from '../src/state';
-import type { AppState, LocationDialog, Patient, Spot, SpotDialog, TransferSendDialog } from '../src/types';
+import type {
+  AppState,
+  LocationDialog,
+  Patient,
+  Spot,
+  SpotDialog,
+  TransferReceiveDialog,
+  TransferSendDialog,
+} from '../src/types';
 import { validatePatientInput, validateSelection } from '../src/validation';
 import { googleMapsProvider } from '../src/mapProviders';
 import type { HistoryEntry } from '../src/db';
@@ -74,6 +82,10 @@ const dialogHandlers = {
   onPhotoIndex: noop,
   onSendDraft: noop,
   onSubmit: noop,
+  onReceivePassword: noop,
+  onReceiveSubmit: noop,
+  onReceiveConfirm: noop,
+  onReceiveConflict: noop,
   onClose: noop,
 };
 
@@ -544,6 +556,47 @@ describe('画面の文言(禁止語が出ない)', () => {
     ];
     for (const [label, dialog, extra] of cases) {
       expectClean(`送るダイアログ(${label})`, renderDialog(withDialog(dialog), dialogHandlers, extra)!.outerHTML);
+    }
+  });
+
+  it('受け取りのダイアログ: 全phase・エラーの文・結果の文', () => {
+    const patients = places(2);
+    const base = (overrides: Partial<TransferReceiveDialog> = {}): TransferReceiveDialog => ({
+      kind: 'transferReceive',
+      fileText: '{}',
+      phase: 'password',
+      password: '',
+      error: null,
+      summary: '',
+      conflictIndex: 0,
+      conflicts: [],
+      result: null,
+      ...overrides,
+    });
+    const conflicts = [
+      { incomingName: '場所1', incomingAddress: '東京都1-1', existingName: '場所1', existingAddress: '東京都1-1' },
+      { incomingName: '場所2', incomingAddress: '東京都2-1', existingName: '場所2', existingAddress: '東京都2-1' },
+    ];
+    const cases: [string, TransferReceiveDialog][] = [
+      ['パスワード', base()],
+      ['パスワード(空)', base({ error: 'パスワードを入れてください。' })],
+      ['パスワード違い', base({ error: 'パスワードが違うか、ファイルが壊れています。何度でもやり直せます。' })],
+      ['中身を読めない', base({ error: '引き継ぎのファイルの中身を読めませんでした。' })],
+      ['写真が壊れている', base({ error: '引き継ぎのファイルの写真が壊れています。' })],
+      ['追加するものがない', base({ error: 'このファイルには追加するものがありません。' })],
+      ['確認', base({ phase: 'confirm', summary: '場所1様ほか1人・お役立ち地点1件' })],
+      ['同じ人(1/2)', base({ phase: 'conflict', conflicts, conflictIndex: 0 })],
+      ['同じ人(2/2)', base({ phase: 'conflict', conflicts, conflictIndex: 1 })],
+      ['処理中', base({ phase: 'working' })],
+      ['完了', base({ phase: 'done', result: '1人とお役立ち地点1件を追加し、1人を上書きしました。' })],
+      ['完了(何もなし)', base({ phase: 'done', result: '追加したものはありません。' })],
+      ['完了(失敗)', base({ phase: 'done', error: '取り込めませんでした。' })],
+    ];
+    for (const [label, dialog] of cases) {
+      expectClean(
+        `受け取りのダイアログ(${label})`,
+        renderDialog({ ...createInitialState(patients), dialog }, dialogHandlers)!.outerHTML,
+      );
     }
   });
 

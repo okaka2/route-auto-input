@@ -92,6 +92,22 @@ export type TransferSendDialog = {
   shared: boolean;
 };
 
+/**
+ * 受け取りのダイアログ(引き継ぎのファイルを読み込んだとき)。復号した中身は state に置かず、
+ * transferFlow.ts の中だけに持つ(ここにあるのは、暗号化されたままの文字列と表示に使う文だけ)。
+ */
+export type TransferReceiveDialog = {
+  kind: 'transferReceive';
+  fileText: string; // 暗号化されたままの文字列(復号した中身は state に置かない)
+  phase: 'password' | 'confirm' | 'conflict' | 'working' | 'done';
+  password: string;
+  error: string | null;
+  summary: string; // 「山田様ほか2人・お役立ち地点1件」
+  conflictIndex: number; // phase 'conflict' のとき、何人目の同じ人か
+  conflicts: { incomingName: string; incomingAddress: string; existingName: string; existingAddress: string }[];
+  result: string | null; // done の文
+};
+
 /** 開いているダイアログ。1件向けは対象の訪問先のidを、複数選択の一括削除は件数を持たない(state.selectedIdsを見る)。 */
 export type Dialog =
   | { kind: 'rowMenu'; id: string }
@@ -108,7 +124,8 @@ export type Dialog =
   | LocationDialog
   | SpotDialog
   | { kind: 'photos'; patientId: string; urls: string[]; index: number }
-  | TransferSendDialog;
+  | TransferSendDialog
+  | TransferReceiveDialog;
 
 export type AppState = {
   screen: Screen;

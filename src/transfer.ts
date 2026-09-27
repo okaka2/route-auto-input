@@ -93,15 +93,9 @@ export function parsePayload(text: string): TransferPayload {
   return { kind: 'houmon-transfer-payload', v: 1, sentAt: record.sentAt, patients, photos, spots };
 }
 
-/** 「山田 太郎様ほか2人」のような、送る相手の説明。0人なら空文字。 */
-export function describeRecipients(patients: readonly Patient[]): string {
-  const [firstPatient] = patients;
-  if (firstPatient === undefined) {
-    return '';
-  }
-  const first = `${firstPatient.name}様`;
-  return patients.length === 1 ? first : `${first}ほか${patients.length - 1}人`;
-}
+// 「山田 太郎様ほか2人」の説明は recipients.ts にある(画面の表示だけに要るので、
+// このファイルを import() で後から読み込めるよう分けた)。今までどおりここからも使える。
+export { describeRecipients } from './recipients';
 
 export type Conflict = { incoming: Patient; existing: Patient };
 

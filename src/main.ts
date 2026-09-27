@@ -191,10 +191,12 @@ let dialogReturnId: string | null = null;
 const SPOT_RETURN_ID = '__spot-add';
 const SEND_SELECTED_RETURN_ID = '__send-selected';
 const SEND_SPOTS_RETURN_ID = '__send-spots';
+const RECEIVE_RETURN_ID = '__receive';
 const RETURN_TARGETS: Record<string, string> = {
   [SPOT_RETURN_ID]: 'spot-add-button',
   [SEND_SELECTED_RETURN_ID]: 'send-selected-button',
   [SEND_SPOTS_RETURN_ID]: 'send-spots-button',
+  [RECEIVE_RETURN_ID]: 'import-button',
 };
 
 // 位置を測っている最中なら、止めるための関数。測っていなければ null。
@@ -666,6 +668,11 @@ function setState(next: AppState, options?: { render?: boolean }): void {
   const previousDialog = state.dialog;
   const previousScreen = state.screen;
   state = next;
+  // 受け取りのダイアログが閉じる/別のダイアログに変わるなら、復号した中身(transferFlowの中に
+  // だけ持っている)をここ一箇所で捨てる。途中で閉じて読み込み直しても、前の続きから始めない。
+  if (previousDialog?.kind === 'transferReceive' && next.dialog?.kind !== 'transferReceive') {
+    transferFlow.discardReceive();
+  }
   // 設定画面を離れるときは、合言葉の入力中の内容(sharedSecretDraft)と「変える」で
   // 出した入力欄(sharedSecretEditing)を引きずらない。次に設定画面を開いたときに
   // 前回の入力が残っていたり、未設定なのに入力欄が引っ込んだままになるのを防ぐ。
@@ -802,8 +809,14 @@ const ctx: AppContext = {
   loadPhotoBytes,
   confirm: (question) => window.confirm(question),
 };
-const backupFlow = createBackupFlow(ctx);
 const transferFlow = createTransferFlow(ctx);
+// 読み込むで引き継ぎのファイル(パスワード付き)が選ばれたら、受け取りの流れに回す。
+const backupFlow = createBackupFlow(ctx, {
+  onTransferFile: (text) => {
+    dialogReturnId = RECEIVE_RETURN_ID;
+    void transferFlow.openReceive(text);
+  },
+});
 
 function currentEditingPatient(): Patient | null {
   const screen = state.screen;
@@ -1003,7 +1016,7 @@ function openMenu(id: string): void {
  */
 function closeAnyDialog(): void {
   const dialog = state.dialog;
-  if (dialog?.kind === 'transferSend' && dialog.phase === 'working') {
+  if ((dialog?.kind === 'transferSend' || dialog?.kind === 'transferReceive') && dialog.phase === 'working') {
     return;
   }
   setState(closeDialog(state));
@@ -1816,6 +1829,16 @@ function renderApp(): HTMLElement {
     onSendDraft: (patch) => transferFlow.updateSendDraft(patch),
     onSubmit: () => {
       void transferFlow.submitSend();
+    },
+    onReceivePassword: (password) => transferFlow.updateReceivePassword(password),
+    onReceiveSubmit: () => {
+      void transferFlow.submitReceivePassword();
+    },
+    onReceiveConfirm: () => {
+      void transferFlow.confirmReceive();
+    },
+    onReceiveConflict: (choice) => {
+      void transferFlow.chooseConflict(choice);
     },
     onClose: closeAnyDialog,
   }, { photoCounts, spotCount: spots.length, hasSharedSecret: settingsInfo.hasSharedSecret });

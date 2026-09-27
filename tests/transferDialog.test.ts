@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPatient } from '../src/patient';
-import type { Patient, TransferSendDialog } from '../src/types';
-import { renderTransferSendDialog, type TransferSendDialogHandlers } from '../src/views/transferDialog';
+import type { Patient, TransferReceiveDialog, TransferSendDialog } from '../src/types';
+import {
+  renderTransferReceiveDialog,
+  renderTransferSendDialog,
+  type TransferReceiveDialogHandlers,
+  type TransferSendDialogHandlers,
+} from '../src/views/transferDialog';
 
 const handlers = (): TransferSendDialogHandlers => ({
   onSendDraft: vi.fn(),
@@ -240,5 +245,166 @@ describe('renderTransferSendDialog: 操作', () => {
     const elements = render(baseDialog({ phase: 'done' }), { handlers: spies });
     q<HTMLButtonElement>(elements, 'dialog-cancel')!.click();
     expect(spies.onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ===== 受け取りのダイアログ =====
+
+const receiveHandlers = (): TransferReceiveDialogHandlers => ({
+  onReceivePassword: vi.fn(),
+  onReceiveSubmit: vi.fn(),
+  onReceiveConfirm: vi.fn(),
+  onReceiveConflict: vi.fn(),
+  onClose: vi.fn(),
+});
+
+function receiveDialog(overrides: Partial<TransferReceiveDialog> = {}): TransferReceiveDialog {
+  return {
+    kind: 'transferReceive',
+    fileText: '{"format":"houmon-transfer"}',
+    phase: 'password',
+    password: '',
+    error: null,
+    summary: '',
+    conflictIndex: 0,
+    conflicts: [],
+    result: null,
+    ...overrides,
+  };
+}
+
+const texts = (elements: HTMLElement[]): string => elements.map((e) => e.textContent ?? '').join('\n');
+
+describe('renderTransferReceiveDialog: パスワードの画面', () => {
+  it('案内・パスワード欄(type password・自動入力なし)・「開く」・忘れたときの案内を出す', () => {
+    const elements = renderTransferReceiveDialog(receiveDialog(), receiveHandlers());
+    expect(texts(elements)).toContain('パスワードを入れてください。');
+    expect(texts(elements)).toContain('パスワードを忘れると開けません。送った人に確かめてください。');
+    const input = q<HTMLInputElement>(elements, 'receive-password')!;
+    expect(input.type).toBe('password');
+    expect(input.autocomplete).toBe('off');
+    expect(input.hasAttribute('data-autofocus')).toBe(true);
+    expect(q(elements, 'receive-password-submit')?.textContent).toBe('開く');
+    expect(q(elements, 'dialog-cancel')?.textContent).toBe('やめる');
+  });
+
+  it('エラーがあれば出す', () => {
+    const elements = renderTransferReceiveDialog(
+      receiveDialog({ error: 'パスワードが違うか、ファイルが壊れています。何度でもやり直せます。' }),
+      receiveHandlers(),
+    );
+    expect(texts(elements)).toContain('パスワードが違うか、ファイルが壊れています。何度でもやり直せます。');
+  });
+
+  it('入力で onReceivePassword、「開く」とEnterキーで onReceiveSubmit が呼ばれる', () => {
+    const spies = receiveHandlers();
+    const elements = renderTransferReceiveDialog(receiveDialog(), spies);
+    const input = q<HTMLInputElement>(elements, 'receive-password')!;
+    input.value = 'abcdef';
+    input.dispatchEvent(new Event('input'));
+    expect(spies.onReceivePassword).toHaveBeenCalledWith('abcdef');
+
+    q<HTMLButtonElement>(elements, 'receive-password-submit')!.click();
+    expect(spies.onReceiveSubmit).toHaveBeenCalledTimes(1);
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(spies.onReceiveSubmit).toHaveBeenCalledTimes(2);
+
+    q<HTMLButtonElement>(elements, 'dialog-cancel')!.click();
+    expect(spies.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('日本語の変換中のEnterキーでは開かない', () => {
+    const spies = receiveHandlers();
+    const elements = renderTransferReceiveDialog(receiveDialog(), spies);
+    q<HTMLInputElement>(elements, 'receive-password')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }),
+    );
+    expect(spies.onReceiveSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderTransferReceiveDialog: 確認・同じ人・処理中・完了', () => {
+  it('確認: 「(summary)を名簿に追加しますか?」と「追加する」(最初にフォーカス)・「やめる」', () => {
+    const spies = receiveHandlers();
+    const elements = renderTransferReceiveDialog(
+      receiveDialog({ phase: 'confirm', summary: '山田 太郎様ほか2人・お役立ち地点1件' }),
+      spies,
+    );
+    expect(q(elements, 'receive-summary')?.textContent).toBe(
+      '山田 太郎様ほか2人・お役立ち地点1件を名簿に追加しますか?',
+    );
+    const confirm = q<HTMLButtonElement>(elements, 'receive-confirm')!;
+    expect(confirm.textContent).toBe('追加する');
+    expect(confirm.hasAttribute('data-autofocus')).toBe(true);
+    confirm.click();
+    expect(spies.onReceiveConfirm).toHaveBeenCalledTimes(1);
+    q<HTMLButtonElement>(elements, 'dialog-cancel')!.click();
+    expect(spies.onClose).toHaveBeenCalledTimes(1);
+    expect(q(elements, 'receive-password')).toBeNull();
+  });
+
+  it('同じ人: (N/M)の見出し、手元と受け取った人、3つの選び方', () => {
+    const spies = receiveHandlers();
+    const elements = renderTransferReceiveDialog(
+      receiveDialog({
+        phase: 'conflict',
+        conflictIndex: 1,
+        conflicts: [
+          { incomingName: 'A', incomingAddress: 'a', existingName: 'A', existingAddress: 'a' },
+          {
+            incomingName: '山田 太郎',
+            incomingAddress: '東京都千代田区1-1',
+            existingName: '山田太郎',
+            existingAddress: '東京都千代田区1ー1',
+          },
+        ],
+      }),
+      spies,
+    );
+    expect(elements.find((e) => e.id === 'dialog-title')?.textContent).toBe('同じ訪問先がすでにあります(2/2)');
+    expect(q(elements, 'conflict-existing')?.textContent).toBe('手元: 山田太郎(東京都千代田区1ー1)');
+    expect(q(elements, 'conflict-incoming')?.textContent).toBe('受け取った: 山田 太郎(東京都千代田区1-1)');
+    const overwrite = q<HTMLButtonElement>(elements, 'conflict-overwrite')!;
+    expect(overwrite.textContent).toBe('上書き');
+    expect(overwrite.hasAttribute('data-autofocus')).toBe(true);
+    expect(q(elements, 'conflict-add')?.textContent).toBe('別に追加');
+    expect(q(elements, 'conflict-skip')?.textContent).toBe('この人は追加しない');
+
+    overwrite.click();
+    q<HTMLButtonElement>(elements, 'conflict-add')!.click();
+    q<HTMLButtonElement>(elements, 'conflict-skip')!.click();
+    expect(vi.mocked(spies.onReceiveConflict).mock.calls).toEqual([['overwrite'], ['addNew'], ['skip']]);
+  });
+
+  it('処理中: 待つように案内し、押せるボタンもパスワード欄も出さない', () => {
+    const elements = renderTransferReceiveDialog(receiveDialog({ phase: 'working' }), receiveHandlers());
+    expect(q(elements, 'receive-working-text')?.textContent).toBe('少しお待ちください。');
+    expect(elements.some((e) => e instanceof HTMLButtonElement || e.querySelector('button') !== null)).toBe(false);
+    expect(q(elements, 'receive-password')).toBeNull();
+  });
+
+  it('完了: 結果の文と「閉じる」(最初にフォーカス)', () => {
+    const spies = receiveHandlers();
+    const elements = renderTransferReceiveDialog(
+      receiveDialog({ phase: 'done', result: '2人を追加し、1人を上書きしました。' }),
+      spies,
+    );
+    expect(q(elements, 'receive-done-text')?.textContent).toBe('2人を追加し、1人を上書きしました。');
+    const close = q<HTMLButtonElement>(elements, 'dialog-cancel')!;
+    expect(close.textContent).toBe('閉じる');
+    expect(close.hasAttribute('data-autofocus')).toBe(true);
+    close.click();
+    expect(spies.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('完了(失敗): エラーだけを出し、「閉じる」を出す', () => {
+    const elements = renderTransferReceiveDialog(
+      receiveDialog({ phase: 'done', result: null, error: '取り込めませんでした。' }),
+      receiveHandlers(),
+    );
+    expect(texts(elements)).toContain('取り込めませんでした。');
+    expect(q(elements, 'receive-done-text')).toBeNull();
+    expect(q(elements, 'dialog-cancel')?.textContent).toBe('閉じる');
   });
 });

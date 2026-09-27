@@ -13,6 +13,7 @@ import {
 } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
 import { blobToDataUrl, dataUrlToBlob } from './photoCodec';
+import { isEncryptedFileText } from './transferFormat';
 import type { Photo } from './types';
 
 /** インポートの確認に出す「(写真M枚・お役立ち地点K件)」。0件の部分は書かず、両方0なら空文字。 */
@@ -29,7 +30,8 @@ function backupExtrasLabel(photoCount: number, spotCount: number): string {
 
 /**
  * バックアップの書き出し・読み込みの流れ。main.ts が持つ状態は AppContext 経由でしか触らない
- * (main.ts側で1つだけ作って渡す)。hooks.onTransferFile は今は使わない(Task 6が使う)。
+ * (main.ts側で1つだけ作って渡す)。読み込んだファイルが引き継ぎのファイル(パスワード付き)なら、
+ * バックアップとしては読まずに hooks.onTransferFile へ渡す(受け取りの流れは transferFlow.ts)。
  */
 export function createBackupFlow(
   ctx: AppContext,
@@ -80,7 +82,14 @@ export function createBackupFlow(
   async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void> {
     let writeStarted = false;
     try {
-      const content = parseBackup(await readTextFile(file));
+      const text = await readTextFile(file);
+      // 引き継ぎのファイルなら、受け取りの流れに任せる。入れ替え/追加の選択は使わない
+      // (引き継ぎは、いつも今のデータへの追加。「入れ替え」を選んでいても手元のデータは消さない)。
+      if (isEncryptedFileText(text)) {
+        hooks.onTransferFile?.(text);
+        return;
+      }
+      const content = parseBackup(text);
 
       // 書き込みを始める前に、写真を1枚ずつ全部デコードしておく(dataUrlToBlobは形が
       // 正しくてもbase64の中身が壊れていれば例外を投げる)。ここで1枚でも壊れていれば、
@@ -172,9 +181,6 @@ export function createBackupFlow(
       }
     }
   }
-
-  // hooksは今は使わない(Task 6が暗号化された引き継ぎファイルをここへ回す)。
-  void hooks;
 
   return { handleExport, handleImport };
 }

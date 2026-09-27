@@ -1,5 +1,6 @@
-import { describeRecipients } from '../transfer';
-import type { Patient, TransferSendDialog } from '../types';
+import { describeRecipients } from '../recipients';
+import type { ConflictChoice } from '../transfer';
+import type { Patient, TransferReceiveDialog, TransferSendDialog } from '../types';
 import { renderMessage } from './common';
 
 export type TransferSendDialogHandlers = {
@@ -144,6 +145,153 @@ export function renderTransferSendDialog(
   buttons.append(cancelButton, submitButton);
   elements.push(buttons);
 
+  return elements;
+}
+
+export type TransferReceiveDialogHandlers = {
+  /** パスワード欄の入力。 */
+  onReceivePassword(password: string): void;
+  /** パスワードの画面で「開く」(またはEnterキー)。 */
+  onReceiveSubmit(): void;
+  /** 確認の画面で「追加する」。 */
+  onReceiveConfirm(): void;
+  /** 同じ人の画面で、その人をどうするか選んだ。 */
+  onReceiveConflict(choice: ConflictChoice): void;
+  onClose(): void;
+};
+
+/**
+ * 受け取りのダイアログの中身(引き継ぎのファイルを読み込んだとき)。外枠は views/dialogs.ts が担う。
+ * phase ごとに、パスワード → 確認 → 同じ人(1人ずつ) → 完了、と進む。working は復号・取り込みの最中。
+ */
+export function renderTransferReceiveDialog(
+  dialog: TransferReceiveDialog,
+  handlers: TransferReceiveDialogHandlers,
+): HTMLElement[] {
+  const elements: HTMLElement[] = [];
+
+  const title = document.createElement('h2');
+  title.id = 'dialog-title';
+  title.className = 'sheet-title';
+  title.textContent =
+    dialog.phase === 'conflict'
+      ? `同じ訪問先がすでにあります(${dialog.conflictIndex + 1}/${dialog.conflicts.length})`
+      : '引き継ぎのファイルを読み込む';
+  elements.push(title);
+
+  if (dialog.error) {
+    elements.push(renderMessage({ kind: 'error', text: dialog.error }));
+  }
+
+  if (dialog.phase === 'working') {
+    const text = document.createElement('p');
+    text.className = 'sheet-text';
+    text.dataset.testid = 'receive-working-text';
+    text.textContent = '少しお待ちください。';
+    elements.push(text);
+    return elements;
+  }
+
+  if (dialog.phase === 'password') {
+    const prompt = document.createElement('p');
+    prompt.className = 'sheet-text';
+    prompt.textContent = 'パスワードを入れてください。';
+    elements.push(prompt);
+
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.autocomplete = 'off';
+    input.value = dialog.password;
+    input.dataset.testid = 'receive-password';
+    input.dataset.autofocus = '';
+    input.addEventListener('input', () => handlers.onReceivePassword(input.value));
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.isComposing) {
+        event.preventDefault();
+        handlers.onReceiveSubmit();
+      }
+    });
+    elements.push(labelled('パスワード', input));
+
+    const guide = document.createElement('p');
+    guide.className = 'hint';
+    guide.textContent = 'パスワードを忘れると開けません。送った人に確かめてください。';
+    elements.push(guide);
+
+    const buttons = document.createElement('div');
+    buttons.className = 'sheet-buttons';
+    buttons.append(
+      actionButton('やめる', 'dialog-cancel', () => handlers.onClose()),
+      actionButton('開く', 'receive-password-submit', () => handlers.onReceiveSubmit(), 'primary'),
+    );
+    elements.push(buttons);
+    return elements;
+  }
+
+  if (dialog.phase === 'confirm') {
+    const question = document.createElement('p');
+    question.className = 'sheet-text';
+    question.dataset.testid = 'receive-summary';
+    question.textContent = `${dialog.summary}を名簿に追加しますか?`;
+    elements.push(question);
+
+    const buttons = document.createElement('div');
+    buttons.className = 'sheet-buttons';
+    const confirmButton = actionButton('追加する', 'receive-confirm', () => handlers.onReceiveConfirm(), 'primary');
+    confirmButton.dataset.autofocus = '';
+    buttons.append(actionButton('やめる', 'dialog-cancel', () => handlers.onClose()), confirmButton);
+    elements.push(buttons);
+    return elements;
+  }
+
+  if (dialog.phase === 'conflict') {
+    const conflict = dialog.conflicts[dialog.conflictIndex];
+    if (conflict !== undefined) {
+      const list = document.createElement('ul');
+      list.className = 'sheet-list';
+      const existing = document.createElement('li');
+      existing.dataset.testid = 'conflict-existing';
+      existing.textContent = `手元: ${conflict.existingName}(${conflict.existingAddress})`;
+      const incoming = document.createElement('li');
+      incoming.dataset.testid = 'conflict-incoming';
+      incoming.textContent = `受け取った: ${conflict.incomingName}(${conflict.incomingAddress})`;
+      list.append(existing, incoming);
+      elements.push(list);
+    }
+
+    const actions = document.createElement('ul');
+    actions.className = 'sheet-actions';
+    const overwrite = actionButton('上書き', 'conflict-overwrite', () => handlers.onReceiveConflict('overwrite'));
+    overwrite.dataset.autofocus = '';
+    const entries = [
+      overwrite,
+      actionButton('別に追加', 'conflict-add', () => handlers.onReceiveConflict('addNew')),
+      actionButton('この人は追加しない', 'conflict-skip', () => handlers.onReceiveConflict('skip')),
+      actionButton('やめる', 'dialog-cancel', () => handlers.onClose()),
+    ];
+    for (const button of entries) {
+      const item = document.createElement('li');
+      item.append(button);
+      actions.append(item);
+    }
+    elements.push(actions);
+    return elements;
+  }
+
+  // done(取り込み終わった。失敗したときは上の error だけを出す)
+  if (dialog.result !== null) {
+    const done = document.createElement('p');
+    done.className = 'sheet-text';
+    done.dataset.testid = 'receive-done-text';
+    done.textContent = dialog.result;
+    elements.push(done);
+  }
+  const buttons = document.createElement('div');
+  buttons.className = 'sheet-buttons';
+  const closeButton = actionButton('閉じる', 'dialog-cancel', () => handlers.onClose());
+  closeButton.dataset.autofocus = '';
+  buttons.append(closeButton);
+  elements.push(buttons);
   return elements;
 }
 

@@ -3328,3 +3328,347 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
     expect((await db.listPatients()).map((p) => p.id)).toEqual([fromFile.id]);
   });
 });
+
+describe('受け取る(引き継ぎのファイルを読み込む)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const SPOT = {
+    id: 'spot-from-file',
+    kind: 'toilet' as const,
+    note: '受け取ったトイレ',
+    location: { lat: 35, lng: 139, accuracy: null, recordedAt: '2026-09-01T00:00:00.000Z', source: 'gps' as const },
+    createdAt: '2026-09-01T00:00:00.000Z',
+  };
+
+  /** テスト用の引き継ぎファイル(回数を少なくして速くする)。 */
+  async function makeTransferText(
+    password: string,
+    content: {
+      patients?: Patient[];
+      photos?: { id: string; patientId: string; dataUrl: string; createdAt: string }[] | null;
+      spots?: (typeof SPOT)[];
+    },
+  ): Promise<string> {
+    const { encryptText } = await import('../src/crypto');
+    const { serializePayload } = await import('../src/transfer');
+    const plain = serializePayload({
+      sentAt: '2026-09-27T00:00:00.000Z',
+      patients: content.patients ?? [],
+      photos: content.photos ?? null,
+      spots: content.spots ?? [],
+    });
+    return encryptText(plain, password, 1000);
+  }
+
+  async function openSettings(): Promise<void> {
+    dismissInstallNotice();
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="import-input"]')).not.toBeNull());
+  }
+
+  /** 読み込むのファイル欄にファイルを入れて「読み込む」を押す(画面を描き直すと欄も作り直されるので、毎回入れ直す)。 */
+  function importText(text: string, filename: string, mode: 'replace' | 'merge' = 'replace'): void {
+    const file = new File([text], filename, { type: filename.endsWith('.json') ? 'application/json' : 'text/plain' });
+    const input = el<HTMLInputElement>('[data-testid="import-input"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    el<HTMLInputElement>(`[data-testid="mode-${mode}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
+  }
+
+  function typeReceivePassword(password: string): void {
+    const input = el<HTMLInputElement>('[data-testid="receive-password"]')!;
+    input.value = password;
+    input.dispatchEvent(new Event('input'));
+  }
+
+  const doneText = () => el('[data-testid="receive-done-text"]')?.textContent;
+
+  it('「送る」で作ったファイルを読み込む → パスワード違い → やり直し → 確認 → 別に追加で、新しい id で写真・位置・メモが入る', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = {
+      ...createPatient('山田 太郎', '東京都千代田区1-1'),
+      note: '駐車場は裏手にあります',
+      location: {
+        lat: 35.68,
+        lng: 139.76,
+        accuracy: 10,
+        recordedAt: '2026-09-22T00:00:00.000Z',
+        source: 'gps' as const,
+      },
+    };
+    await db.savePatient(patient);
+    // fake-indexeddb はBlobの中身を保てないことがあるので、送る側の写真は listPhotos の戻りとして与える。
+    const listPhotosSpy = vi.spyOn(db, 'listPhotos').mockResolvedValue([
+      { id: 'photo-1', patientId: patient.id, blob: new Blob(['x'], { type: 'image/jpeg' }), createdAt: 't1' },
+    ]);
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    // 送る(Task 5)。
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+    for (const testid of ['transfer-password', 'transfer-password-confirm']) {
+      const input = el<HTMLInputElement>(`[data-testid="${testid}"]`)!;
+      input.value = 'abcdef';
+      input.dispatchEvent(new Event('input'));
+    }
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-done-text"]')).not.toBeNull());
+    const sentText = await (share.mock.calls[0]![0].files[0] as File).text();
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    listPhotosSpy.mockRestore();
+    confirmSpy.mockClear();
+
+    // 受け取る(同じ端末なので、同じ人として聞かれる)。
+    await openSettings();
+    importText(sentText, '訪問先の引き継ぎ_2026-09-27.txt');
+    await waitFor(() => expect(el('[data-testid="receive-password"]')).not.toBeNull());
+    expect(document.activeElement).toBe(el('[data-testid="receive-password"]'));
+
+    typeReceivePassword('wrong-password');
+    el<HTMLButtonElement>('[data-testid="receive-password-submit"]')!.click();
+    await waitFor(() =>
+      expect(el('[data-testid="dialog"]')?.textContent).toContain(
+        'パスワードが違うか、ファイルが壊れています。何度でもやり直せます。',
+      ),
+    );
+    expect(el<HTMLInputElement>('[data-testid="receive-password"]')!.value).toBe('');
+
+    typeReceivePassword('abcdef');
+    el<HTMLInputElement>('[data-testid="receive-password"]')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+    );
+    await waitFor(() =>
+      expect(el('[data-testid="receive-summary"]')?.textContent).toBe('山田 太郎様を名簿に追加しますか?'),
+    );
+    expect(document.activeElement).toBe(el('[data-testid="receive-confirm"]'));
+
+    el<HTMLButtonElement>('[data-testid="receive-confirm"]')!.click();
+    await waitFor(() =>
+      expect(el('#dialog-title')?.textContent).toBe('同じ訪問先がすでにあります(1/1)'),
+    );
+    el<HTMLButtonElement>('[data-testid="conflict-add"]')!.click();
+    await waitFor(() => expect(doneText()).toBe('1人を追加しました。'));
+    // バックアップ用の確認(window.confirm)は出ない。
+    expect(confirmSpy).not.toHaveBeenCalled();
+
+    const saved = await db.listPatients();
+    expect(saved).toHaveLength(2);
+    const added = saved.find((p) => p.id !== patient.id)!;
+    expect(added.name).toBe('山田 太郎');
+    expect(added.note).toBe('駐車場は裏手にあります');
+    expect(added.location?.lat).toBe(35.68);
+    expect(await db.listPhotos(added.id)).toHaveLength(1);
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(el('[data-testid="import-button"]'));
+  }, 20_000);
+
+  it('事業所の合言葉で開けるファイルなら、パスワードの画面を飛ばして確認へ進む', async () => {
+    const db = await import('../src/db');
+    await db.setMeta('sharedSecret', 'jimusho-aikotoba');
+    const { createPatient } = await import('../src/patient');
+    const text = await makeTransferText('jimusho-aikotoba', {
+      patients: [createPatient('鈴木 花子', '大阪府大阪市2-2'), createPatient('佐藤 次郎', '京都府京都市3-3')],
+      spots: [SPOT],
+    });
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    await openSettings();
+    importText(text, 'transfer.txt');
+
+    await waitFor(() =>
+      expect(el('[data-testid="receive-summary"]')?.textContent).toBe(
+        '鈴木 花子様ほか1人・お役立ち地点1件を名簿に追加しますか?',
+      ),
+    );
+    expect(el('[data-testid="receive-password"]')).toBeNull();
+
+    el<HTMLButtonElement>('[data-testid="receive-confirm"]')!.click();
+    await waitFor(() => expect(doneText()).toBe('2人とお役立ち地点1件を追加しました。'));
+    expect(await db.listPatients()).toHaveLength(2);
+  });
+
+  it('同じ人が2人いれば1人ずつ聞き、「上書き」と「この人は追加しない」に従う', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const first = { ...createPatient('山田 太郎', '東京都千代田区1-1'), note: '古いメモ' };
+    const second = { ...createPatient('鈴木 花子', '大阪府大阪市2-2'), note: '手元のメモ' };
+    await db.savePatient(first);
+    await db.savePatient(second);
+    const text = await makeTransferText('abcdef', {
+      patients: [
+        { ...createPatient('山田 太郎', '東京都千代田区1-1'), note: '新しいメモ' },
+        { ...createPatient('鈴木 花子', '大阪府大阪市2-2'), note: '入らないメモ' },
+      ],
+    });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    await openSettings();
+    importText(text, 'transfer.txt');
+    await waitFor(() => expect(el('[data-testid="receive-password"]')).not.toBeNull());
+    typeReceivePassword('abcdef');
+    el<HTMLButtonElement>('[data-testid="receive-password-submit"]')!.click();
+    await waitFor(() => expect(el('[data-testid="receive-confirm"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="receive-confirm"]')!.click();
+
+    await waitFor(() => expect(el('#dialog-title')?.textContent).toBe('同じ訪問先がすでにあります(1/2)'));
+    expect(el('[data-testid="conflict-existing"]')?.textContent).toBe('手元: 山田 太郎(東京都千代田区1-1)');
+    expect(document.activeElement).toBe(el('[data-testid="conflict-overwrite"]'));
+    el<HTMLButtonElement>('[data-testid="conflict-overwrite"]')!.click();
+
+    await waitFor(() => expect(el('#dialog-title')?.textContent).toBe('同じ訪問先がすでにあります(2/2)'));
+    expect(el('[data-testid="conflict-incoming"]')?.textContent).toBe('受け取った: 鈴木 花子(大阪府大阪市2-2)');
+    el<HTMLButtonElement>('[data-testid="conflict-skip"]')!.click();
+
+    await waitFor(() => expect(doneText()).toBe('1人を上書きしました。'));
+    expect(document.activeElement).toBe(el('[data-testid="dialog-cancel"]'));
+    const saved = await db.listPatients();
+    expect(saved).toHaveLength(2);
+    expect(saved.find((p) => p.id === first.id)?.note).toBe('新しいメモ');
+    expect(saved.find((p) => p.id === second.id)?.note).toBe('手元のメモ');
+  });
+
+  it('写真を含まないファイルで上書きしても、手元の写真は残る', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const existing = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(existing);
+    await db.addPhoto({
+      id: 'mine',
+      patientId: existing.id,
+      blob: new Blob(['x'], { type: 'image/jpeg' }),
+      createdAt: '2026-09-01T00:00:00.000Z',
+    });
+    const text = await makeTransferText('abcdef', {
+      patients: [{ ...createPatient('山田 太郎', '東京都千代田区1-1'), note: '新しいメモ' }],
+      photos: null,
+    });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    await openSettings();
+    importText(text, 'transfer.txt');
+    await waitFor(() => expect(el('[data-testid="receive-password"]')).not.toBeNull());
+    typeReceivePassword('abcdef');
+    el<HTMLButtonElement>('[data-testid="receive-password-submit"]')!.click();
+    await waitFor(() => expect(el('[data-testid="receive-confirm"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="receive-confirm"]')!.click();
+    await waitFor(() => expect(el('[data-testid="conflict-overwrite"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="conflict-overwrite"]')!.click();
+    await waitFor(() => expect(doneText()).toBe('1人を上書きしました。'));
+
+    expect((await db.listPhotos(existing.id)).map((photo) => photo.id)).toEqual(['mine']);
+    expect((await db.listPatients())[0]!.note).toBe('新しいメモ');
+  });
+
+  it('「入れ替える」を選んでいても、引き継ぎのファイルは今のデータを消さずに追加する', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const existing = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(existing);
+    const text = await makeTransferText('abcdef', { patients: [createPatient('鈴木 花子', '大阪府大阪市2-2')] });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    await openSettings();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    importText(text, 'transfer.txt', 'replace');
+    await waitFor(() => expect(el('[data-testid="receive-password"]')).not.toBeNull());
+    typeReceivePassword('abcdef');
+    el<HTMLButtonElement>('[data-testid="receive-password-submit"]')!.click();
+    await waitFor(() => expect(el('[data-testid="receive-confirm"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="receive-confirm"]')!.click();
+    await waitFor(() => expect(doneText()).toBe('1人を追加しました。'));
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect((await db.listPatients()).map((p) => p.name).sort()).toEqual(['山田 太郎', '鈴木 花子'].sort());
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click();
+    expect(rows()).toHaveLength(2);
+  });
+
+  it('途中で閉じてから読み込み直すと、最初(パスワードの画面)から始まる', async () => {
+    const db = await import('../src/db');
+    const text = await makeTransferText('abcdef', { spots: [SPOT] });
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    await openSettings();
+    importText(text, 'transfer.txt');
+    await waitFor(() => expect(el('[data-testid="receive-password"]')).not.toBeNull());
+    typeReceivePassword('abcdef');
+    el<HTMLButtonElement>('[data-testid="receive-password-submit"]')!.click();
+    await waitFor(() => expect(el('[data-testid="receive-confirm"]')).not.toBeNull());
+
+    // 確認の画面で「やめる」。
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(el('[data-testid="import-button"]'));
+
+    importText(text, 'transfer.txt');
+    await waitFor(() => expect(el('[data-testid="receive-password"]')).not.toBeNull());
+    expect(el<HTMLInputElement>('[data-testid="receive-password"]')!.value).toBe('');
+    expect(el('[data-testid="receive-confirm"]')).toBeNull();
+    expect(el('[data-testid="dialog"] .message')).toBeNull();
+
+    // Escキーでも閉じられ、何も取り込まれていない。
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(await db.listSpots()).toHaveLength(0);
+  });
+
+  it('お役立ち地点だけのファイルも取り込め、設定の一覧に出る', async () => {
+    const text = await makeTransferText('abcdef', { spots: [SPOT] });
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    await openSettings();
+    importText(text, 'transfer.txt');
+    await waitFor(() => expect(el('[data-testid="receive-password"]')).not.toBeNull());
+    typeReceivePassword('abcdef');
+    el<HTMLButtonElement>('[data-testid="receive-password-submit"]')!.click();
+    await waitFor(() =>
+      expect(el('[data-testid="receive-summary"]')?.textContent).toBe('お役立ち地点1件を名簿に追加しますか?'),
+    );
+    el<HTMLButtonElement>('[data-testid="receive-confirm"]')!.click();
+    await waitFor(() => expect(doneText()).toBe('お役立ち地点1件を追加しました。'));
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    expect(el('body')?.textContent).toContain('受け取ったトイレ');
+  });
+
+  it('普通のバックアップ(JSON)は、今までどおり確認して取り込む(受け取りのダイアログは出ない)', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    await db.savePatient(createPatient('山田 太郎', '東京都千代田区1-1'));
+    const text = serializeBackup({
+      patients: [createPatient('鈴木 花子', '大阪府大阪市2-2')],
+      photos: null,
+      spots: [],
+      meta: {},
+    });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    await openSettings();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    importText(text, 'backup.json', 'merge');
+    await waitFor(() => expect(el('.message')?.textContent).toContain('1件を取り込みました。'));
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(await db.listPatients()).toHaveLength(2);
+  });
+});

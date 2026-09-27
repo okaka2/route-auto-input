@@ -4,7 +4,10 @@ import { getMeta, listPhotos, setMeta } from './db';
 import { shareOrDownloadFile } from './fileIo';
 import { dateKey } from './history';
 import { blobToDataUrl } from './photoCodec';
-import { serializePayload } from './transfer';
+// transfer.ts(中身の組み立て)と transferReceive.ts(受け取りの流れ)は、送る/受け取るときだけ
+// import() で読み込む(アプリを開いただけでは使わないので、本体を軽くする)。ここでは型だけを使う。
+import type { ConflictChoice } from './transfer';
+import type { ReceiveSteps } from './transferReceive';
 import type { Patient, TransferSendDialog } from './types';
 
 type SendDraftPatch = Partial<
@@ -20,22 +23,87 @@ const BUILD_FAILED_MESSAGE = '送るファイルを作れませんでした。';
 const PASSWORD_TOO_SHORT_MESSAGE = `パスワードは${MIN_PASSWORD_LENGTH}文字以上にしてください。`;
 const PASSWORD_MISMATCH_MESSAGE = '確認のパスワードが一致しません。';
 const SHARED_SECRET_MISSING_MESSAGE = '事業所の合言葉が見つかりません。パスワードを入力してください。';
+const RECEIVE_LOAD_FAILED_MESSAGE = '引き継ぎのファイルを開けませんでした。';
 
 /**
  * 「送る」の入口(一覧の「⋯」・選択バー・設定のお役立ち地点)からダイアログを開き、
- * パスワードで暗号化したファイルを共有/ダウンロードするまでの流れ。main.ts が持つ状態は
- * AppContext 経由でしか触らない(backupFlow.ts と同じやり方。main.ts側で1つだけ作って渡す)。
+ * パスワードで暗号化したファイルを共有/ダウンロードするまでの流れと、
+ * 設定の「読み込む」で引き継ぎのファイルを選んだときの、受け取り(パスワード → 確認 →
+ * 同じ人ごとの選択 → 取り込み)の流れ。main.ts が持つ状態は AppContext 経由でしか触らない
+ * (backupFlow.ts と同じやり方。main.ts側で1つだけ作って渡す)。
  */
 export function createTransferFlow(ctx: AppContext): {
   openSend(patientIds: string[], options?: { spotsOnly?: boolean }): Promise<void>;
   updateSendDraft(patch: SendDraftPatch): void;
   submitSend(): Promise<void>;
+  openReceive(fileText: string): Promise<void>;
+  updateReceivePassword(password: string): void;
+  submitReceivePassword(): Promise<void>;
+  confirmReceive(): Promise<void>;
+  chooseConflict(choice: ConflictChoice): Promise<void>;
+  discardReceive(): void;
 } {
   // 二重押し防止(送信中に「送る」を連打しても、ファイルを二重に作らない)。
   let sending = false;
 
+  // 受け取りの流れ(transferReceive.ts)。初めて受け取るときに読み込み、以後は同じものを使う
+  // (復号した中身や世代は、その中に持つ)。
+  let receiveSteps: Promise<ReceiveSteps> | null = null;
+  let loadedReceiveSteps: ReceiveSteps | null = null;
+
   function setDialog(next: TransferSendDialog, options?: { render?: boolean }): void {
     ctx.setState({ ...ctx.getState(), dialog: next }, options);
+  }
+
+  function loadReceiveSteps(): Promise<ReceiveSteps> {
+    receiveSteps ??= import('./transferReceive').then(({ createReceiveSteps }) => {
+      loadedReceiveSteps = createReceiveSteps(ctx);
+      return loadedReceiveSteps;
+    });
+    return receiveSteps;
+  }
+
+  /** 読み込むで引き継ぎのファイルを選んだときの入口(合言葉があれば先に試す。transferReceive.ts)。 */
+  async function openReceive(fileText: string): Promise<void> {
+    let steps: ReceiveSteps;
+    try {
+      steps = await loadReceiveSteps();
+    } catch {
+      // 読み込めなかった(通信が切れた直後の更新など)。次に選び直したときに、もう一度読み込む。
+      receiveSteps = null;
+      ctx.showMessage({ kind: 'error', text: RECEIVE_LOAD_FAILED_MESSAGE });
+      return;
+    }
+    await steps.openReceive(fileText);
+  }
+
+  /** パスワード欄の入力。描き直さない(描き直すと入力中のフォーカスが失われる)。 */
+  function updateReceivePassword(password: string): void {
+    const dialog = ctx.getState().dialog;
+    if (dialog?.kind !== 'transferReceive' || dialog.phase !== 'password') {
+      return;
+    }
+    ctx.setState({ ...ctx.getState(), dialog: { ...dialog, password, error: null } }, { render: false });
+  }
+
+  async function submitReceivePassword(): Promise<void> {
+    await (await loadReceiveSteps()).submitReceivePassword();
+  }
+
+  async function confirmReceive(): Promise<void> {
+    await (await loadReceiveSteps()).confirmReceive();
+  }
+
+  async function chooseConflict(choice: ConflictChoice): Promise<void> {
+    await (await loadReceiveSteps()).chooseConflict(choice);
+  }
+
+  /**
+   * 受け取りのダイアログが閉じた(main.ts の setState から呼ぶ)。復号した中身を捨てる。
+   * まだ読み込んでいなければ、捨てるものも無い。
+   */
+  function discardReceive(): void {
+    loadedReceiveSteps?.discardReceive();
   }
 
   /** 一覧の「⋯」(1人)・選択バー(選択中の全員)・設定のお役立ち地点(0人)、共通の入口。 */
@@ -144,6 +212,7 @@ export function createTransferFlow(ctx: AppContext): {
           })),
         );
       }
+      const { serializePayload } = await import('./transfer');
       const text = serializePayload({ sentAt: new Date().toISOString(), patients, photos, spots });
       // 暗号化(Web Crypto)はここでだけ使うので、送るときまで読み込みを遅らせて
       // ビルドの本体を軽くする(受け取る側だけを使う人にも読み込ませずに済む)。
@@ -186,5 +255,15 @@ export function createTransferFlow(ctx: AppContext): {
     }
   }
 
-  return { openSend, updateSendDraft, submitSend };
+  return {
+    openSend,
+    updateSendDraft,
+    submitSend,
+    openReceive,
+    updateReceivePassword,
+    submitReceivePassword,
+    confirmReceive,
+    chooseConflict,
+    discardReceive,
+  };
 }

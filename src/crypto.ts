@@ -4,7 +4,13 @@
  * パスワードから PBKDF2 で鍵を作り、AES-GCM で暗号化する。
  */
 
-export const TRANSFER_FORMAT = 'houmon-transfer';
+import { isEncryptedFileText, TRANSFER_FORMAT } from './transferFormat';
+
+// 見分け方(isEncryptedFileText)と目印(TRANSFER_FORMAT)は transferFormat.ts にある
+// (このファイルを別チャンクに保ったまま、読み込みの見分けに使えるようにするため)。
+// 今までどおりここからも使えるよう、そのまま出し直す。
+export { isEncryptedFileText, TRANSFER_FORMAT };
+
 export const PBKDF2_ITERATIONS = 200_000;
 // パスワードの最短の長さ(MIN_PASSWORD_LENGTH)は config.ts にある(このファイルが
 // 別チャンクに分かれるようにするため。config.ts のコメントを参照)。
@@ -72,19 +78,6 @@ async function deriveKey(password: string, salt: Uint8Array<ArrayBuffer>, iterat
     { name: 'AES-GCM', length: 256 },
     false,
     ['encrypt', 'decrypt'],
-  );
-}
-
-/** 文字列が、引き継ぎファイルの形(JSONでformatが一致)かどうかを調べる。 */
-export function isEncryptedFileText(text: string): boolean {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return false;
-  }
-  return (
-    typeof parsed === 'object' && parsed !== null && (parsed as { format?: unknown }).format === TRANSFER_FORMAT
   );
 }
 

@@ -126,6 +126,10 @@ function dialogHandlers(): DialogHandlers {
     onPhotoIndex: vi.fn(),
     onSendDraft: vi.fn(),
     onSubmit: vi.fn(),
+    onReceivePassword: vi.fn(),
+    onReceiveSubmit: vi.fn(),
+    onReceiveConfirm: vi.fn(),
+    onReceiveConflict: vi.fn(),
     onClose: vi.fn(),
   };
 }

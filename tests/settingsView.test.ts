@@ -163,7 +163,19 @@ describe('renderSettings: 読み込み', () => {
 
   it('ファイル選択欄に名前(aria-label)を付ける', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
-    expect(q(element, 'import-input').getAttribute('aria-label')).toBe('バックアップのファイルを選ぶ');
+    expect(q(element, 'import-input').getAttribute('aria-label')).toBe('バックアップか引き継ぎのファイルを選ぶ');
+  });
+
+  it('ファイルの種類(accept)で絞らない(引き継ぎのファイル .txt も選べるように)', () => {
+    const element = renderSettings(createInitialState([]), info(), handlers());
+    expect(q(element, 'import-input').hasAttribute('accept')).toBe(false);
+  });
+
+  it('引き継ぎのファイルもここから読み込める(今のデータに追加する)と案内する', () => {
+    const element = renderSettings(createInitialState([]), info(), handlers());
+    const note = q(element, 'import-transfer-note');
+    expect(note.textContent).toBe('引き継ぎのファイル(.txt)もここから読み込めます。そのときは今のデータに追加します。');
+    expect(note.classList.contains('hint')).toBe(true);
   });
 });
 

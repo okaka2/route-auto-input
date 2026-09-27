@@ -184,9 +184,10 @@ function renderBackup(info: SettingsInfo, handlers: SettingsHandlers, now: Date)
 
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
-  fileInput.accept = 'application/json,.json';
+  // 種類(accept)で絞らない。引き継ぎのファイル(.txt)もここから選べるようにするため
+  // (iPhone のファイル選択では、accept に無い拡張子のファイルを選べないことがある)。
   fileInput.dataset.testid = 'import-input';
-  fileInput.setAttribute('aria-label', 'バックアップのファイルを選ぶ');
+  fileInput.setAttribute('aria-label', 'バックアップか引き継ぎのファイルを選ぶ');
   const replaceRadio = radio('import-mode', 'replace', 'mode-replace', ' 今のデータを消して入れ替える');
   replaceRadio.input.checked = true;
   const mergeRadio = radio('import-mode', 'merge', 'mode-merge', ' 今のデータに追加する');
@@ -196,13 +197,17 @@ function renderBackup(info: SettingsInfo, handlers: SettingsHandlers, now: Date)
   legend.className = 'visually-hidden';
   legend.textContent = '読み込み方法';
   modes.append(legend, replaceRadio.label, mergeRadio.label);
+  const transferNote = document.createElement('p');
+  transferNote.className = 'hint';
+  transferNote.dataset.testid = 'import-transfer-note';
+  transferNote.textContent = '引き継ぎのファイル(.txt)もここから読み込めます。そのときは今のデータに追加します。';
   const importButton = button('import-button', '読み込む', 'block', () => {
     const file = fileInput.files?.[0];
     if (file) {
       handlers.onImport(file, mergeRadio.input.checked ? 'merge' : 'replace');
     }
   });
-  card.append(last, note, ...(includePhotosLabel ? [includePhotosLabel] : []), exportButton, fileInput, modes, importButton);
+  card.append(last, note, ...(includePhotosLabel ? [includePhotosLabel] : []), exportButton, fileInput, modes, transferNote, importButton);
   return card;
 }
 
