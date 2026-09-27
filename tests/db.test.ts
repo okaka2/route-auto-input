@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { deleteDB, openDB } from 'idb';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addPhoto,
   clearHistory,
@@ -31,8 +31,10 @@ import {
   replaceAllPatients,
   replacePhotosFor,
   savePatient,
+  setDbBlockingHandler,
   setMeta,
   updateHistory,
+  withDb,
   type HistoryEntry,
 } from '../src/db';
 import { createPatient, updatePatientFields } from '../src/patient';
@@ -370,5 +372,71 @@ describe('v3→v4の移行', () => {
     expect(await listPhotos(legacyPatient.id)).toEqual([]);
     await addPhoto(photo(legacyPatient.id, '2026-09-21T00:00:00.000Z', 'new-photo'));
     expect(await listPhotos(legacyPatient.id)).toHaveLength(1);
+  });
+});
+
+describe('接続が切れても作り直す(iOSがバックグラウンドで切ることがある)', () => {
+  afterEach(() => {
+    // 既定(再読み込み)に戻す。他のテストで誤って呼ばれても、jsdomで
+    // window.location.reload()が走って壊れないようにする。
+    setDbBlockingHandler(() => {});
+  });
+
+  it('UnknownError/InvalidStateErrorなら、接続を作り直して1回だけやり直す', async () => {
+    const seenDbs: unknown[] = [];
+    let calls = 0;
+    const result = await withDb(async (db) => {
+      calls += 1;
+      seenDbs.push(db);
+      if (calls === 1) {
+        throw new DOMException('closed', 'InvalidStateError');
+      }
+      return 'ok';
+    });
+    expect(result).toBe('ok');
+    expect(calls).toBe(2);
+    // やり直した2回目は、1回目とは別の接続で呼ばれる。
+    expect(seenDbs[1]).not.toBe(seenDbs[0]);
+  });
+
+  it('やり直しても失敗したら、そのまま投げる(3回目は呼ばない)', async () => {
+    let calls = 0;
+    await expect(
+      withDb(async () => {
+        calls += 1;
+        throw new DOMException('closed', 'InvalidStateError');
+      }),
+    ).rejects.toThrow();
+    expect(calls).toBe(2);
+  });
+
+  it('UnknownError/InvalidStateError以外(TypeErrorなど)はやり直さない', async () => {
+    let calls = 0;
+    await expect(
+      withDb(async () => {
+        calls += 1;
+        throw new TypeError('bad');
+      }),
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(calls).toBe(1);
+  });
+
+  it('他で高い版が先に開かれていると失敗するが、その接続は覚えず、deleteDB後は使える', async () => {
+    const higher = await openDB('route-auto-input', 5);
+    await expect(listPatients()).rejects.toThrow();
+    higher.close();
+    await deleteDB('route-auto-input');
+    // 失敗した接続を覚えていれば、ここも同じ理由で失敗し続けるはず。
+    await expect(listPatients()).resolves.toEqual([]);
+  });
+
+  it('新しい版(高い版)が開こうとすると、setDbBlockingHandlerで差し替えたハンドラが呼ばれ、こちらが接続を閉じて道を譲る', async () => {
+    await listPatients(); // 先にv4の接続を開いておく。
+    const handler = vi.fn();
+    setDbBlockingHandler(handler);
+
+    const higher = await openDB('route-auto-input', 5);
+    expect(handler).toHaveBeenCalledTimes(1);
+    higher.close();
   });
 });

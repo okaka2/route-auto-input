@@ -2083,6 +2083,36 @@ describe('訪問済みと時刻・履歴のコピー・古い履歴の削除', (
     await waitFor(async () => expect(Object.keys((await db.listHistory())[0]!.visited)).toHaveLength(0));
   });
 
+  it('訪問の記録の保存に失敗したら、黙らず「地図を開く」でも「済」でも同じ文でエラーを知らせる', async () => {
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const db = await import('../src/db');
+    await db.savePatient(patient);
+    await db.closeDbForTest();
+    // 前のテスト(地図の画面で選択中のまま終わるもの)の、fire-and-forgetのtoggleVisited
+    // の後始末(loadHistory→render→セッション保存)が、ここへ来るまでのawaitの間に
+    // 完了しきらず、前回の選択をlocalStorageのセッション記録へ書き戻すことがある。
+    // このテストは選択なしの一覧から始めたいので、そのキーだけ念のためもう一度消す
+    // (unlock()が書いた合言葉解錠の記録は残す。clear()だとそれも消えてロック画面に戻ってしまう)。
+    window.localStorage.removeItem('route-auto-input:session');
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    vi.spyOn(db, 'updateHistory').mockRejectedValue(new Error('x'));
+
+    el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+
+    await waitFor(() => expect(el('.message')?.textContent).toBe('訪問の記録を保存できませんでした。'));
+
+    el<HTMLButtonElement>('[data-testid="visited-toggle"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toBe('訪問の記録を保存できませんでした。'));
+  });
+
   it('起動時に56日より古い履歴を消す', async () => {
     const db = await import('../src/db');
     await db.putHistory({ date: '2020-01-01', ids: [], routeEnds: { start: 'first', end: 'last' }, visited: {} });

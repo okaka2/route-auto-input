@@ -499,7 +499,8 @@ async function recordTodayRoute(): Promise<void> {
     });
     await loadHistory();
   } catch {
-    // 記録できなくても地図は開ける。
+    // 記録できなくても地図は開けるが、黙っていると「済」が保存されているように見えてしまうため知らせる。
+    setState(withMessage(state, { kind: 'error', text: '訪問の記録を保存できませんでした。' }));
   }
 }
 
@@ -524,7 +525,7 @@ async function toggleVisited(id: string): Promise<void> {
     });
     await loadHistory();
   } catch {
-    setState(withMessage(state, { kind: 'error', text: '訪問済みを記録できませんでした。' }));
+    setState(withMessage(state, { kind: 'error', text: '訪問の記録を保存できませんでした。' }));
   }
 }
 
