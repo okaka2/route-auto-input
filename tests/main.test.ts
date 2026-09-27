@@ -3248,21 +3248,21 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
     expect(stored.map((p) => p.id).sort()).toEqual(['new-0', 'new-1', 'new-2']);
   });
 
-  it('2枚ある訪問先に、追加する形式で2枚のファイルを読み込むと、上限3枚までしか増えない', async () => {
+  it('追加する形式で読み込むと、手元にいる人の写真はそのままで、新しい人の写真は1人につき上限3枚までしか増えない', async () => {
     const { savePatient, addPhoto, listPhotos } = await import('../src/db');
     const { createPatient } = await import('../src/patient');
     const { serializeBackup } = await import('../src/backup');
-    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
-    await savePatient(patient);
+    const existing = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(existing);
     await addPhoto({
       id: 'old-0',
-      patientId: patient.id,
+      patientId: existing.id,
       blob: new Blob(['x'], { type: 'image/jpeg' }),
       createdAt: '2026-09-01T00:00:00.000Z',
     });
     await addPhoto({
       id: 'old-1',
-      patientId: patient.id,
+      patientId: existing.id,
       blob: new Blob(['x'], { type: 'image/jpeg' }),
       createdAt: '2026-09-02T00:00:00.000Z',
     });
@@ -3274,11 +3274,17 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
     el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="import-input"]')).not.toBeNull());
 
+    // ファイルには、手元にいる人(existing、写真2枚のせて来る=手元は増やさないはず)と、
+    // 手元にいない新しい人(写真4枚=1人の上限3枚を超える)を入れる。
+    const fresh = createPatient('鈴木 花子', '大阪市北区2-2');
     const text = serializeBackup({
-      patients: [patient],
+      patients: [existing, fresh],
       photos: [
-        { id: 'new-0', patientId: patient.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' },
-        { id: 'new-1', patientId: patient.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't2' },
+        { id: 'existing-new-0', patientId: existing.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' },
+        { id: 'fresh-0', patientId: fresh.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't1' },
+        { id: 'fresh-1', patientId: fresh.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't2' },
+        { id: 'fresh-2', patientId: fresh.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't3' },
+        { id: 'fresh-3', patientId: fresh.id, dataUrl: 'data:image/jpeg;base64,AAA=', createdAt: 't4' },
       ],
       spots: [],
       meta: {},
@@ -3290,11 +3296,16 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="mode-merge"]')!.click();
     el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
-    await waitFor(() => expect(el('.message')?.textContent).toContain('取り込みました'));
+    await waitFor(() => expect(el('.message')?.textContent).toContain('追加しました'));
 
-    const stored = await listPhotos(patient.id);
-    expect(stored).toHaveLength(3);
-    expect(stored.map((p) => p.id).sort()).toEqual(['new-0', 'old-0', 'old-1']);
+    // 手元にいた人(existing)の写真は変わらない(ファイルの写真は入らない)。
+    const existingPhotos = await listPhotos(existing.id);
+    expect(existingPhotos.map((p) => p.id)).toEqual(['old-0', 'old-1']);
+
+    // 新しい人(fresh)は、ファイルの順で上限3枚までしか増えない。
+    const freshPhotos = await listPhotos(fresh.id);
+    expect(freshPhotos).toHaveLength(3);
+    expect(freshPhotos.map((p) => p.id)).toEqual(['fresh-0', 'fresh-1', 'fresh-2']);
   });
 
   it('壊れた写真(base64の中身が壊れている)を含むファイルは、確認より前に中断して何も変わらない', async () => {
@@ -3747,10 +3758,87 @@ describe('受け取る(引き継ぎのファイルを読み込む)', () => {
     await openSettings();
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     importText(text, 'backup.json', 'merge');
-    await waitFor(() => expect(el('.message')?.textContent).toContain('1件を取り込みました。'));
+    await waitFor(() => expect(el('.message')?.textContent).toContain('1人を追加しました。'));
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(el('[data-testid="dialog"]')).toBeNull();
     expect(await db.listPatients()).toHaveLength(2);
+  });
+
+  it('手元で位置・メモ・許可証の期限を変えたあと、同じ人を含むバックアップを「追加する」で読むと、手元の値は残り、新しい人だけ増える', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const base = createPatient('山田 太郎', '東京都千代田区1-1');
+    // ファイル(バックアップ)には、変える前の古い状態を入れる。
+    const backedUp = { ...base, note: '古いメモ', parking: { type: 'street_permit' as const, permitExpires: '2026-01-01' } };
+    // 手元は、バックアップのあとに値を変えて保存する。
+    const changed = {
+      ...base,
+      note: '新しいメモ',
+      parking: { type: 'street_permit' as const, permitExpires: '2027-12-31' },
+      location: { lat: 35.1, lng: 139.1, accuracy: 5, recordedAt: '2026-09-25T00:00:00.000Z', source: 'gps' as const },
+    };
+    await db.savePatient(changed);
+    const fresh = createPatient('鈴木 花子', '大阪府大阪市2-2');
+    const text = serializeBackup({ patients: [backedUp, fresh], photos: null, spots: [], meta: {} });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    await openSettings();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    importText(text, 'backup.json', 'merge');
+    await waitFor(() => expect(el('.message')?.textContent).toContain('追加しました'));
+
+    expect(confirmSpy.mock.calls[0]![0]).toBe('1人を追加します(手元にいる1人はそのまま)。よろしいですか?');
+
+    const stored = await db.listPatients();
+    expect(stored).toHaveLength(2);
+    const kept = stored.find((p) => p.id === base.id);
+    expect(kept?.note).toBe('新しいメモ');
+    expect(kept?.parking).toEqual({ type: 'street_permit', permitExpires: '2027-12-31' });
+    expect(kept?.location).toEqual(changed.location);
+    expect(stored.some((p) => p.id === fresh.id)).toBe(true);
+  });
+
+  it('追加する人が1人もいなければ、確認を出さず知らせだけ出す', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const existing = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(existing);
+    const text = serializeBackup({ patients: [existing], photos: null, spots: [], meta: {} });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    await openSettings();
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    importText(text, 'backup.json', 'merge');
+    await waitFor(() =>
+      expect(el('.message')?.textContent).toBe('追加する訪問先はありませんでした(手元にいる1人はそのまま)。'),
+    );
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(await db.listPatients()).toHaveLength(1);
+  });
+
+  it('事業所が設定済みのとき、追加する読み込みではファイルの事業所で上書きされない', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    await db.setMeta('office', { name: '既存事業所', address: '東京都千代田区9-9' });
+    const fresh = createPatient('鈴木 花子', '大阪府大阪市2-2');
+    const text = serializeBackup({
+      patients: [fresh],
+      photos: null,
+      spots: [],
+      meta: { office: { name: 'ファイルの事業所', address: '大阪府大阪市1-1' } },
+    });
+
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    await openSettings();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    importText(text, 'backup.json', 'merge');
+    await waitFor(() => expect(el('.message')?.textContent).toContain('追加しました'));
+
+    expect(await db.getMeta('office')).toEqual({ name: '既存事業所', address: '東京都千代田区9-9' });
   });
 });

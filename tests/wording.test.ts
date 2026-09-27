@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_SELECTION } from '../src/config';
+import { mergeConfirmText, mergeDoneText, mergeNothingText } from '../src/backup';
 import { createPatient } from '../src/patient';
 import { DEFAULT_ROUTE_ENDS, type RouteContext } from '../src/routePlan';
 import {
@@ -600,6 +601,15 @@ describe('画面の文言(禁止語が出ない)', () => {
         renderDialog({ ...createInitialState(patients), dialog }, dialogHandlers)!.outerHTML,
       );
     }
+  });
+
+  it('バックアップの「今のデータに追加する」の文言', () => {
+    expectClean('追加の確認(手元にいる人あり)', mergeConfirmText(2, 1));
+    expectClean('追加の確認(手元にいる人なし)', mergeConfirmText(2, 0));
+    expectClean('追加なしの知らせ(手元にいる人あり)', mergeNothingText(1));
+    expectClean('追加なしの知らせ(手元にいる人なし)', mergeNothingText(0));
+    expectClean('追加の完了', mergeDoneText(2, 0));
+    expectClean('追加の完了(地点あり)', mergeDoneText(2, 3));
   });
 
   it('検証メッセージ', () => {

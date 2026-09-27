@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { deleteDB } from 'idb';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppContext } from '../src/appContext';
 import { createBackupFlow } from '../src/backupFlow';
 import { closeDbForTest } from '../src/db';
@@ -15,6 +15,12 @@ import type { AppState } from '../src/types';
 beforeEach(async () => {
   await closeDbForTest();
   await deleteDB('route-auto-input');
+});
+
+// vi.spyOn したものを毎回もとに戻す(このファイルはdbモジュールを何度もspyOnするため、
+// 戻さないと後のテストに前のモック実装が漏れる)。
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 /** 偽のAppContext。各メソッドはvi.fn()で、DBはmockせず本物(fake-indexeddb)を使う。 */
@@ -85,7 +91,7 @@ describe('createBackupFlow', () => {
     });
   });
 
-  it('入れ替え(replace)は、applyImportが1回だけ呼ばれる', async () => {
+  it('入れ替え(replace)は、applyImportが1回だけ呼ばれ、ファイルの内容がそのまま渡る', async () => {
     const db = await import('../src/db');
     const applyImportSpy = vi.spyOn(db, 'applyImport');
     const fromFile = createPatient('鈴木 花子', '大阪市北区2-2');
@@ -98,7 +104,64 @@ describe('createBackupFlow', () => {
     await flow.handleImport(file, 'replace');
 
     expect(applyImportSpy).toHaveBeenCalledTimes(1);
+    expect(applyImportSpy).toHaveBeenCalledWith({
+      replaceAll: true,
+      patients: [fromFile],
+      replacePhotosOf: [],
+      photos: [],
+      spots: [],
+      meta: {},
+    });
     expect(await db.listPatients()).toEqual([fromFile]);
+  });
+});
+
+describe('createBackupFlow: 追加(merge)はいない人だけ足す', () => {
+  it('applyImportが1回だけ呼ばれ、手元にいる人を除いた新しい人だけが渡る', async () => {
+    const db = await import('../src/db');
+    const existing = createPatient('既存', '東京都千代田区1-1');
+    await db.savePatient(existing);
+    const applyImportSpy = vi.spyOn(db, 'applyImport');
+    const fresh = createPatient('新規', '大阪市北区2-2');
+    const text = serializeBackup({ patients: [existing, fresh], photos: null, spots: [], meta: {} });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+
+    const ctx = createFakeContext();
+    const flow = createBackupFlow(ctx);
+
+    await flow.handleImport(file, 'merge');
+
+    expect(applyImportSpy).toHaveBeenCalledTimes(1);
+    expect(applyImportSpy).toHaveBeenCalledWith({
+      replaceAll: false,
+      patients: [fresh],
+      replacePhotosOf: [],
+      photos: [],
+      spots: [],
+      meta: {},
+    });
+    expect((await db.listPatients()).map((p) => p.id).sort()).toEqual([existing.id, fresh.id].sort());
+  });
+
+  it('足す人が1人もいなければ、applyImportを呼ばず確認も出さない(知らせだけ)', async () => {
+    const db = await import('../src/db');
+    const existing = createPatient('既存', '東京都千代田区1-1');
+    await db.savePatient(existing);
+    const applyImportSpy = vi.spyOn(db, 'applyImport');
+    const text = serializeBackup({ patients: [existing], photos: null, spots: [], meta: {} });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+
+    const ctx = createFakeContext();
+    const flow = createBackupFlow(ctx);
+
+    await flow.handleImport(file, 'merge');
+
+    expect(applyImportSpy).not.toHaveBeenCalled();
+    expect(ctx.confirm).not.toHaveBeenCalled();
+    expect(ctx.showMessage).toHaveBeenCalledWith({
+      kind: 'info',
+      text: '追加する訪問先はありませんでした(手元にいる1人はそのまま)。',
+    });
   });
 });
 
@@ -121,7 +184,10 @@ describe('createBackupFlow: 引き継ぎのファイルの見分け', () => {
   });
 
   it('普通のバックアップは hooks.onTransferFile へ渡さず、今までどおり確認する', async () => {
-    const text = serializeBackup({ patients: [], photos: null, spots: [], meta: {} });
+    // 追加(merge)は足す人が1人もいなければ確認を出さない(N=0の別の仕様)ため、
+    // ここでは確認が出ることを確かめるために新しい人を1人含める。
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const text = serializeBackup({ patients: [patient], photos: null, spots: [], meta: {} });
     const onTransferFile = vi.fn();
     const ctx = createFakeContext();
     const flow = createBackupFlow(ctx, { onTransferFile });

@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { BACKUP_VERSION, parseBackup, serializeBackup, type BackupContent, type BackupPhoto } from '../src/backup';
+import { MAX_PHOTOS_PER_PATIENT } from '../src/config';
+import {
+  BACKUP_VERSION,
+  mergeConfirmText,
+  mergeDoneText,
+  mergeNothingText,
+  parseBackup,
+  planBackupMerge,
+  serializeBackup,
+  type BackupContent,
+  type BackupPhoto,
+  type LocalSnapshot,
+} from '../src/backup';
 import { createPatient } from '../src/patient';
-import type { GeoLocation, Spot } from '../src/types';
+import type { GeoLocation, Photo, Spot } from '../src/types';
 
 const samplePatients = () => [
   createPatient('山田 太郎', '東京都千代田区1-1'),
@@ -289,5 +301,105 @@ describe('parseBackup', () => {
   it('バージョン3のファイルは「対応していないバージョンのバックアップファイルです。」で拒否する', () => {
     const text = JSON.stringify({ version: 3, exportedAt: '', patients: [], photos: null, spots: [], meta: {} });
     expect(() => parseBackup(text)).toThrow('対応していないバージョンのバックアップファイルです。');
+  });
+});
+
+const localOf = (overrides: Partial<LocalSnapshot> = {}): LocalSnapshot => ({
+  patientIds: new Set(),
+  spotIds: new Set(),
+  hasOffice: false,
+  hasRouteEnds: false,
+  ...overrides,
+});
+
+const mergePhoto = (patientId: string, id: string, createdAt: string): Photo => ({
+  id,
+  patientId,
+  blob: new Blob(['x'], { type: 'image/jpeg' }),
+  createdAt,
+});
+
+describe('planBackupMerge', () => {
+  it('手元にいる人は write.patients に入らず、新しい人だけ入る(added・keptの数も返す)', () => {
+    const existing = createPatient('既存', '東京都千代田区1-1');
+    const fresh = createPatient('新規', '大阪市北区2-2');
+    const plan = planBackupMerge(
+      { patients: [existing, fresh], photos: null, spots: [], meta: {} },
+      null,
+      localOf({ patientIds: new Set([existing.id]) }),
+    );
+    expect(plan.write.patients).toEqual([fresh]);
+    expect(plan.write.replaceAll).toBe(false);
+    expect(plan.write.replacePhotosOf).toEqual([]);
+    expect(plan.added).toBe(1);
+    expect(plan.kept).toBe(1);
+  });
+
+  it('写真は新しい人の分だけ、ファイルの順で1人MAX_PHOTOS_PER_PATIENT枚まで(4枚目は入らない)', () => {
+    const existing = createPatient('既存', '東京都千代田区1-1');
+    const fresh = createPatient('新規', '大阪市北区2-2');
+    const decodedPhotos: Photo[] = [
+      mergePhoto(existing.id, 'existing-photo', 't0'),
+      mergePhoto(fresh.id, 'p1', 't1'),
+      mergePhoto(fresh.id, 'p2', 't2'),
+      mergePhoto(fresh.id, 'p3', 't3'),
+      mergePhoto(fresh.id, 'p4', 't4'),
+    ];
+    const plan = planBackupMerge(
+      { patients: [existing, fresh], photos: null, spots: [], meta: {} },
+      decodedPhotos,
+      localOf({ patientIds: new Set([existing.id]) }),
+    );
+    expect(MAX_PHOTOS_PER_PATIENT).toBe(3);
+    expect(plan.write.photos.map((p) => p.id)).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('地点は無いidだけ足す(重複idは除く)', () => {
+    const existingSpot: Spot = {
+      id: 'existing-spot',
+      kind: 'toilet',
+      note: '',
+      location: { lat: 35, lng: 139, accuracy: null, recordedAt: 't', source: 'gps' },
+      createdAt: 't',
+    };
+    const newSpot: Spot = { ...existingSpot, id: 'new-spot' };
+    const plan = planBackupMerge(
+      { patients: [], photos: null, spots: [existingSpot, newSpot], meta: {} },
+      null,
+      localOf({ spotIds: new Set([existingSpot.id]) }),
+    );
+    expect(plan.write.spots).toEqual([newSpot]);
+    expect(plan.spotsAdded).toBe(1);
+  });
+
+  it('office・routeEndsは手元にまだ無いときだけ書く', () => {
+    const office = { name: '本店', address: '東京都中央区1-1' };
+    const routeEnds = { start: 'office' as const, end: 'last' as const };
+    const withNeither = planBackupMerge({ patients: [], photos: null, spots: [], meta: { office, routeEnds } }, null, localOf());
+    expect(withNeither.write.meta).toEqual({ office, routeEnds });
+
+    const withBoth = planBackupMerge(
+      { patients: [], photos: null, spots: [], meta: { office, routeEnds } },
+      null,
+      localOf({ hasOffice: true, hasRouteEnds: true }),
+    );
+    expect(withBoth.write.meta).toEqual({});
+  });
+});
+
+describe('mergeConfirmText・mergeNothingText・mergeDoneText', () => {
+  it('mergeConfirmText: 手元にいる人がいれば括弧を付け、いなければ付けない', () => {
+    expect(mergeConfirmText(2, 1)).toBe('2人を追加します(手元にいる1人はそのまま)。よろしいですか?');
+    expect(mergeConfirmText(2, 0)).toBe('2人を追加します。よろしいですか?');
+  });
+
+  it('mergeNothingText: 手元にいる人がいれば括弧を付け、いなければ付けない(M=0)', () => {
+    expect(mergeNothingText(1)).toBe('追加する訪問先はありませんでした(手元にいる1人はそのまま)。');
+    expect(mergeNothingText(0)).toBe('追加する訪問先はありませんでした。');
+  });
+
+  it('mergeDoneText: 地点を足していれば件数を添える', () => {
+    expect(mergeDoneText(2, 0)).toBe('2人を追加しました。');
+    expect(mergeDoneText(2, 3)).toBe('2人・お役立ち地点3件を追加しました。');
   });
 });

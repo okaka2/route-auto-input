@@ -1,6 +1,15 @@
 import type { AppContext } from './appContext';
-import { parseBackup, planBackupReplace, serializeBackup } from './backup';
-import { applyImport, deleteOrphanPhotos, listAllPhotos, mergePatients, mergePhotosCapped, putSpots, setMeta } from './db';
+import {
+  mergeConfirmText,
+  mergeDoneText,
+  mergeNothingText,
+  parseBackup,
+  planBackupMerge,
+  planBackupReplace,
+  serializeBackup,
+  type LocalSnapshot,
+} from './backup';
+import { applyImport, getMeta, listAllPhotos, listPatients, listSpots, setMeta } from './db';
 import { downloadTextFile, readTextFile } from './fileIo';
 import { blobToDataUrl, dataUrlToBlob } from './photoCodec';
 import { isEncryptedFileText } from './transferFormat';
@@ -100,24 +109,18 @@ export function createBackupFlow(
         return;
       }
 
-      // 確認の件数は、実際に取り込まれる訪問先に属する写真だけを数える
-      // (入れ替えならファイルの訪問先だけ、追加ならファイル+今の訪問先)。
-      const currentPatients = ctx.getState().patients;
-      const fileIds = new Set(content.patients.map((patient) => patient.id));
-      const countedIds =
-        mode === 'replace' ? fileIds : new Set([...fileIds, ...currentPatients.map((patient) => patient.id)]);
-      const photoCount = decodedPhotos?.filter((photo) => countedIds.has(photo.patientId)).length ?? 0;
-      const extras = backupExtrasLabel(photoCount, content.spots.length);
-      const question =
-        mode === 'replace'
-          ? `今のデータ${currentPatients.length}件を消して、${content.patients.length}件${extras}を取り込みます。よろしいですか?`
-          : `${content.patients.length}件${extras}を今のデータに追加します。よろしいですか?`;
-      if (!ctx.confirm(question)) {
-        return;
-      }
-
-      writeStarted = true;
       if (mode === 'replace') {
+        // 確認の写真枚数は、入れ替え後に実際に残る(=ファイルの訪問先ぶんの)写真だけを数える。
+        const fileIds = new Set(content.patients.map((patient) => patient.id));
+        const photoCount = decodedPhotos?.filter((photo) => fileIds.has(photo.patientId)).length ?? 0;
+        const extras = backupExtrasLabel(photoCount, content.spots.length);
+        const currentPatients = ctx.getState().patients;
+        const question = `今のデータ${currentPatients.length}件を消して、${content.patients.length}件${extras}を取り込みます。よろしいですか?`;
+        if (!ctx.confirm(question)) {
+          return;
+        }
+
+        writeStarted = true;
         // 訪問先・写真・地点・meta を1つのトランザクションで書く(applyImportが名簿に
         // 無くなった写真も同じ中で消す)。書き込みが成功してから、まとめて画面の状態に反映する。
         await applyImport(planBackupReplace(content, decodedPhotos));
@@ -129,33 +132,49 @@ export function createBackupFlow(
         if (content.meta.routeEnds !== undefined) {
           ctx.setRouteContext({ ...ctx.getRouteContext(), ends: content.meta.routeEnds });
         }
-      } else {
-        await mergePatients(content.patients);
-        // 写真がnullのとき(書き出す側で外した、または旧version 1のバックアップ)は、
-        // 既存の写真に一切触れない(消さない)。追加では、既存の写真を残したまま、
-        // 訪問先ごとの上限を超えないぶんだけ足す。
-        if (decodedPhotos !== null) {
-          await mergePhotosCapped(decodedPhotos);
-        }
-        await putSpots(content.spots);
-        if (content.meta.office !== undefined) {
-          const office = content.meta.office;
-          await setMeta('office', office);
-          ctx.setRouteContext({ ...ctx.getRouteContext(), office });
-          ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), office });
-        }
-        if (content.meta.routeEnds !== undefined) {
-          const routeEnds = content.meta.routeEnds;
-          await setMeta('routeEnds', routeEnds);
-          ctx.setRouteContext({ ...ctx.getRouteContext(), ends: routeEnds });
-        }
-        await deleteOrphanPhotos();
+        ctx.clearOpenedRoutes();
+        await ctx.loadSpots();
+        await ctx.loadPhotoCounts();
+        await ctx.loadPhotoBytes();
+        await ctx.reloadPatients({ kind: 'info', text: `${content.patients.length}件を取り込みました。` });
+        return;
+      }
+
+      // 追加(merge): 手元の様子は画面の state ではなく、いま実際にDBにある内容から読む。
+      // 手元に同じidの人・地点がいれば、その人は一切書き換えない(いない人だけ足す)。
+      const local: LocalSnapshot = {
+        patientIds: new Set((await listPatients()).map((patient) => patient.id)),
+        spotIds: new Set((await listSpots()).map((spot) => spot.id)),
+        hasOffice: (await getMeta('office')) !== undefined,
+        hasRouteEnds: (await getMeta('routeEnds')) !== undefined,
+      };
+      const plan = planBackupMerge(content, decodedPhotos, local);
+
+      if (plan.added === 0) {
+        // 足す人が1人もいなければ、確認を出さず何も書き込まない。
+        ctx.showMessage({ kind: 'info', text: mergeNothingText(plan.kept) });
+        return;
+      }
+      if (!ctx.confirm(mergeConfirmText(plan.added, plan.kept))) {
+        return;
+      }
+
+      writeStarted = true;
+      // 訪問先(新しい人だけ)・写真・地点・meta を1つのトランザクションで書く。
+      await applyImport(plan.write);
+      if (plan.write.meta.office !== undefined) {
+        const office = plan.write.meta.office;
+        ctx.setRouteContext({ ...ctx.getRouteContext(), office });
+        ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), office });
+      }
+      if (plan.write.meta.routeEnds !== undefined) {
+        ctx.setRouteContext({ ...ctx.getRouteContext(), ends: plan.write.meta.routeEnds });
       }
       ctx.clearOpenedRoutes();
       await ctx.loadSpots();
       await ctx.loadPhotoCounts();
       await ctx.loadPhotoBytes();
-      await ctx.reloadPatients({ kind: 'info', text: `${content.patients.length}件を取り込みました。` });
+      await ctx.reloadPatients({ kind: 'info', text: mergeDoneText(plan.added, plan.spotsAdded) });
     } catch (error) {
       if (writeStarted) {
         // 訪問先の入れ替え・追加が始まったあとに失敗した場合、DBには一部だけ書き込まれている

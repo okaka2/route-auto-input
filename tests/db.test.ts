@@ -22,11 +22,8 @@ import {
   listPhotos,
   listSpots,
   MAX_PHOTOS_PER_PATIENT,
-  mergePatients,
-  mergePhotosCapped,
   putHistory,
   putSpot,
-  putSpots,
   savePatient,
   setDbBlockingHandler,
   setMeta,
@@ -219,23 +216,35 @@ describe('applyImport(入れ替え・追加を1つのトランザクションで
     expect((await listSpots()).map((s) => s.id)).toEqual(['existing-spot']);
     expect(await getMeta('office')).toEqual({ name: '本店', address: '東京都中央区1-1' });
   });
-});
 
-describe('インポート(mergePatients・mergePhotosCapped・putSpots。Task 4でmergeを足したらplanBackupMerge経由でも使う)', () => {
-  it('mergePatientsは既存データを残したまま追加する', async () => {
+  it('複数のstoreにまたがる書き込みの途中で失敗させても(spotsの最後でput失敗)、patients・photos・spots・metaのどれも変わらない', async () => {
     const existing = createPatient('既存', '東京都');
     await savePatient(existing);
-    await mergePatients([createPatient('追加', '大阪府')]);
-    expect(await listPatients()).toHaveLength(2);
-  });
+    await addPhoto(photo(existing.id, '2026-09-20T00:00:00.000Z', 'existing-photo'));
+    // 名簿に無い訪問先を指す、孤立した写真(replaceAllの片付けで消える対象になり得るもの)。
+    await addPhoto(photo('orphan-patient', '2026-09-19T00:00:00.000Z', 'orphan-photo'));
+    await putSpot(spot('toilet', 'existing-spot'));
+    await setMeta('office', { name: '本店', address: '東京都中央区1-1' });
+    await setMeta('routeEnds', { start: 'office', end: 'last' });
 
-  it('mergePatientsは同じidを上書きする', async () => {
-    const existing = createPatient('既存', '東京都');
-    await savePatient(existing);
-    await mergePatients([updatePatientFields(existing, '更新後', '大阪府')]);
-    const stored = await listPatients();
-    expect(stored).toHaveLength(1);
-    expect(stored[0]?.name).toBe('更新後');
+    const badPlan = importPlan({
+      replaceAll: true,
+      patients: [createPatient('取込1', '大阪府')],
+      replacePhotosOf: [existing.id],
+      photos: [photo(existing.id, '2026-09-21T00:00:00.000Z', 'new-photo')],
+      // 最後の要素がkeyPath(id)を持たないため、そこでputが失敗しトランザクションごと中断される。
+      spots: [spot('rest', 'new-spot'), {} as unknown as Spot],
+      meta: { office: { name: '新事業所', address: '大阪府大阪市1-1' }, routeEnds: { start: 'current', end: 'office' } },
+    });
+
+    await expect(applyImport(badPlan)).rejects.toThrow();
+
+    expect(await listPatients()).toEqual([existing]);
+    expect((await listPhotos(existing.id)).map((p) => p.id)).toEqual(['existing-photo']);
+    expect((await listAllPhotos()).map((p) => p.id).sort()).toEqual(['existing-photo', 'orphan-photo']);
+    expect((await listSpots()).map((s) => s.id)).toEqual(['existing-spot']);
+    expect(await getMeta('office')).toEqual({ name: '本店', address: '東京都中央区1-1' });
+    expect(await getMeta('routeEnds')).toEqual({ start: 'office', end: 'last' });
   });
 });
 
@@ -357,34 +366,6 @@ describe('写真', () => {
     expect(remaining.map((p) => p.id)).toEqual(['a']);
     expect(remaining[0]?.patientId).toBe(kept.id);
   });
-
-  it('mergePhotosCappedは、既存を残したまま訪問先ごとの上限までしか追加せず、同じidは上書きする', async () => {
-    // p1はすでに2枚。ファイルは3枚追加しようとするが、上限3枚のため1枚だけ追加され、残りはスキップされる。
-    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'e1'));
-    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z', 'e2'));
-
-    await mergePhotosCapped([
-      photo('p1', '2026-09-22T00:00:00.000Z', 'n1'),
-      photo('p1', '2026-09-23T00:00:00.000Z', 'n2'),
-    ]);
-
-    const p1Photos = await listPhotos('p1');
-    expect(p1Photos).toHaveLength(3);
-    expect(p1Photos.map((p) => p.id)).toEqual(['e1', 'e2', 'n1']);
-  });
-
-  it('mergePhotosCappedは、同じidの写真は上限に数えず上書きする', async () => {
-    await addPhoto(photo('p1', '2026-09-20T00:00:00.000Z', 'a'));
-    await addPhoto(photo('p1', '2026-09-21T00:00:00.000Z', 'b'));
-    await addPhoto(photo('p1', '2026-09-22T00:00:00.000Z', 'c'));
-
-    // 3枚とも上限いっぱいだが、既存と同じidの上書きなので、件数を増やさず反映される。
-    await mergePhotosCapped([{ ...photo('p1', '2026-09-25T00:00:00.000Z', 'a'), createdAt: '2026-09-25T00:00:00.000Z' }]);
-
-    const p1Photos = await listPhotos('p1');
-    expect(p1Photos).toHaveLength(3);
-    expect(p1Photos.find((p) => p.id === 'a')?.createdAt).toBe('2026-09-25T00:00:00.000Z');
-  });
 });
 
 describe('地点(Spot)', () => {
@@ -399,11 +380,6 @@ describe('地点(Spot)', () => {
 
     await deleteSpot('a');
     expect((await listSpots()).map((s) => s.id)).toEqual(['b']);
-  });
-
-  it('putSpotsはまとめて上書きで取り込む(バックアップ用)', async () => {
-    await putSpots([spot('toilet', 'a'), spot('parking', 'c')]);
-    expect(await listSpots()).toHaveLength(2);
   });
 });
 

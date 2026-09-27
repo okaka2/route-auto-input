@@ -1,3 +1,4 @@
+import { MAX_PHOTOS_PER_PATIENT } from './config';
 import type { DbImportPlan } from './db';
 import type { Office, RouteEnd, RouteEnds, RouteStart } from './routePlan';
 import { SPOT_KINDS } from './spots';
@@ -98,6 +99,89 @@ export function planBackupReplace(content: BackupContent, decodedPhotos: Photo[]
     spots: content.spots,
     meta: content.meta,
   };
+}
+
+/** バックアップの「追加する」計画を立てるために必要な、手元(DB)の様子。 */
+export type LocalSnapshot = {
+  patientIds: ReadonlySet<string>;
+  spotIds: ReadonlySet<string>;
+  hasOffice: boolean;
+  hasRouteEnds: boolean;
+};
+
+export type MergePlan = { write: DbImportPlan; added: number; kept: number; spotsAdded: number };
+
+/**
+ * バックアップを「今のデータに追加する」ときの、applyImport への計画。手元に同じidの人が
+ * いれば、その人は一切書き換えない(上書きしない・そのまま)。写真は新しく足す人の分だけ、
+ * ファイルの順で1人 MAX_PHOTOS_PER_PATIENT 枚まで取り込む。地点は手元に無いidだけ、
+ * office・routeEndsは手元にまだ無いときだけ書く。
+ */
+export function planBackupMerge(content: BackupContent, decodedPhotos: Photo[] | null, local: LocalSnapshot): MergePlan {
+  const newPatients = content.patients.filter((patient) => !local.patientIds.has(patient.id));
+  const newPatientIds = new Set(newPatients.map((patient) => patient.id));
+  const kept = content.patients.length - newPatients.length;
+
+  const photos: Photo[] = [];
+  if (decodedPhotos !== null) {
+    const countByPatient = new Map<string, number>();
+    for (const photo of decodedPhotos) {
+      if (!newPatientIds.has(photo.patientId)) {
+        continue;
+      }
+      const count = countByPatient.get(photo.patientId) ?? 0;
+      if (count >= MAX_PHOTOS_PER_PATIENT) {
+        continue;
+      }
+      photos.push(photo);
+      countByPatient.set(photo.patientId, count + 1);
+    }
+  }
+
+  const newSpots = content.spots.filter((spot) => !local.spotIds.has(spot.id));
+
+  const meta: { office?: Office; routeEnds?: RouteEnds } = {};
+  if (!local.hasOffice && content.meta.office !== undefined) {
+    meta.office = content.meta.office;
+  }
+  if (!local.hasRouteEnds && content.meta.routeEnds !== undefined) {
+    meta.routeEnds = content.meta.routeEnds;
+  }
+
+  return {
+    write: {
+      replaceAll: false,
+      patients: newPatients,
+      replacePhotosOf: [],
+      photos,
+      spots: newSpots,
+      meta,
+    },
+    added: newPatients.length,
+    kept,
+    spotsAdded: newSpots.length,
+  };
+}
+
+/** 追加の確認。手元にいる人が1人以上いれば括弧を付け、いなければ付けない。 */
+export function mergeConfirmText(added: number, kept: number): string {
+  return kept > 0
+    ? `${added}人を追加します(手元にいる${kept}人はそのまま)。よろしいですか?`
+    : `${added}人を追加します。よろしいですか?`;
+}
+
+/** 足す人が1人もいなかったとき(N=0)に、確認の代わりに出す知らせ。 */
+export function mergeNothingText(kept: number): string {
+  return kept > 0
+    ? `追加する訪問先はありませんでした(手元にいる${kept}人はそのまま)。`
+    : `追加する訪問先はありませんでした。`;
+}
+
+/** 追加が終わったときの文。地点も足していれば件数を添える。 */
+export function mergeDoneText(added: number, spotsAdded: number): string {
+  return spotsAdded > 0
+    ? `${added}人・お役立ち地点${spotsAdded}件を追加しました。`
+    : `${added}人を追加しました。`;
 }
 
 export function toPatient(item: unknown, index: number): Patient {

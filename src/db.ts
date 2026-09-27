@@ -189,17 +189,6 @@ export async function deletePatients(ids: readonly string[]): Promise<void> {
   });
 }
 
-/** 既存データを残したまま、同じidは上書きして取り込む。(Task 4でmergeを足したらplanBackupMerge経由でも使う。) */
-export async function mergePatients(patients: readonly Patient[]): Promise<void> {
-  await withDb(async (db) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    for (const patient of patients) {
-      await tx.store.put(patient);
-    }
-    await tx.done;
-  });
-}
-
 /** バックアップの読み込み・引き継ぎの受け取りを1回で書くための計画。 */
 export type DbImportPlan = {
   /** true なら訪問先を全部消してから patients を入れる(バックアップの入れ替え)。持ち主のいなくなった写真も同じ中で消す。 */
@@ -374,37 +363,6 @@ export async function listAllPhotos(): Promise<Photo[]> {
 }
 
 /**
- * バックアップの「追加する」読み込み用。既存の写真は残したまま、訪問先ごとの上限
- * (MAX_PHOTOS_PER_PATIENT)を超えないぶんだけファイルの写真を追加する。同じidの写真は
- * 上限に数えず上書きし、上限を超えるぶんの新しい写真は書き込まずスキップする。
- */
-export async function mergePhotosCapped(photos: readonly Photo[]): Promise<void> {
-  await withDb(async (db) => {
-    const tx = db.transaction(PHOTOS_STORE, 'readwrite');
-    const index = tx.store.index('patientId');
-    const countByPatient = new Map<string, number>();
-    for (const photo of photos) {
-      if (!countByPatient.has(photo.patientId)) {
-        countByPatient.set(photo.patientId, await index.count(photo.patientId));
-      }
-      const existingKey = await tx.store.getKey(photo.id);
-      if (existingKey !== undefined) {
-        // 同じidは上書き(件数には数えない)。
-        await tx.store.put(photo);
-        continue;
-      }
-      const count = countByPatient.get(photo.patientId) ?? 0;
-      if (count >= MAX_PHOTOS_PER_PATIENT) {
-        continue;
-      }
-      await tx.store.put(photo);
-      countByPatient.set(photo.patientId, count + 1);
-    }
-    await tx.done;
-  });
-}
-
-/**
  * 名簿に無い訪問先を指す、孤立した写真を消す(起動時の片付けなど)。名簿も同じ
  * トランザクションの中で読むので、この最中に他の書き込みが割り込んで矛盾することはない。
  * 消した件数を返す。
@@ -438,15 +396,4 @@ export async function putSpot(spot: Spot): Promise<void> {
 
 export async function deleteSpot(id: string): Promise<void> {
   await withDb((db) => db.delete(SPOTS_STORE, id));
-}
-
-/** バックアップの読み込み用(同じidは上書き)。 */
-export async function putSpots(spots: readonly Spot[]): Promise<void> {
-  await withDb(async (db) => {
-    const tx = db.transaction(SPOTS_STORE, 'readwrite');
-    for (const spot of spots) {
-      await tx.store.put(spot);
-    }
-    await tx.done;
-  });
 }
