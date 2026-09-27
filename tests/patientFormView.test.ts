@@ -161,6 +161,15 @@ describe('renderPatientForm: 住所の地図での確認', () => {
     const element = renderPatientForm(null, null, null, handlers());
     expect(q(element, 'map-check-link').classList.contains('map-check')).toBe(true);
   });
+
+  it('建物名が付いた住所は、外してから地図確認リンクに渡す', () => {
+    const element = renderPatientForm(null, null, null, handlers());
+    const address = addressInput(element);
+    address.value = '神奈川県横浜市中区山下町279 グランドコート横浜レジデンス棟1203号室';
+    address.dispatchEvent(new Event('input'));
+    const url = new URL(q<HTMLAnchorElement>(element, 'map-check-link').href);
+    expect(url.searchParams.get('query')).toBe('神奈川県横浜市中区山下町279');
+  });
 });
 
 describe('renderPatientForm: メッセージと下書き', () => {

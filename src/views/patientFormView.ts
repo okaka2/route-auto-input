@@ -1,3 +1,4 @@
+import { addressForMaps } from '../addressForMaps';
 import { MAX_PHOTOS_PER_PATIENT } from '../config';
 import { DEFAULT_MAP_PROVIDER } from '../mapProviders';
 import type { Message, ParkingType, Patient, PatientFormDraft } from '../types';
@@ -372,7 +373,7 @@ function renderMapCheck(addressInput: HTMLInputElement): HTMLAnchorElement {
       link.classList.add('disabled');
       return;
     }
-    link.href = DEFAULT_MAP_PROVIDER.buildUrl([address]);
+    link.href = DEFAULT_MAP_PROVIDER.buildUrl([addressForMaps(address)]);
     link.classList.remove('disabled');
   };
   update();

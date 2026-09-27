@@ -41,6 +41,18 @@ describe('pointOf', () => {
     expect(pointOf({ address: '東京都1', location: { lat: 35.6812405, lng: 139.7671248 } })).toBe('35.681241,139.767125');
     expect(pointOf({ address: '東京都1' })).toBe('東京都1');
   });
+
+  it('位置が無ければ、住所は建物名を外して渡す(あれば座標を優先)', () => {
+    expect(pointOf({ address: '神奈川県横浜市中区山下町279 グランドコート横浜レジデンス棟1203号室' })).toBe(
+      '神奈川県横浜市中区山下町279',
+    );
+    expect(
+      pointOf({
+        address: '神奈川県横浜市中区山下町279 グランドコート横浜レジデンス棟1203号室',
+        location: { lat: 35.1, lng: 139.1 },
+      }),
+    ).toBe('35.100000,139.100000');
+  });
 });
 
 describe('accuracyLevel', () => {

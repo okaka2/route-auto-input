@@ -1545,7 +1545,7 @@ function confirmedShareText(): string | null {
   if (!window.confirm(question)) {
     return null;
   }
-  return buildShareText(points, MAX_STOPS_PER_ROUTE, DEFAULT_MAP_PROVIDER);
+  return buildShareText(points, MAX_STOPS_PER_ROUTE - 1, DEFAULT_MAP_PROVIDER);
 }
 
 function showCopiedMessage(): void {

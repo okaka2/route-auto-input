@@ -10,9 +10,12 @@ describe('officeStopCount / stopsPerRoute', () => {
     expect(officeStopCount(ends('office', 'office'), office)).toBe(2);
     expect(stopsPerRoute(ends('office', 'office'), office, 10)).toBe(8);
   });
-  it('現在地から/最後の訪問先で終わるなら減らない', () => {
-    expect(stopsPerRoute(ends('current', 'last'), office, 10)).toBe(10);
+  it('最後の訪問先で終わるなら減らない', () => {
     expect(stopsPerRoute(ends('first', 'last'), null, 10)).toBe(10);
+  });
+  it('現在地からは1件減る', () => {
+    expect(stopsPerRoute(ends('current', 'last'), office, 10)).toBe(9);
+    expect(stopsPerRoute(ends('current', 'office'), office, 10)).toBe(8);
   });
   it('事業所が未登録なら office の指定は無視する', () => {
     expect(officeStopCount(ends('office', 'office'), null)).toBe(0);
@@ -69,5 +72,17 @@ describe('buildRoutePlans', () => {
     ];
     const [plan] = buildRoutePlans(stopsWithLocation, { start: 'first', end: 'last' }, null, 10);
     expect(plan!.addresses).toEqual(['35.100000,139.100000', '住所2']);
+  });
+  it('現在地から出発なら、1ルート9件までで分かれる', () => {
+    const plans = buildRoutePlans(stops(10), ends('current', 'last'), null, 10);
+    expect(plans).toHaveLength(2);
+    expect(plans[0]!.addresses).toHaveLength(9);
+    expect(plans[1]!.addresses).toHaveLength(2);
+  });
+  it('事業所の住所は建物名を外して渡す', () => {
+    const officeWithBuilding: Office = { name: '事業所', address: '東京都中央区0-0-0 本社ビル3F' };
+    const [plan] = buildRoutePlans(stops(2), ends('office', 'office'), officeWithBuilding, 10);
+    expect(plan!.addresses[0]).toBe('東京都中央区0-0-0');
+    expect(plan!.addresses.at(-1)).toBe('東京都中央区0-0-0');
   });
 });

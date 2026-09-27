@@ -1,3 +1,5 @@
+import { addressForMaps } from './addressForMaps';
+
 export const GOOD_ACCURACY_M = 20;
 export const POOR_ACCURACY_M = 50;
 
@@ -44,9 +46,11 @@ export function distanceMeters(a: LatLng, b: LatLng): number {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/** 地図に渡す地点。位置があれば '35.681240,139.767120'(小数6桁)、なければ住所。 */
+/** 地図に渡す地点。位置があれば '35.681240,139.767120'(小数6桁)、なければ住所(建物名は外す)。 */
 export function pointOf(stop: { address: string; location?: LatLng }): string {
-  return stop.location ? `${stop.location.lat.toFixed(6)},${stop.location.lng.toFixed(6)}` : stop.address;
+  return stop.location
+    ? `${stop.location.lat.toFixed(6)},${stop.location.lng.toFixed(6)}`
+    : addressForMaps(stop.address);
 }
 
 /** 'good'(20m以内)/ 'fair' / 'poor'(50m以上)。 */

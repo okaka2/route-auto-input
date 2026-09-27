@@ -1,3 +1,4 @@
+import { addressForMaps } from './addressForMaps';
 import { pointOf } from './geoPoint';
 import { splitIntoRoutes } from './routeSplitter';
 
@@ -24,9 +25,9 @@ export function officeStopCount(ends: RouteEnds, office: Office | null): number 
   return (e.start === 'office' ? 1 : 0) + (e.end === 'office' ? 1 : 0);
 }
 
-/** 1ルートに入れられる訪問先の数。 */
+/** 1ルートに入れられる訪問先の数。現在地から出発するなら、地図の出発地ぶんでさらに1件減る。 */
 export function stopsPerRoute(ends: RouteEnds, office: Office | null, maxStops: number): number {
-  return maxStops - officeStopCount(ends, office);
+  return maxStops - officeStopCount(ends, office) - (ends.start === 'current' ? 1 : 0);
 }
 
 export type RoutePlan<T> = {
@@ -54,10 +55,10 @@ export function buildRoutePlans<T extends { address: string; location?: { lat: n
     const last = index === routes.length - 1;
     const addresses = route.map((stop) => pointOf(stop));
     if (first && e.start === 'office' && office) {
-      addresses.unshift(office.address);
+      addresses.unshift(addressForMaps(office.address));
     }
     if (last && e.end === 'office' && office) {
-      addresses.push(office.address);
+      addresses.push(addressForMaps(office.address));
     }
     return {
       stops: [...route],

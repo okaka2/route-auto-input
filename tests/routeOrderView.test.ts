@@ -272,4 +272,10 @@ describe('出発・帰着の選択', () => {
     expect(items[8]!.dataset.testid).toBe('route-divider');
     expect(element.textContent).toContain('訪問先は1ルート8件まで');
   });
+  it('現在地から出発すると、区切りが9件ごとになり、案内に「9件まで」と出る', () => {
+    const element = renderRouteOrder(selectedState(10), context(office, { start: 'current', end: 'last' }), handlers());
+    const items = [...element.querySelectorAll<HTMLElement>('.stop-timeline > li')];
+    expect(items[9]!.dataset.testid).toBe('route-divider');
+    expect(element.textContent).toContain('訪問先は1ルート9件まで');
+  });
 });

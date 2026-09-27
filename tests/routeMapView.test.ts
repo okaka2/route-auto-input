@@ -460,4 +460,18 @@ describe('renderRouteMap: 出発・帰着', () => {
     expect(element.querySelectorAll('[data-testid="route-card"]')).toHaveLength(2);
     expect(element.querySelector('[data-testid="map-summary"]')?.textContent).toContain('最大8地点');
   });
+  it('現在地から出発すると、10件選んでも1本9件までで2本に分かれる', () => {
+    const element = renderRouteMap(
+      selectedState(10),
+      new Map(),
+      googleMapsProvider,
+      { ends: { start: 'current', end: 'last' }, office: null },
+      new Map(),
+      new Map(),
+      [],
+      handlers(),
+    );
+    expect(element.querySelectorAll('[data-testid="route-card"]')).toHaveLength(2);
+    expect(element.querySelector('[data-testid="map-summary"]')?.textContent).toContain('最大9地点');
+  });
 });
