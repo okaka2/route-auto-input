@@ -15,8 +15,11 @@ export const PBKDF2_ITERATIONS = 200_000;
 // パスワードの最短の長さ(MIN_PASSWORD_LENGTH)は config.ts にある(このファイルが
 // 別チャンクに分かれるようにするため。config.ts のコメントを参照)。
 
-/** ホスト側の異常なファイルで止まらないように、回数の上限を決めておく。 */
-const MAX_ITERATIONS = 10_000_000;
+/**
+ * 異常なファイル(回数がとても大きい)で、古いスマホが長く固まらないように、回数の上限を決めておく。
+ * 既定(PBKDF2_ITERATIONS)の10倍。暗号化と復号の両方で、この上限を使う。
+ */
+export const MAX_ITERATIONS = 2_000_000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 /** `String.fromCharCode(...大きな配列)` はスタックを溢れさせるので、区切って変換する。 */
@@ -24,6 +27,17 @@ const BASE64_CHUNK_SIZE = 0x8000;
 
 const WRONG_PASSWORD_MESSAGE = 'パスワードが違うか、ファイルが壊れています。';
 const NOT_TRANSFER_FILE_MESSAGE = '引き継ぎのファイルではありません。';
+
+/**
+ * ファイルの形が引き継ぎのファイルとして読めない(JSONでない・目印や版が違う・回数が上限を超える など)
+ * ときに decryptText が投げる例外。パスワード違い(復号の失敗)と見分けられるよう、別の型にする。
+ */
+export class NotTransferFileError extends Error {
+  constructor() {
+    super(NOT_TRANSFER_FILE_MESSAGE);
+    this.name = 'NotTransferFileError';
+  }
+}
 
 export type EncryptedFile = {
   format: typeof TRANSFER_FORMAT;
@@ -81,16 +95,16 @@ async function deriveKey(password: string, salt: Uint8Array<ArrayBuffer>, iterat
   );
 }
 
-/** JSON文字列を、形を確かめたうえでEncryptedFileに変換する。形が違えば例外を投げる。 */
+/** JSON文字列を、形を確かめたうえでEncryptedFileに変換する。形が違えば NotTransferFileError を投げる。 */
 function parseEncryptedFile(text: string): EncryptedFile {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error(NOT_TRANSFER_FILE_MESSAGE);
+    throw new NotTransferFileError();
   }
   if (typeof parsed !== 'object' || parsed === null) {
-    throw new Error(NOT_TRANSFER_FILE_MESSAGE);
+    throw new NotTransferFileError();
   }
   const obj = parsed as Record<string, unknown>;
   if (
@@ -101,7 +115,7 @@ function parseEncryptedFile(text: string): EncryptedFile {
     typeof obj.iv !== 'string' ||
     typeof obj.data !== 'string'
   ) {
-    throw new Error(NOT_TRANSFER_FILE_MESSAGE);
+    throw new NotTransferFileError();
   }
   return { format: TRANSFER_FORMAT, v: 1, iter: obj.iter, salt: obj.salt, iv: obj.iv, data: obj.data };
 }
@@ -113,7 +127,7 @@ export async function encryptText(
   iterations: number = PBKDF2_ITERATIONS,
 ): Promise<string> {
   if (!isValidIterationCount(iterations)) {
-    throw new RangeError('PBKDF2の回数(iterations)は、1以上10,000,000以下の整数にしてください。');
+    throw new RangeError(`PBKDF2の回数(iterations)は、1以上${MAX_ITERATIONS.toLocaleString('en-US')}以下の整数にしてください。`);
   }
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
@@ -132,7 +146,7 @@ export async function encryptText(
 
 /**
  * 引き継ぎファイルのJSON文字列をパスワードで復号する。
- * 形が違えば「引き継ぎのファイルではありません。」、
+ * 形が違えば NotTransferFileError(「引き継ぎのファイルではありません。」)、
  * パスワード違いや改ざんなど復号に失敗した場合は「パスワードが違うか、ファイルが壊れています。」を投げる。
  */
 export async function decryptText(fileText: string, password: string): Promise<string> {

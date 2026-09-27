@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { decryptText, encryptText, isEncryptedFileText, PBKDF2_ITERATIONS } from '../src/crypto';
+import {
+  decryptText,
+  encryptText,
+  isEncryptedFileText,
+  MAX_ITERATIONS,
+  NotTransferFileError,
+  PBKDF2_ITERATIONS,
+} from '../src/crypto';
 
 /** テスト用に、data(base64)をバイト列に戻す/バイト列をbase64に戻す。 */
 function base64ToBytes(base64: string): Uint8Array {
@@ -33,11 +40,12 @@ describe('encryptText / decryptText / isEncryptedFileText', () => {
     expect(await decryptText(file, 'secret-123')).toBe(plain);
   });
 
-  it('パスワードが違えば、決まった文で失敗する', async () => {
+  it('パスワードが違えば、決まった文で失敗する(形の違いの NotTransferFileError とは別の例外)', async () => {
     const file = await encryptText('x', 'secret-123', 1000);
     await expect(decryptText(file, 'secret-124')).rejects.toThrow(
       'パスワードが違うか、ファイルが壊れています。',
     );
+    await expect(decryptText(file, 'secret-124')).rejects.not.toBeInstanceOf(NotTransferFileError);
   });
 
   it('パスワードのNFC正規化が違っても(分解済み⇔合成済み)、同じパスワードとして戻せる', async () => {
@@ -89,9 +97,23 @@ describe('encryptText / decryptText / isEncryptedFileText', () => {
     await expect(decryptText('abc', 'secret-123')).rejects.toThrow(
       '引き継ぎのファイルではありません。',
     );
+    // パスワード違いと見分けられるよう、形の違いは NotTransferFileError で投げる。
+    await expect(decryptText('abc', 'secret-123')).rejects.toBeInstanceOf(NotTransferFileError);
   });
 
-  it.each([0, -1, 1.5, '1000', 10_000_001])(
+  it('版(v)が違うファイルも、NotTransferFileError(新しい版のアプリで作られたものなど)', async () => {
+    const file = await encryptText('x', 'secret-123', 1000);
+    const parsed = JSON.parse(file) as Record<string, unknown>;
+    parsed.v = 2;
+    await expect(decryptText(JSON.stringify(parsed), 'secret-123')).rejects.toBeInstanceOf(NotTransferFileError);
+  });
+
+  it('回数の上限は 2,000,000 回(既定の10倍)', () => {
+    expect(MAX_ITERATIONS).toBe(2_000_000);
+    expect(MAX_ITERATIONS).toBe(PBKDF2_ITERATIONS * 10);
+  });
+
+  it.each([0, -1, 1.5, '1000', MAX_ITERATIONS + 1, 10_000_000])(
     '回数(iter)が %p のように不正なファイルは、引き継ぎのファイルではない',
     async (badIter) => {
       const file = await encryptText('x', 'secret-123', 1000);
@@ -100,6 +122,7 @@ describe('encryptText / decryptText / isEncryptedFileText', () => {
       await expect(decryptText(JSON.stringify(parsed), 'secret-123')).rejects.toThrow(
         '引き継ぎのファイルではありません。',
       );
+      await expect(decryptText(JSON.stringify(parsed), 'secret-123')).rejects.toBeInstanceOf(NotTransferFileError);
     },
   );
 
@@ -120,7 +143,7 @@ describe('encryptText / decryptText / isEncryptedFileText', () => {
     expect(await decryptText(file, 'secret-123')).toBe(plain);
   }, 20_000);
 
-  it.each([0, -1, 1.5, '1000' as unknown as number, 10_000_001])(
+  it.each([0, -1, 1.5, '1000' as unknown as number, MAX_ITERATIONS + 1, 10_000_000])(
     'encryptTextに不正な回数(%p)を渡すとRangeErrorになる',
     async (badIterations) => {
       await expect(encryptText('x', 'secret-123', badIterations)).rejects.toThrow(RangeError);

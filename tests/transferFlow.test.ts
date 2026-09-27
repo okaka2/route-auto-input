@@ -203,6 +203,25 @@ describe('createTransferFlow: submitSend', () => {
     expect(ctx.confirm).not.toHaveBeenCalled();
   });
 
+  it('長さの数え方は設定の合言葉と同じ(前後の空白も数える): 5文字はエラー、空白で始まる6文字は通る', async () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const { ctx, getDialog } = createFakeContext({ patients: [patient] });
+    const flow = createTransferFlow(ctx);
+    await flow.openSend([patient.id]);
+    vi.mocked(ctx.confirm).mockReturnValue(false);
+
+    flow.updateSendDraft({ password: 'abcde', passwordConfirm: 'abcde' });
+    await flow.submitSend();
+    expect(getDialog()?.error).toBe(`パスワードは${MIN_PASSWORD_LENGTH}文字以上にしてください。`);
+    expect(ctx.confirm).not.toHaveBeenCalled();
+
+    flow.updateSendDraft({ password: ' abcde', passwordConfirm: ' abcde' });
+    await flow.submitSend();
+    expect(getDialog()?.error).toBeNull();
+    // 長さの確認を通り、送る前の確認まで進んだ。
+    expect(ctx.confirm).toHaveBeenCalledTimes(1);
+  });
+
   it('確認用パスワードが一致しなければエラー', async () => {
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
     const { ctx, getDialog } = createFakeContext({ patients: [patient] });
@@ -617,6 +636,183 @@ describe('createTransferFlow: 受け取り(パスワード)', () => {
     await pending;
 
     expect(getState().dialog).toBeNull();
+  });
+
+  it('「少しお待ちください」(working)のダイアログは、受け取りのコードを読み込む前に、その場で出る', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    const text = await makeTransferFile('abcdef', { spots: [SPOT] });
+
+    const pending = flow.openReceive(text);
+    // まだ1つも await が進んでいない(同期のうち)に、もう出ている。
+    expect(receiveDialogOf(getState())).toEqual({
+      kind: 'transferReceive',
+      fileText: text,
+      phase: 'working',
+      password: '',
+      error: null,
+      summary: '',
+      conflictIndex: 0,
+      conflicts: [],
+      result: null,
+    });
+    await pending;
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', fileText: text });
+  });
+
+  it('2回目以降(受け取りのコードを読み込み済み)でも、working のダイアログはその場で出る', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await flow.openReceive(await makeTransferFile('abcdef', { spots: [SPOT] }));
+    ctx.setState({ ...getState(), dialog: null });
+    flow.discardReceive();
+
+    const text = await makeTransferFile('abcdef', { spots: [SPOT] });
+    const pending = flow.openReceive(text);
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'working', fileText: text });
+    await pending;
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', fileText: text });
+  });
+
+  it('合言葉を読み出している間も working のまま。その間に閉じられたら、あとから開き直さない', async () => {
+    await setMeta('sharedSecret', 'jimusho-aikotoba');
+    const { ctx, getState } = createFakeContext({ hasSharedSecret: true });
+    const flow = createTransferFlow(ctx);
+    // 1回目で受け取りのコードを読み込んでおく(2回目は、合言葉の読み出しの前に working になる)。
+    await flow.openReceive(await makeTransferFile('jimusho-aikotoba', { spots: [SPOT] }));
+    ctx.setState({ ...getState(), dialog: null });
+    flow.discardReceive();
+
+    let releaseMeta!: () => void;
+    const metaGate = new Promise<void>((resolve) => {
+      releaseMeta = resolve;
+    });
+    const realGetMeta = db.getMeta;
+    vi.spyOn(db, 'getMeta').mockImplementation(async (key) => {
+      await metaGate;
+      return realGetMeta(key);
+    });
+
+    const pending = flow.openReceive(await makeTransferFile('jimusho-aikotoba', { spots: [SPOT] }));
+    await vi.waitFor(() => expect(db.getMeta).toHaveBeenCalledWith('sharedSecret'), { timeout: 2000, interval: 5 });
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'working' });
+
+    // main.ts の setState と同じく、閉じたら discardReceive を呼ぶ。
+    ctx.setState({ ...getState(), dialog: null });
+    flow.discardReceive();
+    releaseMeta();
+    await pending;
+
+    expect(getState().dialog).toBeNull();
+  });
+
+  it('受け取りのコードを読み込めなければ、working のダイアログを閉じて「開けませんでした」を出す。選び直せば、もう一度読み込む', async () => {
+    vi.doMock('../src/transferReceive', () => {
+      throw new Error('読み込みに失敗(通信が切れたなど)');
+    });
+    try {
+      const { ctx, getState } = createFakeContext();
+      const flow = createTransferFlow(ctx);
+      const text = await makeTransferFile('abcdef', { spots: [SPOT] });
+
+      const pending = flow.openReceive(text);
+      expect(receiveDialogOf(getState())).toMatchObject({ phase: 'working' });
+      await pending;
+
+      expect(getState().dialog).toBeNull();
+      expect(getState().message).toEqual({ kind: 'error', text: '引き継ぎのファイルを開けませんでした。' });
+
+      vi.doUnmock('../src/transferReceive');
+      await flow.openReceive(text);
+      expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', fileText: text });
+    } finally {
+      vi.doUnmock('../src/transferReceive');
+    }
+  });
+});
+
+describe('createTransferFlow: 受け取り(パスワードと関係のない失敗の文)', () => {
+  const NOT_TRANSFER = '引き継ぎのファイルではないか、新しい版のアプリで作られています。';
+  const LOAD_FAILED = '引き継ぎのファイルを開けませんでした。';
+
+  /** 版(v)だけを変えた、新しい版のアプリで作られたかのようなファイル。 */
+  async function newerVersionFile(password: string): Promise<string> {
+    const parsed = JSON.parse(await makeTransferFile(password, { spots: [SPOT] })) as Record<string, unknown>;
+    parsed.v = 2;
+    return JSON.stringify(parsed);
+  }
+
+  it('形が読めない(新しい版など)ファイルは、パスワード違いではなく、その旨を出す', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await flow.openReceive(await newerVersionFile('abcdef'));
+    flow.updateReceivePassword('abcdef');
+
+    await flow.submitReceivePassword();
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', error: NOT_TRANSFER });
+  });
+
+  it('合言葉で先に試したときも、形が読めなければ黙ってパスワードの画面にせず、その旨を出す', async () => {
+    await setMeta('sharedSecret', 'jimusho-aikotoba');
+    const { ctx, getState } = createFakeContext({ hasSharedSecret: true });
+    const flow = createTransferFlow(ctx);
+
+    await flow.openReceive(await newerVersionFile('jimusho-aikotoba'));
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', error: NOT_TRANSFER });
+  });
+
+  it('復号のコードを読み込めなければ、パスワード違いではなく「開けませんでした」を出す', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    const text = await makeTransferFile('abcdef', { spots: [SPOT] });
+    await flow.openReceive(text);
+    flow.updateReceivePassword('abcdef');
+
+    vi.doMock('../src/crypto', () => {
+      throw new Error('読み込みに失敗(通信が切れたなど)');
+    });
+    try {
+      await flow.submitReceivePassword();
+    } finally {
+      vi.doUnmock('../src/crypto');
+    }
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', error: LOAD_FAILED });
+  });
+
+  it('合言葉で先に試したときも、復号のコードを読み込めなければ「開けませんでした」を出す', async () => {
+    await setMeta('sharedSecret', 'jimusho-aikotoba');
+    const { ctx, getState } = createFakeContext({ hasSharedSecret: true });
+    const flow = createTransferFlow(ctx);
+    const text = await makeTransferFile('jimusho-aikotoba', { spots: [SPOT] });
+
+    vi.doMock('../src/crypto', () => {
+      throw new Error('読み込みに失敗(通信が切れたなど)');
+    });
+    try {
+      await flow.openReceive(text);
+    } finally {
+      vi.doUnmock('../src/crypto');
+    }
+
+    expect(receiveDialogOf(getState())).toMatchObject({ phase: 'password', error: LOAD_FAILED });
+  });
+
+  it('パスワード違い(復号の失敗)だけが「パスワードが違うか…」になる', async () => {
+    const { ctx, getState } = createFakeContext();
+    const flow = createTransferFlow(ctx);
+    await flow.openReceive(await makeTransferFile('abcdef', { spots: [SPOT] }));
+    flow.updateReceivePassword('abcdeg');
+
+    await flow.submitReceivePassword();
+
+    expect(receiveDialogOf(getState())).toMatchObject({
+      phase: 'password',
+      error: 'パスワードが違うか、ファイルが壊れています。何度でもやり直せます。',
+    });
   });
 });
 

@@ -171,3 +171,26 @@ describe('選択バー', () => {
     expect(css).toMatch(/\.selection-bar\s*\{[^}]*flex-wrap:\s*wrap/s);
   });
 });
+
+describe('訪問順の画面の出発・帰着(狭い画面で横にはみ出さない)', () => {
+  it('.ends-row は、中身の幅で広がる素の 1fr 1fr ではなく、minmax(0, 1fr) の2列にする', () => {
+    const start = css.indexOf('\n.ends-row {');
+    expect(start, '.ends-row が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).not.toMatch(/grid-template-columns:\s*1fr 1fr/);
+    expect(block).toMatch(/grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  });
+
+  it('選択欄は列の幅いっぱい(width: 100%)にする', () => {
+    expect(css).toMatch(/\.ends-field select\s*\{[^}]*width:\s*100%/s);
+  });
+
+  it('狭い画面(30rem以下)では1列にする(後ろにある .ends-row の定義に負けない詳しさで)', () => {
+    const mediaStart = css.indexOf('@media (max-width: 30rem)');
+    expect(mediaStart, '@media (max-width: 30rem) が styles.css にない').toBeGreaterThanOrEqual(0);
+    const mediaBlock = blockAt(css, css.indexOf('{', mediaStart));
+    // この @media は .ends-row の定義より前にあるので、素の .ends-row では後ろの2列に負ける。
+    expect(mediaStart).toBeLessThan(css.indexOf('\n.ends-row {'));
+    expect(mediaBlock).toMatch(/\.ends-panel \.ends-row\s*\{[^}]*grid-template-columns:\s*1fr\s*;/s);
+  });
+});

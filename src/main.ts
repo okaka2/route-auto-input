@@ -614,9 +614,13 @@ async function handleClearOffice(): Promise<void> {
   }
 }
 
-/** 設定の「事業所の合言葉」の「保存」。6文字未満なら保存せずメッセージだけ出す。 */
+/**
+ * 設定の「事業所の合言葉」の「保存」。6文字未満なら保存せずメッセージだけ出す。
+ * 長さの数え方は、送るダイアログで「この合言葉を事業所の合言葉として保存する」ときと同じにする
+ * (空白も1文字と数え、前後を削らない。保存する値そのものの長さで決める)。
+ */
 async function handleSaveSharedSecret(value: string): Promise<void> {
-  if (value.trim().length < MIN_PASSWORD_LENGTH) {
+  if (value.length < MIN_PASSWORD_LENGTH) {
     setState(withMessage(state, { kind: 'error', text: `${MIN_PASSWORD_LENGTH}文字以上にしてください。` }));
     return;
   }

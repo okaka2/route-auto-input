@@ -250,6 +250,132 @@ describe('renderDialog: アクセシビリティ', () => {
     }
   });
 
+  const tab = (target: HTMLElement, shiftKey = false): KeyboardEvent => {
+    const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event;
+  };
+
+  it('受け取りのパスワード: 最初の入力欄でShift+Tabを押すと、最後の「開く」へ回る', () => {
+    const state = {
+      ...base(),
+      dialog: {
+        kind: 'transferReceive' as const,
+        fileText: '{}',
+        phase: 'password' as const,
+        password: '',
+        error: null,
+        summary: '',
+        conflictIndex: 0,
+        conflicts: [],
+        result: null,
+      },
+    };
+    const element = renderDialog(state, handlers())!;
+    document.body.append(element);
+    try {
+      const input = element.querySelector<HTMLInputElement>('[data-testid="receive-password"]')!;
+      input.focus();
+      const event = tab(input, true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(button(element, 'receive-password-submit'));
+
+      // 「開く」でTabを押すと、最初の入力欄へ戻る。
+      const back = tab(button(element, 'receive-password-submit'));
+      expect(back.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(input);
+    } finally {
+      element.remove();
+    }
+  });
+
+  it('送るダイアログ: 最後の「送る」でTabを押すと、最初の入力欄(パスワード)へ回る', () => {
+    const state = {
+      ...base(),
+      dialog: {
+        kind: 'transferSend' as const,
+        patientIds: [patient.id],
+        includePhotos: true,
+        includeSpots: false,
+        useSharedSecret: false,
+        password: '',
+        passwordConfirm: '',
+        saveAsShared: false,
+        phase: 'form' as const,
+        error: null,
+        shared: false,
+      },
+    };
+    const element = renderDialog(state, handlers())!;
+    document.body.append(element);
+    try {
+      const send = button(element, 'transfer-send-button');
+      send.focus();
+      const event = tab(send);
+      expect(event.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(element.querySelector('[data-testid="transfer-password"]'));
+    } finally {
+      element.remove();
+    }
+  });
+
+  it('位置の登録: 閉じた貼り付け欄(details)の中の入力欄・ボタンは数えない(見出しの summary は数える)', () => {
+    const locationState = (pasteOpen: boolean) => ({
+      ...base(),
+      dialog: {
+        kind: 'location' as const,
+        id: patient.id,
+        phase: 'idle' as const,
+        best: null,
+        error: null,
+        pasteText: '',
+        pasteError: null,
+        pasteOpen,
+        previous: null,
+      },
+    });
+    // 「閉じる」を取り除いて、貼り付け欄(details)を最後にした形で確かめる
+    // (details の中身を数えるかどうかで、最後がどれになるかが変わる)。
+    const renderWithoutClose = (pasteOpen: boolean): HTMLElement => {
+      const element = renderDialog(locationState(pasteOpen), handlers())!;
+      element.querySelector('.sheet-buttons')!.remove();
+      document.body.append(element);
+      return element;
+    };
+
+    const closed = renderWithoutClose(false);
+    try {
+      const summary = closed.querySelector<HTMLElement>('summary')!;
+      expect(closed.querySelector<HTMLDetailsElement>('details')!.open).toBe(false);
+      summary.focus();
+      const event = tab(summary);
+      // 閉じた details の中の入力欄・「貼り付けた位置で登録」は飛ばし、summary が最後になる。
+      expect(event.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(button(closed, 'location-measure-button'));
+
+      const first = button(closed, 'location-measure-button');
+      const backward = tab(first, true);
+      expect(backward.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(summary);
+    } finally {
+      closed.remove();
+    }
+
+    const opened = renderWithoutClose(true);
+    try {
+      const summary = opened.querySelector<HTMLElement>('summary')!;
+      summary.focus();
+      // 開いていれば、中の入力欄・ボタンへ進める(summary は最後ではない)。
+      expect(tab(summary).defaultPrevented).toBe(false);
+      const first = button(opened, 'location-measure-button');
+      first.focus();
+      tab(first, true);
+      expect(document.activeElement).toBe(button(opened, 'location-paste-save'));
+    } finally {
+      opened.remove();
+    }
+  });
+
   it('途中のボタンでのTabキーは、そのまま(ブラウザの動作に任せる)', () => {
     const element = renderDialog(openRowMenu(base(), patient.id), handlers())!;
     document.body.append(element);

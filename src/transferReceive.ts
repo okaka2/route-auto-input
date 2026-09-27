@@ -16,10 +16,13 @@ import {
   type ConflictChoice,
   type TransferPayload,
 } from './transfer';
+import { RECEIVE_LOAD_FAILED_MESSAGE } from './transferFormat';
 import type { Patient, Photo, TransferReceiveDialog } from './types';
 
 const RECEIVE_PASSWORD_EMPTY_MESSAGE = 'パスワードを入れてください。';
 const RECEIVE_WRONG_PASSWORD_MESSAGE = 'パスワードが違うか、ファイルが壊れています。何度でもやり直せます。';
+/** 形が引き継ぎのファイルとして読めない(目印・版・回数など)。パスワードを入れ直しても直らない。 */
+const RECEIVE_NOT_TRANSFER_FILE_MESSAGE = '引き継ぎのファイルではないか、新しい版のアプリで作られています。';
 const RECEIVE_BROKEN_PHOTO_MESSAGE = '引き継ぎのファイルの写真が壊れています。';
 const RECEIVE_NOTHING_MESSAGE = 'このファイルには追加するものがありません。';
 const RECEIVE_PARSE_FAILED_MESSAGE = '引き継ぎのファイルの中身を読めませんでした。';
@@ -135,17 +138,29 @@ export function createReceiveSteps(ctx: AppContext): ReceiveSteps {
     return dialog;
   }
 
-  /** パスワードで復号して読み取る。パスワード違いなら 'wrong'、中身に問題があればその文。 */
+  /**
+   * パスワードで復号して読み取る。パスワード違い(復号の失敗)のときだけ 'wrong'。
+   * それ以外の問題(復号のコードを読み込めない・引き継ぎのファイルとして読めない形・中身の問題)は、
+   * パスワードを入れ直しても直らないので、その文を返す。
+   */
   async function decryptAndRead(
     fileText: string,
     password: string,
   ): Promise<{ data: DecodedReceive } | { error: string } | 'wrong'> {
     // 復号(Web Crypto)は、送る側と同じく別に分けたものを、ここで初めて読み込む。
-    const { decryptText } = await import('./crypto');
+    let cryptoModule: typeof import('./crypto');
+    try {
+      cryptoModule = await import('./crypto');
+    } catch {
+      return { error: RECEIVE_LOAD_FAILED_MESSAGE };
+    }
     let plain: string;
     try {
-      plain = await decryptText(fileText, password);
-    } catch {
+      plain = await cryptoModule.decryptText(fileText, password);
+    } catch (error) {
+      if (error instanceof cryptoModule.NotTransferFileError) {
+        return { error: RECEIVE_NOT_TRANSFER_FILE_MESSAGE };
+      }
       return 'wrong';
     }
     return readReceived(plain);
@@ -159,24 +174,28 @@ export function createReceiveSteps(ctx: AppContext): ReceiveSteps {
 
   /**
    * 読み込むで引き継ぎのファイルを選んだときの入口。事業所の合言葉が保存されていれば
-   * 先にそれで開いてみて、開ければパスワードの画面を飛ばして確認へ進む。開けなければ
+   * 先にそれで開いてみて、開ければパスワードの画面を飛ばして確認へ進む。合言葉で開けなければ
    * (別の合言葉で作られたファイルなど)、エラーは出さずにパスワードの画面にする。
+   * ただし、パスワードと関係のない問題(読み込めない・引き継ぎのファイルとして読めない形・
+   * 中身の問題)なら、合言葉が違ったかのように黙ってパスワードの画面にはせず、その文を出す。
    */
   async function openReceive(fileText: string): Promise<void> {
     receiveGeneration += 1;
     const generation = receiveGeneration;
     received = null;
-    const base: TransferReceiveDialog = {
+    // 合言葉の読み出し・復号(PBKDF2)の間は「少しお待ちください」を出す。最初の await より前に
+    // 出すので、working(閉じられない)のまま、ほかのダイアログに置き換わることはない。
+    setDialog({
       kind: 'transferReceive',
       fileText,
-      phase: 'password',
+      phase: 'working',
       password: '',
       error: null,
       summary: '',
       conflictIndex: 0,
       conflicts: [],
       result: null,
-    };
+    });
 
     let shared: string | undefined;
     try {
@@ -184,16 +203,15 @@ export function createReceiveSteps(ctx: AppContext): ReceiveSteps {
     } catch {
       shared = undefined;
     }
-    if (generation !== receiveGeneration) {
+    const afterMeta = currentReceive(generation);
+    if (afterMeta === null) {
       return;
     }
     if (shared === undefined) {
-      setDialog(base);
+      setDialog({ ...afterMeta, phase: 'password', error: null });
       return;
     }
 
-    // 復号(PBKDF2)には少し時間がかかるので、その間は「少しお待ちください」を出す。
-    setDialog({ ...base, phase: 'working' });
     let outcome: Awaited<ReturnType<typeof decryptAndRead>>;
     try {
       outcome = await decryptAndRead(fileText, shared);

@@ -4,11 +4,12 @@ import { getMeta, listPhotos, setMeta } from './db';
 import { shareOrDownloadFile } from './fileIo';
 import { dateKey } from './history';
 import { blobToDataUrl } from './photoCodec';
+import { RECEIVE_LOAD_FAILED_MESSAGE } from './transferFormat';
 // transfer.ts(中身の組み立て)と transferReceive.ts(受け取りの流れ)は、送る/受け取るときだけ
 // import() で読み込む(アプリを開いただけでは使わないので、本体を軽くする)。ここでは型だけを使う。
 import type { ConflictChoice } from './transfer';
 import type { ReceiveSteps } from './transferReceive';
-import type { Patient, TransferSendDialog } from './types';
+import type { Patient, TransferReceiveDialog, TransferSendDialog } from './types';
 
 type SendDraftPatch = Partial<
   Pick<
@@ -23,7 +24,6 @@ const BUILD_FAILED_MESSAGE = '送るファイルを作れませんでした。';
 const PASSWORD_TOO_SHORT_MESSAGE = `パスワードは${MIN_PASSWORD_LENGTH}文字以上にしてください。`;
 const PASSWORD_MISMATCH_MESSAGE = '確認のパスワードが一致しません。';
 const SHARED_SECRET_MISSING_MESSAGE = '事業所の合言葉が見つかりません。パスワードを入力してください。';
-const RECEIVE_LOAD_FAILED_MESSAGE = '引き継ぎのファイルを開けませんでした。';
 
 /**
  * 「送る」の入口(一覧の「⋯」・選択バー・設定のお役立ち地点)からダイアログを開き、
@@ -63,15 +63,40 @@ export function createTransferFlow(ctx: AppContext): {
     return receiveSteps;
   }
 
-  /** 読み込むで引き継ぎのファイルを選んだときの入口(合言葉があれば先に試す。transferReceive.ts)。 */
+  /**
+   * 読み込むで引き継ぎのファイルを選んだときの入口(合言葉があれば先に試す。transferReceive.ts)。
+   * 受け取りのコードを読み込む(初回は少し時間がかかる)より前に、この場で「少しお待ちください」の
+   * ダイアログを出す。出すのが読み込みの後だと、その間はファイルを選んだのに何も起きないように見え、
+   * 画面を触れてしまう。working のダイアログは閉じられないので、読み込みの間に他のものに
+   * 置き換わることもない。
+   */
   async function openReceive(fileText: string): Promise<void> {
+    const waiting: TransferReceiveDialog = {
+      kind: 'transferReceive',
+      fileText,
+      phase: 'working',
+      password: '',
+      error: null,
+      summary: '',
+      conflictIndex: 0,
+      conflicts: [],
+      result: null,
+    };
+    ctx.setState({ ...ctx.getState(), dialog: waiting });
     let steps: ReceiveSteps;
     try {
       steps = await loadReceiveSteps();
     } catch {
       // 読み込めなかった(通信が切れた直後の更新など)。次に選び直したときに、もう一度読み込む。
       receiveSteps = null;
+      if (ctx.getState().dialog === waiting) {
+        ctx.setState({ ...ctx.getState(), dialog: null });
+      }
       ctx.showMessage({ kind: 'error', text: RECEIVE_LOAD_FAILED_MESSAGE });
+      return;
+    }
+    if (ctx.getState().dialog !== waiting) {
+      // 読み込みの間に、出しておいたダイアログが別のものになった(通常は起きない)。続けない。
       return;
     }
     await steps.openReceive(fileText);

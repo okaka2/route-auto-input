@@ -439,6 +439,15 @@ a.disabled {
   .selection-actions button {
     flex: 1;
   }
+
+  /*
+   * 訪問順の画面の「出発」「帰着」は、狭い画面では縦に1つずつ並べる(横に2つだと、長い選択肢の
+   * 文字で画面が横にはみ出す)。この @media は下の .ends-row の定義より前にあるので、
+   * .ends-panel を付けて詳しさを上げ、後ろの定義に負けないようにする。
+   */
+  .ends-panel .ends-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .segmented {
@@ -886,9 +895,13 @@ button.select-all {
   padding: 0.75rem var(--gap);
 }
 
+/*
+ * 1fr は「中身の幅より狭くならない」ので、長い選択肢の文字で列が広がり、画面が横にはみ出す
+ * (375px幅で横に418pxまでスクロールした)。minmax(0, 1fr) にして、列を画面の幅に収める。
+ */
 .ends-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
@@ -896,6 +909,11 @@ button.select-all {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+}
+
+/* 選択欄は列の幅いっぱいにする(中身の長さで列を押し広げない)。.form-select の指定は下のまま変えない。 */
+.ends-field select {
+  width: 100%;
 }
 
 .ends-field select,

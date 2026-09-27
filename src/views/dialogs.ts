@@ -372,15 +372,25 @@ function actionButton(
   return button;
 }
 
+/**
+ * Tabキーで移れるもの(押せるボタン・入力欄・選択欄・リンク・details の見出し)。
+ * 入力欄が最初や最後にあるダイアログ(受け取りのパスワードなど)でも、外へ出ないようにするため。
+ */
+const FOCUSABLE =
+  'button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), a[href], summary';
+
 /** Tabキーでフォーカスがダイアログの外へ出ないよう、最後の次は最初へ、最初の前は最後へ回す。 */
 function trapFocus(event: KeyboardEvent): void {
   if (event.key !== 'Tab') {
     return;
   }
   const sheet = event.currentTarget as HTMLElement;
-  const buttons = [...sheet.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
-  const first = buttons[0];
-  const last = buttons[buttons.length - 1];
+  // 閉じた details の中身(見出しの summary を除く)は、Tabキーで移れないので数えない。
+  const focusables = [...sheet.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) => el.tagName === 'SUMMARY' || el.closest('details:not([open])') === null,
+  );
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
   if (first === undefined || last === undefined) {
     return;
   }

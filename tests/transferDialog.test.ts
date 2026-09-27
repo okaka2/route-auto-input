@@ -367,9 +367,12 @@ describe('renderTransferReceiveDialog: 確認・同じ人・処理中・完了',
     expect(q(elements, 'conflict-incoming')?.textContent).toBe('受け取った: 山田 太郎(東京都千代田区1-1)');
     const overwrite = q<HTMLButtonElement>(elements, 'conflict-overwrite')!;
     expect(overwrite.textContent).toBe('上書き');
-    expect(overwrite.hasAttribute('data-autofocus')).toBe(true);
+    // 最初のフォーカスは「この人は追加しない」(Enterを続けて押しても上書きしない)。
+    expect(overwrite.hasAttribute('data-autofocus')).toBe(false);
     expect(q(elements, 'conflict-add')?.textContent).toBe('別に追加');
+    expect(q(elements, 'conflict-add')?.hasAttribute('data-autofocus')).toBe(false);
     expect(q(elements, 'conflict-skip')?.textContent).toBe('この人は追加しない');
+    expect(q(elements, 'conflict-skip')?.hasAttribute('data-autofocus')).toBe(true);
 
     overwrite.click();
     q<HTMLButtonElement>(elements, 'conflict-add')!.click();

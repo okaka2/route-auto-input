@@ -1567,6 +1567,28 @@ describe('事業所の合言葉', () => {
     expect(await db.getMeta('sharedSecret')).toBeUndefined();
   });
 
+  it('長さの数え方は送るダイアログと同じ(前後の空白も数える): 空白で始まる6文字は保存、5文字は保存しない', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="shared-secret-input"]')).not.toBeNull());
+    const db = await import('../src/db');
+
+    const short = el<HTMLInputElement>('[data-testid="shared-secret-input"]')!;
+    short.value = 'abcde';
+    short.dispatchEvent(new Event('input'));
+    el<HTMLButtonElement>('[data-testid="shared-secret-save"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('6文字以上にしてください'));
+    expect(await db.getMeta('sharedSecret')).toBeUndefined();
+
+    const input = el<HTMLInputElement>('[data-testid="shared-secret-input"]')!;
+    input.value = ' abcde';
+    input.dispatchEvent(new Event('input'));
+    el<HTMLButtonElement>('[data-testid="shared-secret-save"]')!.click();
+    await waitFor(() => expect(el('.message')?.textContent).toContain('事業所の合言葉を保存しました'));
+    expect(await db.getMeta('sharedSecret')).toBe(' abcde');
+  });
+
   it('「変える」で入力欄を出して保存し直せる。「やめる」は保存せず引っ込める', async () => {
     const { setMeta, closeDbForTest } = await import('../src/db');
     await setMeta('sharedSecret', 'もとのあいことば');
@@ -3525,10 +3547,12 @@ describe('受け取る(引き継ぎのファイルを読み込む)', () => {
 
     await waitFor(() => expect(el('#dialog-title')?.textContent).toBe('同じ訪問先がすでにあります(1/2)'));
     expect(el('[data-testid="conflict-existing"]')?.textContent).toBe('手元: 山田 太郎(東京都千代田区1-1)');
-    expect(document.activeElement).toBe(el('[data-testid="conflict-overwrite"]'));
+    // 最初のフォーカスは「この人は追加しない」(Enterを続けて押しても、上書きしない)。
+    expect(document.activeElement).toBe(el('[data-testid="conflict-skip"]'));
     el<HTMLButtonElement>('[data-testid="conflict-overwrite"]')!.click();
 
     await waitFor(() => expect(el('#dialog-title')?.textContent).toBe('同じ訪問先がすでにあります(2/2)'));
+    expect(document.activeElement).toBe(el('[data-testid="conflict-skip"]'));
     expect(el('[data-testid="conflict-incoming"]')?.textContent).toBe('受け取った: 鈴木 花子(大阪府大阪市2-2)');
     el<HTMLButtonElement>('[data-testid="conflict-skip"]')!.click();
 

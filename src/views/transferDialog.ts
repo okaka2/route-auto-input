@@ -261,12 +261,14 @@ export function renderTransferReceiveDialog(
 
     const actions = document.createElement('ul');
     actions.className = 'sheet-actions';
-    const overwrite = actionButton('上書き', 'conflict-overwrite', () => handlers.onReceiveConflict('overwrite'));
-    overwrite.dataset.autofocus = '';
+    // 最初のフォーカスは「この人は追加しない」にする(Enterを続けて押しても、手元の人を
+    // うっかり上書きしないように。上書きは、選んで押したときだけ)。
+    const skip = actionButton('この人は追加しない', 'conflict-skip', () => handlers.onReceiveConflict('skip'));
+    skip.dataset.autofocus = '';
     const entries = [
-      overwrite,
+      actionButton('上書き', 'conflict-overwrite', () => handlers.onReceiveConflict('overwrite')),
       actionButton('別に追加', 'conflict-add', () => handlers.onReceiveConflict('addNew')),
-      actionButton('この人は追加しない', 'conflict-skip', () => handlers.onReceiveConflict('skip')),
+      skip,
       actionButton('やめる', 'dialog-cancel', () => handlers.onClose()),
     ];
     for (const button of entries) {
