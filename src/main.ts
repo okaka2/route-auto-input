@@ -207,6 +207,34 @@ function stopCurrentMeasuring(): void {
   stopMeasuring = null;
 }
 
+// 位置の貼り付け欄・地点のメモ欄がIME変換中(compositionstart〜compositionend)かどうか。
+// 変換中にGPSの読み取り更新などでsetStateが割り込んで画面を作り直すと、変換中の文字が
+// 消えてしまうので、変換中はsetStateでの再描画をここで見送る(下記setState参照)。
+// composingStartedAtは、compositionendの取りこぼし(タブが裏に回るなど)で万一戻らなかった
+// ときの安全弁に使う時刻。renderDeferredは、見送った再描画があるかどうか
+// (変換確定時に1回だけまとめて描く)。
+let composing = false;
+let composingStartedAt = 0;
+let renderDeferred = false;
+const MAX_COMPOSING_MS = 30_000;
+
+/** 位置の貼り付け欄・地点のメモ欄のIME変換の開始/終了(onComposingChange)。 */
+function handleComposingChange(next: boolean): void {
+  if (next) {
+    composing = true;
+    composingStartedAt = Date.now();
+    return;
+  }
+  // compositionendの直前に、確定した値がonPasteChange/onSpotDraft経由でもう
+  // setState済み(呼び出し順はviews/locationDialog.ts参照)。ここではその後で、
+  // 見送っていた再描画があればまとめて1回だけ行う。
+  composing = false;
+  if (renderDeferred) {
+    renderDeferred = false;
+    render();
+  }
+}
+
 // 設定画面に出す情報(最後のバックアップ日時・データの保存状態・表示の設定・事業所)。
 // spotsは含めない(この変数はDBから読み直すたびに更新される情報の置き場で、お役立ち地点は
 // 別に持っている`spots`が唯一の出所。設定画面へ渡す直前に{ ...settingsInfo, spots }で合わせる)。
@@ -633,7 +661,34 @@ function setState(next: AppState, options?: { render?: boolean }): void {
       URL.revokeObjectURL(url);
     }
   }
+  // IME変換中(composing)の安全弁: compositionendを取りこぼす等で30秒たっても変換中の
+  // ままなら、変換中とみなすのをやめる(そうしないと再描画がずっと止まったままになる)。
+  if (composing && Date.now() - composingStartedAt > MAX_COMPOSING_MS) {
+    composing = false;
+    renderDeferred = false;
+  }
+  // 変換中に、ダイアログが閉じる/別のダイアログに変わる/画面が変わるなら、変換中フラグを
+  // 引きずらない(compositionendの取りこぼしで、次に開いたダイアログの再描画まで
+  // 止めてしまわないように)。
+  if (composing) {
+    const stillComposingDialog =
+      previousDialog !== null &&
+      (previousDialog.kind === 'location'
+        ? isSameMeasuringDialog(next.dialog, { kind: 'location', id: previousDialog.id })
+        : previousDialog.kind === 'spot' && isSameMeasuringDialog(next.dialog, { kind: 'spot' }));
+    if (!stillComposingDialog || previousScreen.name !== next.screen.name) {
+      composing = false;
+      renderDeferred = false;
+    }
+  }
   if (options?.render === false) {
+    return;
+  }
+  // 変換中は、他の要因(GPSの読み取り更新など)によるsetStateで画面を作り直すと、
+  // 変換中の文字が消えてしまう。stateそのものはいつもどおり更新しつつ、再描画だけ
+  // onComposingChange(false)まで見送り、変換の確定時にまとめて1回だけ行う。
+  if (composing) {
+    renderDeferred = true;
     return;
   }
   render();
@@ -1792,6 +1847,7 @@ function renderApp(): HTMLElement {
       void undoLocation();
     },
     onSpotDraft: changeSpotDraft,
+    onComposingChange: handleComposingChange,
     onSaveSpot: () => {
       void saveSpot();
     },

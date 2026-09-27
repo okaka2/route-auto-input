@@ -120,6 +120,7 @@ function dialogHandlers(): DialogHandlers {
     onRemove: vi.fn(),
     onUndo: vi.fn(),
     onSpotDraft: vi.fn(),
+    onComposingChange: vi.fn(),
     onSaveSpot: vi.fn(),
     onPhotoIndex: vi.fn(),
     onClose: vi.fn(),

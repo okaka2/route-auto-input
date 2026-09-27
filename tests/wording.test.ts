@@ -68,6 +68,7 @@ const dialogHandlers = {
   onRemove: noop,
   onUndo: noop,
   onSpotDraft: noop,
+  onComposingChange: noop,
   onSaveSpot: noop,
   onPhotoIndex: noop,
   onClose: noop,

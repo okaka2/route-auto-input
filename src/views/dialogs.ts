@@ -38,6 +38,8 @@ export type DialogHandlers = {
   onUndo(): void;
   /** お役立ち地点の登録: 種類・メモの入力のたび、入力中の内容をstateに保つ。 */
   onSpotDraft(draft: { spotKind: SpotKind; note: string }): void;
+  /** 位置の貼り付け欄・地点のメモ欄がIME変換中かどうか(compositionstart/compositionendのたび)。 */
+  onComposingChange(composing: boolean): void;
   /** お役立ち地点の登録: 測った位置とそのときのspotKind・noteで登録する。 */
   onSaveSpot(): void;
   /** 写真のダイアログ: 前/次へ切り替える(表示中のindexを変える)。 */

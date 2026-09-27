@@ -15,6 +15,8 @@ export type LocationDialogHandlers = {
   onRemove(): void;
   /** saved のとき「元に戻す」。 */
   onUndo(): void;
+  /** 貼り付け欄がIME変換中かどうか(compositionstart/compositionendのたび)。 */
+  onComposingChange(composing: boolean): void;
   onClose(): void;
 };
 
@@ -27,6 +29,8 @@ export type SpotDialogHandlers = {
   onStartMeasuring(): void;
   /** 種類・メモの入力のたび、入力中の内容をstateに保つ。 */
   onSpotDraft(draft: { spotKind: SpotKind; note: string }): void;
+  /** 一言メモがIME変換中かどうか(compositionstart/compositionendのたび)。 */
+  onComposingChange(composing: boolean): void;
   /** 測った位置と、そのときのspotKind・noteでお役立ち地点として登録する。 */
   onSaveSpot(): void;
   onClose(): void;
@@ -280,13 +284,18 @@ function renderPasteSection(dialog: LocationDialog, handlers: LocationDialogHand
   input.value = dialog.pasteText;
   // 検索欄(patientListView.tsのrenderSearch)と同じ変換ガード。座標の貼り付けは
   // 普段IMEを使わないが、念のため一貫して付けておく(Important 3)。
+  // 加えて、変換中かどうかをonComposingChangeでmain.ts側にも知らせる。GPSの読み取り更新
+  // など他の要因での再描画が変換の途中に割り込むと、変換中の文字が消えてしまうため、
+  // main.ts側はこれを見て変換中の再描画を1回にまとめる(setStateの説明を参照)。
   let isComposing = false;
   input.addEventListener('compositionstart', () => {
     isComposing = true;
+    handlers.onComposingChange(true);
   });
   input.addEventListener('compositionend', () => {
-    isComposing = false;
     handlers.onPasteChange(input.value);
+    isComposing = false;
+    handlers.onComposingChange(false);
   });
   input.addEventListener('input', () => {
     if (isComposing) {
@@ -369,6 +378,12 @@ export function renderSpotDialog(dialog: SpotDialog, handlers: SpotDialogHandler
  * 呼ばず、compositionendで確定した文字列を送る。呼び出し側(main.ts)はonSpotDraftの結果を
  * 再描画なしでstateへ入れるので(setState(..., { render: false }))、変換中でないときの
  * 入力のたびの呼び出しでも画面は作り直されず、変換は壊れない。
+ *
+ * ただし、これだけでは変換中にGPSの読み取り更新など「別の」setStateが割り込むと、
+ * その再描画で入力欄が作り直され、変換中の文字が消えてしまう。それを防ぐため、
+ * compositionstart/compositionendのたびonComposingChangeでmain.ts側にも知らせ、
+ * main.ts側は変換中のあいだ、そうした割り込みのsetStateも再描画だけ見送る
+ * (setStateの説明を参照)。
  */
 function renderSpotFields(dialog: SpotDialog, handlers: SpotDialogHandlers): HTMLElement[] {
   const selectWrapper = document.createElement('label');
@@ -413,10 +428,12 @@ function renderSpotFields(dialog: SpotDialog, handlers: SpotDialogHandlers): HTM
   let isComposing = false;
   noteInput.addEventListener('compositionstart', () => {
     isComposing = true;
+    handlers.onComposingChange(true);
   });
   noteInput.addEventListener('compositionend', () => {
-    isComposing = false;
     report();
+    isComposing = false;
+    handlers.onComposingChange(false);
   });
   noteInput.addEventListener('input', () => {
     if (isComposing) {

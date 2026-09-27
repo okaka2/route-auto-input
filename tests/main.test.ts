@@ -2414,26 +2414,99 @@ describe('お役立ち地点の登録', () => {
     expect(geolocation.clearWatch).toHaveBeenCalled();
   });
 
-  it('地点メモの入力中(IME変換)にGPSの読み取りが来ても、入力中の内容とフォーカスを保つ', async () => {
+  it('地点メモの変換中(IME)にGPSの読み取りが来ても、変換中の内容とフォーカスを保つ(再描画を見送る)。変換確定でまとめて1回描画する', async () => {
     const { emit } = await setupSpotMeasuring();
 
     const note = el<HTMLInputElement>('[data-testid="spot-note-input"]')!;
     note.focus();
     note.dispatchEvent(new Event('compositionstart'));
-    note.value = 'にゅうりょくちゅう';
+    note.value = 'にゅうりょく';
     note.dispatchEvent(new Event('input'));
-    note.dispatchEvent(new Event('compositionend'));
-    // 変換の確定はdraftだけの更新で、再描画はしないので、同じinput要素のままフォーカスも保たれる。
-    expect(el('[data-testid="spot-note-input"]')).toBe(note);
-    expect(document.activeElement).toBe(note);
 
-    // 測定中のGPSの読み取り更新は、いつもどおり再描画される。
+    // 変換中にGPSの読み取り更新(reading→精度15mでdoneまで一気に進む)が来ても、
+    // 画面は作り直されない。同じinput要素のまま、変換中の文字とフォーカスを保つ。
     emit(35.0001, 139.0001, 15);
-    await waitFor(() => expect(el<HTMLButtonElement>('[data-testid="spot-save-button"]')?.disabled).toBe(false));
+    expect(el('[data-testid="spot-note-input"]')).toBe(note);
+    expect(note.value).toBe('にゅうりょく');
+    expect(document.activeElement).toBe(note);
+    expect(el('body')?.textContent).not.toContain('誤差 ±15m');
 
-    // 再描画で入力欄は作り直されるが、確定していた入力内容とフォーカスは保たれる。
-    expect(el<HTMLInputElement>('[data-testid="spot-note-input"]')!.value).toBe('にゅうりょくちゅう');
-    expect(document.activeElement).toBe(el('[data-testid="spot-note-input"]'));
+    note.dispatchEvent(new Event('compositionend'));
+
+    // 変換の確定で、見送っていた再描画がまとめて1回行われ、確定した文字と
+    // 測定結果(見送っていたGPSの更新)の両方が反映される。
+    await waitFor(() => expect(el<HTMLButtonElement>('[data-testid="spot-save-button"]')?.disabled).toBe(false));
+    expect(el<HTMLInputElement>('[data-testid="spot-note-input"]')!.value).toBe('にゅうりょく');
+    expect(el('body')?.textContent).toContain('誤差 ±15m');
+  });
+
+  it('位置の貼り付け欄の変換中(IME)にGPSの読み取りが来ても、変換中の内容とフォーカスを保つ。変換確定でまとめて1回描画する', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+
+    const geolocation = {
+      watchPosition: vi.fn((success: PositionCallback) => {
+        (geolocation as unknown as { success: PositionCallback }).success = success;
+        return 1;
+      }),
+      clearWatch: vi.fn(),
+      getCurrentPosition: vi.fn(),
+    } as unknown as Geolocation & { success: PositionCallback };
+    Object.defineProperty(navigator, 'geolocation', { value: geolocation, configurable: true });
+    const emit = (lat: number, lng: number, accuracy: number) =>
+      geolocation.success({ coords: { latitude: lat, longitude: lng, accuracy } } as GeolocationPosition);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    dismissInstallNotice();
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-location"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-measure-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="location-measure-button"]')!.click();
+    await waitFor(() => expect(geolocation.watchPosition).toHaveBeenCalledTimes(1));
+
+    const input = el<HTMLInputElement>('[data-testid="location-paste-input"]')!;
+    input.focus();
+    input.dispatchEvent(new Event('compositionstart'));
+    input.value = 'にゅうりょく';
+    input.dispatchEvent(new Event('input'));
+
+    emit(35.1, 139.1, 15);
+    expect(el('[data-testid="location-paste-input"]')).toBe(input);
+    expect(input.value).toBe('にゅうりょく');
+    expect(document.activeElement).toBe(input);
+    expect(el('body')?.textContent).not.toContain('誤差 ±15m');
+
+    input.dispatchEvent(new Event('compositionend'));
+
+    await waitFor(() => expect(el<HTMLButtonElement>('[data-testid="location-save-button"]')?.disabled).toBe(false));
+    expect(el<HTMLInputElement>('[data-testid="location-paste-input"]')!.value).toBe('にゅうりょく');
+    expect(el('body')?.textContent).toContain('誤差 ±15m');
+
+    delete (navigator as { geolocation?: Geolocation }).geolocation;
+  });
+
+  it('変換中にダイアログを閉じると、変換中フラグを引きずらない(閉じる操作はそのまま反映され、次の描画も普通に行われる)', async () => {
+    await setupSpotMeasuring();
+
+    const note = el<HTMLInputElement>('[data-testid="spot-note-input"]')!;
+    note.focus();
+    note.dispatchEvent(new Event('compositionstart'));
+    note.value = 'にゅうりょく';
+    note.dispatchEvent(new Event('input'));
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    // 変換中フラグに引きずられて再描画が止まらず、閉じる操作そのものはきちんと反映される。
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(el('[data-testid="spot-add-button"]'));
+
+    // フラグが尾を引いていないので、次に開き直したときも普通に描画される。
+    el<HTMLButtonElement>('[data-testid="spot-add-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="location-measure-button"]')).not.toBeNull());
   });
 });
 

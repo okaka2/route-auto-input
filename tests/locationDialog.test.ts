@@ -41,6 +41,7 @@ function handlers(): LocationDialogHandlers {
     onSavePasted: vi.fn(),
     onRemove: vi.fn(),
     onUndo: vi.fn(),
+    onComposingChange: vi.fn(),
     onClose: vi.fn(),
   };
 }
