@@ -399,6 +399,69 @@ describe('接続が切れても作り直す(iOSがバックグラウンドで切
     expect(seenDbs[1]).not.toBe(seenDbs[0]);
   });
 
+  it('並行するwithDbが両方とも1回目に失敗しても、片方が作り直した接続をもう片方が捨てず、1つの新しい接続を共有する', async () => {
+    await listPatients(); // 先に接続を1つ確立しておく(両方のwithDbが同じ接続から始まるように)。
+
+    const dbsSeenByCall: unknown[][] = [[], []];
+    const makeOperation = (index: number) => {
+      let calls = 0;
+      return async (db: unknown) => {
+        calls += 1;
+        dbsSeenByCall[index]!.push(db);
+        if (calls === 1) {
+          throw new DOMException('closed', 'InvalidStateError');
+        }
+        return 'ok';
+      };
+    };
+
+    const [result0, result1] = await Promise.all([
+      withDb(makeOperation(0)),
+      withDb(makeOperation(1)),
+    ]);
+    expect(result0).toBe('ok');
+    expect(result1).toBe('ok');
+
+    // 両方とも1回目は同じ(最初に確立した)接続で失敗する。
+    expect(dbsSeenByCall[0]![0]).toBe(dbsSeenByCall[1]![0]);
+    // やり直し(2回目)は、どちらの呼び出しも同じ新しい接続を使う
+    // (片方が作り直した接続を、もう片方が誤って捨てて別の接続をもう1つ作ってしまわない)。
+    expect(dbsSeenByCall[0]![1]).toBe(dbsSeenByCall[1]![1]);
+    // やり直しの接続は、最初の(失敗した)接続とは別のもの。
+    expect(dbsSeenByCall[0]![1]).not.toBe(dbsSeenByCall[0]![0]);
+  });
+
+  it('接続の取得(getDb)自体がUnknownError/InvalidStateErrorで失敗しても、1回だけやり直す', async () => {
+    vi.resetModules();
+    const idbActual = await vi.importActual<typeof import('idb')>('idb');
+    let openCalls = 0;
+    vi.doMock('idb', () => ({
+      ...idbActual,
+      openDB: (...args: Parameters<typeof idbActual.openDB>) => {
+        openCalls += 1;
+        if (openCalls === 1) {
+          return Promise.reject(new DOMException('closed', 'InvalidStateError'));
+        }
+        return idbActual.openDB(...args);
+      },
+    }));
+
+    const dbModule = await import('../src/db');
+    try {
+      const result = await dbModule.withDb(async () => 'ok');
+      expect(result).toBe('ok');
+      // 1回目(失敗)+やり直しの1回=合計2回。operationを1度も呼んでいないので、
+      // これは接続の取得(getDb)そのものの失敗からやり直したことを示す。
+      expect(openCalls).toBe(2);
+    } finally {
+      // このテストだけモックしたidbを使う、別のモジュールインスタンスの接続を閉じておく
+      // (閉じないと、以降のテストのbeforeEachのdeleteDBがブロックされる)。
+      await dbModule.closeDbForTest();
+      vi.doUnmock('idb');
+      vi.resetModules();
+    }
+  });
+
   it('やり直しても失敗したら、そのまま投げる(3回目は呼ばない)', async () => {
     let calls = 0;
     await expect(

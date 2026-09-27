@@ -112,18 +112,22 @@ function isRetryableDbError(error: unknown): boolean {
 
 /**
  * 接続を取り出してoperationを行う。iOSがアプリをバックグラウンドに回したときなどに
- * 接続が切れ、UnknownError・InvalidStateErrorで失敗することがある。そのときは
- * 接続を捨てて作り直し、1回だけやり直す(やり直しても失敗したら、そのまま投げる)。
+ * 接続が切れ、UnknownError・InvalidStateErrorで失敗することがある(接続の取得
+ * そのものが失敗することもあれば、取得はできてもoperationの中で失敗することもある)。
+ * そのときは接続を捨てて作り直し、1回だけやり直す(やり直しても失敗したら、そのまま投げる)。
+ *
+ * 接続を捨てるのは、今も自分が取り出したのと同じ接続を覚えているとき(`connection === opening`)
+ * だけにする。並行して呼ばれた別のwithDbが先にやり直して新しい接続を作っていたら、
+ * それを誤って捨てない(捨てると、せっかく作り直した接続をもう1つ余計に作ってしまう)。
  */
 export async function withDb<T>(operation: (db: Db) => Promise<T>): Promise<T> {
-  const db = await getDb();
+  const opening = getDb();
   try {
-    return await operation(db);
+    return await operation(await opening);
   } catch (error) {
     if (!isRetryableDbError(error)) throw error;
-    connection = null;
-    const retryDb = await getDb();
-    return operation(retryDb);
+    if (connection === opening) connection = null;
+    return operation(await getDb());
   }
 }
 
