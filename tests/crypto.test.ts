@@ -1,6 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { decryptText, encryptText, isEncryptedFileText, PBKDF2_ITERATIONS } from '../src/crypto';
 
+/** テスト用に、data(base64)をバイト列に戻す/バイト列をbase64に戻す。 */
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/** dataの中の1バイトを反転させたJSON文字列を作る(改ざんのテスト用)。 */
+async function tamperByteAt(file: string, byteIndex: number): Promise<string> {
+  const parsed = JSON.parse(file) as { data: string };
+  const bytes = base64ToBytes(parsed.data);
+  bytes[byteIndex] = bytes[byteIndex]! ^ 0xff;
+  parsed.data = bytesToBase64(bytes);
+  return JSON.stringify(parsed);
+}
+
 describe('encryptText / decryptText / isEncryptedFileText', () => {
   it('暗号化して同じパスワードで戻せる(日本語・大きな中身も)', async () => {
     const plain = JSON.stringify({ x: 'あいう'.repeat(50_000) });
@@ -17,14 +40,35 @@ describe('encryptText / decryptText / isEncryptedFileText', () => {
     );
   });
 
-  it('中身を1文字変えると失敗する(改ざんの検出)', async () => {
-    const file = await encryptText('x', 'secret-123', 1000);
-    const parsed = JSON.parse(file) as { data: string };
-    const originalData = parsed.data;
-    const lastChar = originalData.at(-1);
-    const replacement = lastChar === 'A' ? 'B' : 'A';
-    parsed.data = originalData.slice(0, -1) + replacement;
-    const tampered = JSON.stringify(parsed);
+  it('パスワードのNFC正規化が違っても(分解済み⇔合成済み)、同じパスワードとして戻せる', async () => {
+    const decomposed = 'がぎ'; // 「がぎ」を濁点分解して書いたもの
+    const composed = 'がぎ';
+    expect(decomposed).not.toBe(composed);
+    expect(decomposed.normalize('NFC')).toBe(composed);
+    const file = await encryptText('x', decomposed, 1000);
+    expect(await decryptText(file, composed)).toBe('x');
+  });
+
+  it('暗号文の途中のバイトを変えると失敗する(改ざんの検出)', async () => {
+    const plain = 'x'.repeat(100);
+    const file = await encryptText(plain, 'secret-123', 1000);
+    const bytes = base64ToBytes((JSON.parse(file) as { data: string }).data);
+    // dataは「暗号文 + 認証タグ16バイト」。平文を長くしておけば、真ん中はタグより前の
+    // 暗号文部分になる(タグは末尾16バイトなので、真ん中がそこに入らないことを確認する)。
+    const middleIndex = Math.floor(bytes.length / 2);
+    expect(middleIndex).toBeLessThan(bytes.length - 16);
+    const tampered = await tamperByteAt(file, middleIndex);
+    await expect(decryptText(tampered, 'secret-123')).rejects.toThrow(
+      'パスワードが違うか、ファイルが壊れています。',
+    );
+  });
+
+  it('認証タグ(末尾16バイト)のバイトを変えても失敗する(改ざんの検出)', async () => {
+    const plain = 'x'.repeat(100);
+    const file = await encryptText(plain, 'secret-123', 1000);
+    const bytes = base64ToBytes((JSON.parse(file) as { data: string }).data);
+    const tagByteIndex = bytes.length - 8; // 末尾16バイト(認証タグ)の中の1バイト
+    const tampered = await tamperByteAt(file, tagByteIndex);
     await expect(decryptText(tampered, 'secret-123')).rejects.toThrow(
       'パスワードが違うか、ファイルが壊れています。',
     );
@@ -47,6 +91,27 @@ describe('encryptText / decryptText / isEncryptedFileText', () => {
     );
   });
 
+  it.each([0, -1, 1.5, '1000', 10_000_001])(
+    '回数(iter)が %p のように不正なファイルは、引き継ぎのファイルではない',
+    async (badIter) => {
+      const file = await encryptText('x', 'secret-123', 1000);
+      const parsed = JSON.parse(file) as Record<string, unknown>;
+      parsed.iter = badIter;
+      await expect(decryptText(JSON.stringify(parsed), 'secret-123')).rejects.toThrow(
+        '引き継ぎのファイルではありません。',
+      );
+    },
+  );
+
+  it('dataが不正なbase64のファイルは、パスワードが違うか壊れているとして失敗する', async () => {
+    const file = await encryptText('x', 'secret-123', 1000);
+    const parsed = JSON.parse(file) as Record<string, unknown>;
+    parsed.data = '*';
+    await expect(decryptText(JSON.stringify(parsed), 'secret-123')).rejects.toThrow(
+      'パスワードが違うか、ファイルが壊れています。',
+    );
+  });
+
   it('既定の回数は 200,000 回で、ファイルに iter として残る', async () => {
     const plain = 'y';
     const file = await encryptText(plain, 'secret-123');
@@ -54,4 +119,11 @@ describe('encryptText / decryptText / isEncryptedFileText', () => {
     expect(parsed.iter).toBe(PBKDF2_ITERATIONS);
     expect(await decryptText(file, 'secret-123')).toBe(plain);
   }, 20_000);
+
+  it.each([0, -1, 1.5, '1000' as unknown as number, 10_000_001])(
+    'encryptTextに不正な回数(%p)を渡すとRangeErrorになる',
+    async (badIterations) => {
+      await expect(encryptText('x', 'secret-123', badIterations)).rejects.toThrow(RangeError);
+    },
+  );
 });

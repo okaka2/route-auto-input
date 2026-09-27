@@ -47,11 +47,20 @@ function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-/** パスワードと salt・回数から、AES-GCM用の鍵を作る。 */
+/** 回数(iter)が、そのまま使ってよい正の整数か(上限 MAX_ITERATIONS 以下か)。 */
+function isValidIterationCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= MAX_ITERATIONS;
+}
+
+/**
+ * パスワードと salt・回数から、AES-GCM用の鍵を作る。
+ * パスワードは NFC に正規化してから使う。同じ見た目でも合成済み・未合成のUnicodeで
+ * 打ち方が違うと別のパスワード扱いになってしまうのを防ぐため。
+ */
 async function deriveKey(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number): Promise<CryptoKey> {
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
-    new TextEncoder().encode(password),
+    new TextEncoder().encode(password.normalize('NFC')),
     'PBKDF2',
     false,
     ['deriveKey'],
@@ -93,10 +102,7 @@ function parseEncryptedFile(text: string): EncryptedFile {
   if (
     obj.format !== TRANSFER_FORMAT ||
     obj.v !== 1 ||
-    typeof obj.iter !== 'number' ||
-    !Number.isInteger(obj.iter) ||
-    obj.iter <= 0 ||
-    obj.iter > MAX_ITERATIONS ||
+    !isValidIterationCount(obj.iter) ||
     typeof obj.salt !== 'string' ||
     typeof obj.iv !== 'string' ||
     typeof obj.data !== 'string'
@@ -106,12 +112,15 @@ function parseEncryptedFile(text: string): EncryptedFile {
   return { format: TRANSFER_FORMAT, v: 1, iter: obj.iter, salt: obj.salt, iv: obj.iv, data: obj.data };
 }
 
-/** 平文をパスワードで暗号化し、引き継ぎファイルのJSON文字列にする。 */
+/** 平文をパスワードで暗号化し、引き継ぎファイルのJSON文字列にする。iterationsが不正なら RangeError を投げる。 */
 export async function encryptText(
   plain: string,
   password: string,
   iterations: number = PBKDF2_ITERATIONS,
 ): Promise<string> {
+  if (!isValidIterationCount(iterations)) {
+    throw new RangeError('PBKDF2の回数(iterations)は、1以上10,000,000以下の整数にしてください。');
+  }
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const key = await deriveKey(password, salt, iterations);
