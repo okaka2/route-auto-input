@@ -82,7 +82,7 @@ export function parseBackup(text: string): BackupContent {
   return { patients, photos, spots, meta };
 }
 
-function toPatient(item: unknown, index: number): Patient {
+export function toPatient(item: unknown, index: number): Patient {
   if (typeof item !== 'object' || item === null) {
     throw new Error(`${index + 1}件目のデータが壊れています。`);
   }
@@ -158,7 +158,7 @@ function toGeoLocation(value: unknown): GeoLocation | undefined {
 const DATA_URL_PREFIX_PATTERN = /^data:[^;,]*;base64,/;
 
 /** 形が合わなければ丸ごと捨てる(null)。写真は1件ごとに独立しているため、この項目だけ落とせばよい。 */
-function toBackupPhoto(value: unknown): BackupPhoto | null {
+export function toBackupPhoto(value: unknown): BackupPhoto | null {
   if (typeof value !== 'object' || value === null) {
     return null;
   }
@@ -179,7 +179,7 @@ function toBackupPhoto(value: unknown): BackupPhoto | null {
 }
 
 /** 形が合わなければ丸ごと捨てる(null)。位置が読めない地点は、地点として意味を持たないため捨てる。 */
-function toSpot(value: unknown): Spot | null {
+export function toSpot(value: unknown): Spot | null {
   if (typeof value !== 'object' || value === null) {
     return null;
   }
