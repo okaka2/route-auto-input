@@ -1,0 +1,147 @@
+/**
+ * 引き継ぎファイルの暗号化・復号。
+ * Web Crypto(`crypto.subtle`・`crypto.getRandomValues`)だけを使い、
+ * パスワードから PBKDF2 で鍵を作り、AES-GCM で暗号化する。
+ */
+
+export const TRANSFER_FORMAT = 'houmon-transfer';
+export const PBKDF2_ITERATIONS = 200_000;
+export const MIN_PASSWORD_LENGTH = 6;
+
+/** ホスト側の異常なファイルで止まらないように、回数の上限を決めておく。 */
+const MAX_ITERATIONS = 10_000_000;
+const SALT_BYTES = 16;
+const IV_BYTES = 12;
+/** `String.fromCharCode(...大きな配列)` はスタックを溢れさせるので、区切って変換する。 */
+const BASE64_CHUNK_SIZE = 0x8000;
+
+const WRONG_PASSWORD_MESSAGE = 'パスワードが違うか、ファイルが壊れています。';
+const NOT_TRANSFER_FILE_MESSAGE = '引き継ぎのファイルではありません。';
+
+export type EncryptedFile = {
+  format: typeof TRANSFER_FORMAT;
+  v: 1;
+  iter: number;
+  salt: string;
+  iv: string;
+  data: string;
+};
+
+/** バイト列を、大きなデータでもスタックを溢れさせずにbase64文字列へ変換する。 */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += BASE64_CHUNK_SIZE) {
+    const chunk = bytes.subarray(i, i + BASE64_CHUNK_SIZE);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+/** base64文字列をバイト列に戻す。文字列が壊れていれば例外を投げる。 */
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/** パスワードと salt・回数から、AES-GCM用の鍵を作る。 */
+async function deriveKey(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number): Promise<CryptoKey> {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+/** 文字列が、引き継ぎファイルの形(JSONでformatが一致)かどうかを調べる。 */
+export function isEncryptedFileText(text: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  return (
+    typeof parsed === 'object' && parsed !== null && (parsed as { format?: unknown }).format === TRANSFER_FORMAT
+  );
+}
+
+/** JSON文字列を、形を確かめたうえでEncryptedFileに変換する。形が違えば例外を投げる。 */
+function parseEncryptedFile(text: string): EncryptedFile {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(NOT_TRANSFER_FILE_MESSAGE);
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error(NOT_TRANSFER_FILE_MESSAGE);
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (
+    obj.format !== TRANSFER_FORMAT ||
+    obj.v !== 1 ||
+    typeof obj.iter !== 'number' ||
+    !Number.isInteger(obj.iter) ||
+    obj.iter <= 0 ||
+    obj.iter > MAX_ITERATIONS ||
+    typeof obj.salt !== 'string' ||
+    typeof obj.iv !== 'string' ||
+    typeof obj.data !== 'string'
+  ) {
+    throw new Error(NOT_TRANSFER_FILE_MESSAGE);
+  }
+  return { format: TRANSFER_FORMAT, v: 1, iter: obj.iter, salt: obj.salt, iv: obj.iv, data: obj.data };
+}
+
+/** 平文をパスワードで暗号化し、引き継ぎファイルのJSON文字列にする。 */
+export async function encryptText(
+  plain: string,
+  password: string,
+  iterations: number = PBKDF2_ITERATIONS,
+): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const key = await deriveKey(password, salt, iterations);
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plain));
+  const file: EncryptedFile = {
+    format: TRANSFER_FORMAT,
+    v: 1,
+    iter: iterations,
+    salt: bytesToBase64(salt),
+    iv: bytesToBase64(iv),
+    data: bytesToBase64(new Uint8Array(cipher)),
+  };
+  return JSON.stringify(file);
+}
+
+/**
+ * 引き継ぎファイルのJSON文字列をパスワードで復号する。
+ * 形が違えば「引き継ぎのファイルではありません。」、
+ * パスワード違いや改ざんなど復号に失敗した場合は「パスワードが違うか、ファイルが壊れています。」を投げる。
+ */
+export async function decryptText(fileText: string, password: string): Promise<string> {
+  const file = parseEncryptedFile(fileText);
+  try {
+    const salt = base64ToBytes(file.salt);
+    const iv = base64ToBytes(file.iv);
+    const data = base64ToBytes(file.data);
+    const key = await deriveKey(password, salt, file.iter);
+    const plainBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
+    return new TextDecoder().decode(plainBuffer);
+  } catch {
+    throw new Error(WRONG_PASSWORD_MESSAGE);
+  }
+}
