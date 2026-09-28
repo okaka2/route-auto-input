@@ -484,6 +484,15 @@ function currentNotice(): Notice | null {
   return null;
 }
 
+/** 「全解除」「先週と同じ」「履歴から選ぶ」の直前の状態を記録する(元に戻す用、Task 12)。 */
+function captureSelectionBefore(): SelectionUndo['before'] {
+  return {
+    selectedIds: state.selectedIds,
+    opened: [...openedRoutes] as [number, string][],
+    routeEnds: routeContext.ends,
+  };
+}
+
 /**
  * 「全解除」「先週と同じ」「履歴から選ぶ」の直後に出す、「元に戻す」つきの知らせ(Task 12)。
  * 一覧では、このお知らせを currentNotice() より先に出す(同時には出さない。同じ1箇所に出す)。
@@ -703,11 +712,7 @@ function pickHistory(date: string): void {
   }
   // 置き換える前の選択が1件以上あれば、元に戻せるよう先に記録しておく(Task 12)。
   const hadSelection = state.selectedIds.length > 0;
-  const before = {
-    selectedIds: state.selectedIds,
-    opened: [...openedRoutes] as [number, string][],
-    routeEnds: routeContext.ends,
-  };
+  const before = captureSelectionBefore();
   routeContext = { ...routeContext, ends: entry.routeEnds };
   void setMeta('routeEnds', entry.routeEnds).catch(() => undefined);
   openedRoutes.clear();
@@ -1185,11 +1190,7 @@ function handleToggleSelectAll(): void {
     return;
   }
   const hadSelection = state.selectedIds.length > 0;
-  const before = {
-    selectedIds: state.selectedIds,
-    opened: [...openedRoutes] as [number, string][],
-    routeEnds: routeContext.ends,
-  };
+  const before = captureSelectionBefore();
   const next = clearVisibleSelection(state);
   if (hadSelection) {
     selectionUndo = { text: '選択を外しました', before, after: next.selectedIds, screen: next.screen.name };
