@@ -165,6 +165,13 @@ textarea {
   font-family: inherit;
 }
 
+/* バックアップ/引き継ぎファイルの選択欄。中身(ファイル名)が長いと294px前後まで
+   広がり、320px幅の画面でははみ出すため、親の幅に収める。 */
+input[type='file'] {
+  max-width: 100%;
+  min-width: 0;
+}
+
 /* キーボードで操作する人のために、フォーカスの枠は必ず出す。 */
 :focus-visible {
   outline: 3px solid var(--primary);
@@ -518,6 +525,7 @@ button.select-all.small {
   border-radius: 0.5rem;
   background: var(--surface);
   color: var(--text);
+  font-size: 1rem;
 }
 
 button.select-all {
@@ -1117,8 +1125,12 @@ input::placeholder {
   background: var(--primary-soft);
 }
 
+/* opacityで薄くすると文字のコントラストも一緒に落ちて、屋外で読みにくくなるため、
+   背景・枠の色トークンだけを変えて「選ばれていない」ことを示す(文字色は変えない)。 */
 .place-row.dimmed {
-  opacity: 0.55;
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: var(--bg);
 }
 
 .place-row.disabled {
@@ -1322,7 +1334,7 @@ input:focus-visible + .check {
 .notice-text { margin: 0 0 0.5rem; }
 .notice-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 
-.weekday-filter { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.25rem; margin-bottom: var(--gap); }
+.weekday-filter { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--tap-min), 1fr)); gap: 0.25rem; margin-bottom: var(--gap); }
 .weekday-filter .segment { border: 1px solid var(--border-strong); border-radius: var(--radius); }
 .history-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.75rem; }
 .history-row { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; width: 100%; min-height: var(--tap-primary); padding: 0.75rem var(--gap); text-align: left; }

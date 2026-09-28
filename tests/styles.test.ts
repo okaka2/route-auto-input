@@ -247,3 +247,57 @@ describe('地図の画面の行(名前とボタンの折り返し)', () => {
     expect(block).toMatch(/min-width:\s*min\(8em,\s*100%\)/);
   });
 });
+
+describe('一覧の並び替え欄(iOSのSafariで、選んだ時に画面が拡大されない)', () => {
+  it(".list-controls select は font-size: 1rem(16px)", () => {
+    const start = css.indexOf('.list-controls select {');
+    expect(start, '.list-controls select が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).toMatch(/font-size:\s*1rem/);
+  });
+});
+
+describe('設定の読み込み欄(バックアップ/引き継ぎファイルの選択)', () => {
+  it("input[type='file'] は max-width: 100% と min-width: 0 で、320px幅でもはみ出さない", () => {
+    const start = css.indexOf("input[type='file']");
+    expect(start, "input[type='file'] が styles.css にない").toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).toMatch(/max-width:\s*100%/);
+    expect(block).toMatch(/min-width:\s*0/);
+  });
+});
+
+describe('薄く表示する行(.place-row.dimmed)の読みやすさ(屋外でも読める)', () => {
+  it('opacity ではなく、色トークンの背景・枠で「選ばれていない」ことを示す', () => {
+    const start = css.indexOf('.place-row.dimmed {');
+    expect(start, '.place-row.dimmed が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).not.toMatch(/opacity/);
+    expect(block).toMatch(/background:\s*var\(--bg\)/);
+  });
+
+  it.each(Object.entries(themes))(
+    '薄い行の文字(text・muted)は、その背景(--bg)に対しても4.5:1以上(%s)',
+    (_themeName, tokens) => {
+      expect(contrast(tokens['text']!, tokens['bg']!)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(tokens['muted']!, tokens['bg']!)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+});
+
+describe('曜日フィルターのボタン(狭い画面でも44px以上を保つ)', () => {
+  it('.weekday-filter は repeat(auto-fit, minmax(var(--tap-min), 1fr)) で、狭い画面では2段に折り返す', () => {
+    const start = css.indexOf('.weekday-filter {');
+    expect(start, '.weekday-filter が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).not.toMatch(/grid-template-columns:\s*repeat\(7,\s*1fr\)/);
+    expect(block).toMatch(/grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(var\(--tap-min\),\s*1fr\)\)/);
+  });
+
+  it('.segment は min-height: var(--tap-min)(曜日ボタンにも効く)', () => {
+    const start = css.indexOf('.segment {');
+    expect(start, '.segment が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).toMatch(/min-height:\s*var\(--tap-min\)/);
+  });
+});
