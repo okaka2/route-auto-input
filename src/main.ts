@@ -709,6 +709,11 @@ function setState(next: AppState, options?: { render?: boolean }): void {
   if (previousDialog?.kind === 'backupSave' && next.dialog?.kind !== 'backupSave') {
     backupFlowInstance?.discardExport();
   }
+  // 送るダイアログが閉じる/別のダイアログに変わるなら、readyでできたファイル(transferFlowの中に
+  // だけ持っている)をここ一箇所で捨てる。
+  if (previousDialog?.kind === 'transferSend' && next.dialog?.kind !== 'transferSend') {
+    transferFlow.discardSendFile();
+  }
   // 設定画面を離れるときは、合言葉の入力中の内容(sharedSecretDraft)と「変える」で
   // 出した入力欄(sharedSecretEditing)を引きずらない。次に設定画面を開いたときに
   // 前回の入力が残っていたり、未設定なのに入力欄が引っ込んだままになるのを防ぐ。
@@ -1895,6 +1900,13 @@ function renderApp(): HTMLElement {
     onSendDraft: (patch) => transferFlow.updateSendDraft(patch),
     onSubmit: () => {
       void transferFlow.submitSend();
+    },
+    onSendShare: () => {
+      // 押した処理の中から直接呼ぶ(navigator.shareを同期で呼ぶ必要があるため、awaitを挟まない)。
+      transferFlow.shareSendFile();
+    },
+    onSendSave: () => {
+      transferFlow.saveSendFile();
     },
     onReceivePassword: (password) => transferFlow.updateReceivePassword(password),
     onReceiveSubmit: () => {

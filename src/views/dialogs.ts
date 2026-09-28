@@ -58,8 +58,12 @@ export type DialogHandlers = {
       >
     >,
   ): void;
-  /** 送るダイアログ: 「送る」を押した。 */
+  /** 送るダイアログ: 「ファイルを作る」を押した。 */
   onSubmit(): void;
+  /** 送るダイアログ: readyの「LINEなどで送る」。押した処理の中から直接呼ぶこと。 */
+  onSendShare(): void;
+  /** 送るダイアログ: readyの「ファイルを保存」。 */
+  onSendSave(): void;
   /** 受け取りのダイアログ: パスワード欄の入力。 */
   onReceivePassword(password: string): void;
   /** 受け取りのダイアログ: 「開く」(またはEnterキー)。 */

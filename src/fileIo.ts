@@ -44,27 +44,6 @@ export function readTextFile(file: File): Promise<string> {
   return file.text();
 }
 
-/** 共有メニュー(files)が使えれば共有し、使えなければダウンロードする。取りやめたら 'cancelled'。 */
-export async function shareOrDownloadFile(file: File): Promise<'shared' | 'downloaded' | 'cancelled'> {
-  const canShareFiles =
-    typeof navigator.canShare === 'function' &&
-    typeof navigator.share === 'function' &&
-    navigator.canShare({ files: [file] });
-  if (canShareFiles) {
-    try {
-      await navigator.share({ files: [file] });
-      return 'shared';
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        return 'cancelled';
-      }
-      // 共有に失敗した(端末側のそのほかの理由)ときは、ダウンロードにフォールバックする。
-    }
-  }
-  downloadFile(file);
-  return 'downloaded';
-}
-
 /** ダウンロードしたファイルの保存先を伝える案内(共有できない端末で、送る/バックアップの小窓に出す)。 */
 export function downloadLocationHint(platform: InstallPlatform): string {
   switch (platform) {

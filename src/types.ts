@@ -86,8 +86,10 @@ export type TransferSendDialog = {
   password: string;
   passwordConfirm: string;
   saveAsShared: boolean; // 「この合言葉を事業所の合言葉として保存する」
-  phase: 'form' | 'working' | 'done';
+  phase: 'form' | 'working' | 'ready' | 'done';
   error: string | null;
+  /** phase: 'ready'・'done' のときだけ意味を持つ。共有(navigator.share)が使える端末かどうか。 */
+  canShare: boolean;
   /** phase: 'done' のときだけ意味を持つ。共有できた(true)かダウンロードした(false)かで、文言を出し分ける。 */
   shared: boolean;
 };

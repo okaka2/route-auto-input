@@ -393,6 +393,7 @@ describe('ダイアログの状態', () => {
       saveAsShared: false,
       phase: 'form' as const,
       error: null,
+      canShare: false,
       shared: false,
     };
   }

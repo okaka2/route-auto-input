@@ -1656,7 +1656,7 @@ describe('送る', () => {
     confirmInput.dispatchEvent(new Event('input'));
   }
 
-  it('一覧の「⋯」から1人を送ると、共有の偽物に渡ったFileが暗号化されており、同じパスワードで名前・メモ・位置・写真が読める', async () => {
+  it('一覧の「⋯」から1人を送ると、「ファイルを作る」→「LINEなどで送る」で、共有の偽物に渡ったFileが暗号化されており、同じパスワードで名前・メモ・位置・写真が読める', async () => {
     const db = await import('../src/db');
     const { createPatient } = await import('../src/patient');
     const patient = {
@@ -1688,8 +1688,11 @@ describe('送る', () => {
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
 
     fillPassword('sakura-2026');
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    await waitFor(() => expect(el('[data-testid="transfer-share-button"]')).not.toBeNull());
+    expect(share).not.toHaveBeenCalled();
+    el<HTMLButtonElement>('[data-testid="transfer-share-button"]')!.click();
 
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
     const file = share.mock.calls[0]![0].files[0] as File;
@@ -1707,6 +1710,34 @@ describe('送る', () => {
     expect(payload.photos).toHaveLength(1);
 
     await waitFor(() => expect(el('[data-testid="transfer-done-text"]')?.textContent).toBe('送りました。'));
+  }, 10_000);
+
+  it('共有できない端末では、readyで「ファイルを保存」と保存先の案内を出す', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+    const downloadSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    vi.stubGlobal('navigator', { ...window.navigator, share: undefined, canShare: undefined });
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+    fillPassword('sakura-2026');
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+
+    await waitFor(() => expect(el('[data-testid="transfer-save-button"]')).not.toBeNull());
+    expect(el('[data-testid="transfer-save-hint"]')).not.toBeNull();
+    expect(el('[data-testid="transfer-share-button"]')).toBeNull();
+    el<HTMLButtonElement>('[data-testid="transfer-save-button"]')!.click();
+
+    await waitFor(() => expect(el('[data-testid="transfer-done-text"]')?.textContent).toBe(
+      'ファイルを保存しました。LINE などで送ってください。',
+    ));
+    expect(downloadSpy).toHaveBeenCalledTimes(1);
   }, 10_000);
 
   it('パスワードが10文字未満なら、送らずエラーを出す', async () => {
@@ -1753,32 +1784,6 @@ describe('送る', () => {
     expect(el('.message')?.textContent).toContain('確認のパスワードが一致しません');
   });
 
-  it('確認で「キャンセル」なら、何も送らずformのまま', async () => {
-    const db = await import('../src/db');
-    const { createPatient } = await import('../src/patient');
-    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
-    await db.savePatient(patient);
-    const share = vi.fn();
-    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
-
-    await import('../src/main');
-    await waitFor(() => expect(rows()).toHaveLength(1));
-
-    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
-    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
-    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
-    fillPassword('sakura-2026');
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
-
-    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
-
-    // パスワードの判定(getMeta呼び出し等)がPromiseを1回挟むため、確認ダイアログの
-    // window.confirm はクリックと同じタックでは呼ばれない。呼ばれるまで待つ。
-    await waitFor(() => expect(window.confirm).toHaveBeenCalled());
-    expect(share).not.toHaveBeenCalled();
-    expect(el('[data-testid="transfer-send-button"]')).not.toBeNull();
-  });
-
   it('事業所の合言葉が保存されていれば、それを使って送れる(パスワード欄は出ない)', async () => {
     const db = await import('../src/db');
     await db.setMeta('sharedSecret', 'jimusho-no-aikotoba');
@@ -1799,8 +1804,9 @@ describe('送る', () => {
     expect(el<HTMLInputElement>('[data-testid="transfer-use-shared"]')!.checked).toBe(true);
     expect(el('[data-testid="transfer-password"]')).toBeNull();
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-share-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="transfer-share-button"]')!.click();
 
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
     const file = share.mock.calls[0]![0].files[0] as File;
@@ -1829,9 +1835,10 @@ describe('送る', () => {
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
     expect(el('#dialog-title')?.textContent).toBe('お役立ち地点を送る');
     fillPassword('sakura-2026');
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-share-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="transfer-share-button"]')!.click();
 
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
     const file = share.mock.calls[0]![0].files[0] as File;
@@ -1863,9 +1870,10 @@ describe('送る', () => {
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
     expect(el('#dialog-title')?.textContent).toBe('山田 太郎様ほか1人を送る');
     fillPassword('sakura-2026');
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-share-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="transfer-share-button"]')!.click();
 
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
     const file = share.mock.calls[0]![0].files[0] as File;
@@ -1891,8 +1899,9 @@ describe('送る', () => {
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
     fillPassword('sakura-2026');
     el<HTMLInputElement>('[data-testid="transfer-save-shared"]')!.click();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-share-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="transfer-share-button"]')!.click();
 
     await waitFor(() => expect(el('[data-testid="transfer-done-text"]')).not.toBeNull());
     expect(await db.getMeta('sharedSecret')).toBe('sakura-2026');
@@ -1905,17 +1914,18 @@ describe('送る', () => {
     expect(el('[data-testid="transfer-password"]')).toBeNull();
   }, 10_000);
 
-  it('送信中(working)はEscキーで閉じない', async () => {
+  it('ファイルを作っている間(working)はEscキーで閉じない。readyになれば閉じられる', async () => {
     const db = await import('../src/db');
     const { createPatient } = await import('../src/patient');
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
     await db.savePatient(patient);
-    let resolveShare: () => void = () => {};
-    const sharePromise = new Promise<void>((resolve) => {
-      resolveShare = resolve;
+    // listPhotos(写真の変換より前)を止めて、working中であることを確実に保つ。
+    let releasePhotos: (photos: Awaited<ReturnType<typeof db.listPhotos>>) => void = () => {};
+    const photosPromise = new Promise<Awaited<ReturnType<typeof db.listPhotos>>>((resolve) => {
+      releasePhotos = resolve;
     });
-    const share = vi.fn().mockReturnValue(sharePromise);
-    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+    vi.spyOn(db, 'listPhotos').mockReturnValue(photosPromise);
+    vi.stubGlobal('navigator', { ...window.navigator, share: vi.fn(), canShare: () => true });
 
     await import('../src/main');
     await waitFor(() => expect(rows()).toHaveLength(1));
@@ -1924,11 +1934,9 @@ describe('送る', () => {
     el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
     fillPassword('sakura-2026');
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
 
-    // 共有メニュー(navigator.share)が呼ばれた時点で、暗号化が終わりworking中になっている。
-    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(el('[data-testid="transfer-working-text"]')).not.toBeNull());
     expect(el<HTMLButtonElement>('[data-testid="transfer-send-button"]')?.disabled).toBe(true);
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
@@ -1938,8 +1946,12 @@ describe('送る', () => {
     el('[data-testid="dialog-overlay"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(el('[data-testid="dialog"]')).not.toBeNull();
 
-    resolveShare();
-    await waitFor(() => expect(el('[data-testid="transfer-done-text"]')).not.toBeNull());
+    releasePhotos([]);
+    await waitFor(() => expect(el('[data-testid="transfer-share-button"]')).not.toBeNull());
+
+    // readyになれば、Escキーで閉じられる。
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(el('[data-testid="dialog"]')).toBeNull();
   }, 10_000);
 
   it('選択バーの「送る」から開いた送るダイアログを閉じると、フォーカスが「送る」ボタンへ戻る', async () => {
@@ -3547,16 +3559,17 @@ describe('受け取る(引き継ぎのファイルを読み込む)', () => {
       input.value = 'sakura-2026';
       input.dispatchEvent(new Event('input'));
     }
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = vi.spyOn(window, 'confirm');
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
     // 既定の回数(PBKDF2_ITERATIONS)での暗号化・復号を、このテストの中で3回(送信の暗号化、
     // パスワード違いでの復号の失敗、正しいパスワードでの復号)行うため、1回あたりの待ち時間を延ばす
     // (待ち時間を固定するのではなく、vi.waitForの上限だけを延ばす)。
+    await waitFor(() => expect(el('[data-testid="transfer-share-button"]')).not.toBeNull(), 10_000);
+    el<HTMLButtonElement>('[data-testid="transfer-share-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="transfer-done-text"]')).not.toBeNull(), 10_000);
     const sentText = await (share.mock.calls[0]![0].files[0] as File).text();
     el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
     listPhotosSpy.mockRestore();
-    confirmSpy.mockClear();
 
     // 受け取る(同じ端末なので、同じ人として聞かれる)。
     await openSettings();

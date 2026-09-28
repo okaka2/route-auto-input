@@ -35,6 +35,8 @@ const handlers = (): DialogHandlers => ({
   onPhotoIndex: vi.fn(),
   onSendDraft: vi.fn(),
   onSubmit: vi.fn(),
+  onSendShare: vi.fn(),
+  onSendSave: vi.fn(),
   onReceivePassword: vi.fn(),
   onReceiveSubmit: vi.fn(),
   onReceiveConfirm: vi.fn(),
@@ -304,6 +306,7 @@ describe('renderDialog: アクセシビリティ', () => {
         saveAsShared: false,
         phase: 'form' as const,
         error: null,
+        canShare: false,
         shared: false,
       },
     };

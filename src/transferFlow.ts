@@ -1,7 +1,7 @@
 import type { AppContext } from './appContext';
 import { MIN_PASSWORD_LENGTH } from './config';
 import { getMeta, listPhotos, setMeta } from './db';
-import { shareOrDownloadFile } from './fileIo';
+import { canShareFile, downloadFile, shareFile } from './fileIo';
 import { dateKey } from './history';
 import { blobToDataUrl } from './photoCodec';
 import { RECEIVE_LOAD_FAILED_MESSAGE } from './transferFormat';
@@ -18,7 +18,6 @@ type SendDraftPatch = Partial<
   >
 >;
 
-const CONFIRM_MESSAGE = '名前・住所・写真などが相手に渡ります。送りますか?';
 const NOTHING_TO_SEND_MESSAGE = '送るものがありません。';
 const BUILD_FAILED_MESSAGE = '送るファイルを作れませんでした。';
 const PASSWORD_TOO_SHORT_MESSAGE = `パスワードは${MIN_PASSWORD_LENGTH}文字以上にしてください。`;
@@ -37,6 +36,9 @@ export function createTransferFlow(ctx: AppContext): {
   openSend(patientIds: string[], options?: { spotsOnly?: boolean }): Promise<void>;
   updateSendDraft(patch: SendDraftPatch): void;
   submitSend(): Promise<void>;
+  shareSendFile(): void;
+  saveSendFile(): void;
+  discardSendFile(): void;
   openReceive(fileText: string): Promise<void>;
   updateReceivePassword(password: string): void;
   submitReceivePassword(): Promise<void>;
@@ -44,8 +46,14 @@ export function createTransferFlow(ctx: AppContext): {
   chooseConflict(choice: ConflictChoice): Promise<void>;
   discardReceive(): void;
 } {
-  // 二重押し防止(送信中に「送る」を連打しても、ファイルを二重に作らない)。
+  // 二重押し防止(「ファイルを作る」を連打しても、ファイルを二重に作らない)。
   let sending = false;
+
+  // readyになったときにできたファイル。小窓(transferSend)を出している間だけ持ち、stateには
+  // 入れない(backupFlow.ts の pendingFile と同じやり方)。「LINEなどで送る」「ファイルを保存」で使う。
+  let readyFile: File | null = null;
+  // saveAsSharedのとき、送り終えてから合言葉として保存するために持っておくパスワード。
+  let readyPassword: string | null = null;
 
   // 受け取りの流れ(transferReceive.ts)。初めて受け取るときに読み込み、以後は同じものを使う
   // (復号した中身や世代は、その中に持つ)。
@@ -150,6 +158,7 @@ export function createTransferFlow(ctx: AppContext): {
       saveAsShared: false,
       phase: 'form',
       error: sharedSecretShort ? SHARED_SECRET_SHORT_MESSAGE : null,
+      canShare: false,
       shared: false,
     });
   }
@@ -231,10 +240,6 @@ export function createTransferFlow(ctx: AppContext): {
         return;
       }
 
-      if (!ctx.confirm(CONFIRM_MESSAGE)) {
-        return;
-      }
-
       setDialog({ ...dialog, phase: 'working', error: null });
       let photos: { id: string; patientId: string; dataUrl: string; createdAt: string }[] | null = null;
       if (dialog.includePhotos) {
@@ -256,33 +261,17 @@ export function createTransferFlow(ctx: AppContext): {
       const encrypted = await encryptText(text, password);
       const filename = `訪問先の引き継ぎ_${dateKey(new Date())}.txt`;
       const file = new File([encrypted], filename, { type: 'text/plain' });
-      const result = await shareOrDownloadFile(file);
 
       const current = ctx.getState().dialog;
       if (current?.kind !== 'transferSend') {
-        // 送っている間にダイアログが閉じられた(通常は起きないが、念のため)。
+        // 作っている間にダイアログが閉じられた(通常は起きないが、念のため)。
         return;
       }
-      if (result === 'cancelled') {
-        setDialog({ ...current, phase: 'form' });
-        return;
-      }
-      if (dialog.saveAsShared) {
-        try {
-          await setMeta('sharedSecret', password);
-          // 設定画面などが「合言葉が保存されている」を正しく反映できるよう、この場で伝える
-          // (settingsInfoを読み直すまで待つと、次に送るダイアログを開いたときに
-          // 「事業所の合言葉を使う」がまだ出ない、という食い違いが起きる)。
-          // ここで保存するpasswordは、上のresolvePasswordでMIN_PASSWORD_LENGTH以上と
-          // 確かめ済みなので、sharedSecretShortは常にfalseにしてよい。
-          ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), hasSharedSecret: true, sharedSecretShort: false });
-        } catch {
-          // 保存できなくても、送信自体は成功しているので、下の成功表示は変えない。
-        }
-      }
-      // パスワードは送り終えたら画面に残さない(doneの後にもう一度送る場合は入力し直す)。
-      // 取りやめてformに戻ったとき(上のcancelled)は、入力し直さずに済むよう残す。
-      setDialog({ ...current, phase: 'done', shared: result === 'shared', error: null, password: '', passwordConfirm: '' });
+      // 「LINEなどで送る」「ファイルを保存」(shareSendFile/saveSendFile)で使う。ここではまだ
+      // 共有もダウンロードもしない(window.confirmはしないので、readyの画面で押させて初めて行う)。
+      readyFile = file;
+      readyPassword = password;
+      setDialog({ ...current, phase: 'ready', canShare: canShareFile(file), error: null });
     } catch {
       const current = ctx.getState().dialog;
       if (current?.kind === 'transferSend') {
@@ -293,10 +282,84 @@ export function createTransferFlow(ctx: AppContext): {
     }
   }
 
+  /**
+   * readyから共有/保存できた(取りやめではない)。saveAsSharedなら、合言葉として保存してから
+   * doneにする(保存に失敗しても、送信自体は成功しているので下の成功表示は変えない)。
+   */
+  async function finishSend(result: 'shared' | 'downloaded'): Promise<void> {
+    const dialog = ctx.getState().dialog;
+    if (dialog?.kind !== 'transferSend') {
+      return;
+    }
+    if (dialog.saveAsShared && readyPassword !== null) {
+      try {
+        await setMeta('sharedSecret', readyPassword);
+        // 設定画面などが「合言葉が保存されている」を正しく反映できるよう、この場で伝える
+        // (settingsInfoを読み直すまで待つと、次に送るダイアログを開いたときに
+        // 「事業所の合言葉を使う」がまだ出ない、という食い違いが起きる)。
+        // ここで保存するpasswordは、上のresolvePasswordでMIN_PASSWORD_LENGTH以上と
+        // 確かめ済みなので、sharedSecretShortは常にfalseにしてよい。
+        ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), hasSharedSecret: true, sharedSecretShort: false });
+      } catch {
+        // 保存できなくても、送信自体は成功しているので、下の成功表示は変えない。
+      }
+    }
+    const latest = ctx.getState().dialog;
+    if (latest?.kind !== 'transferSend') {
+      // 合言葉を保存している間にダイアログが閉じられた(通常は起きないが、念のため)。
+      return;
+    }
+    // パスワードは送り終えたら画面に残さない(doneの後にもう一度送る場合は入力し直す)。
+    setDialog({ ...latest, phase: 'done', shared: result === 'shared', error: null, password: '', passwordConfirm: '' });
+  }
+
+  /**
+   * readyの「LINEなどで送る」。押した処理(クリックのイベントハンドラ)の中から、最初のawaitより
+   * 前に直接呼ぶこと(shareFileが、そのまた最初のawaitより前にnavigator.shareを呼ぶ必要があるため)。
+   * 取りやめ('cancelled')は ready のまま(もう一度押せる)。
+   */
+  function shareSendFile(): void {
+    const dialog = ctx.getState().dialog;
+    const file = readyFile;
+    if (dialog?.kind !== 'transferSend' || dialog.phase !== 'ready' || file === null) {
+      return;
+    }
+    void (async () => {
+      const result = await shareFile(file);
+      if (result === 'cancelled') {
+        return;
+      }
+      if (result === 'failed') {
+        downloadFile(file);
+      }
+      await finishSend(result === 'shared' ? 'shared' : 'downloaded');
+    })();
+  }
+
+  /** readyの「ファイルを保存」(共有できない端末向け)。 */
+  function saveSendFile(): void {
+    const dialog = ctx.getState().dialog;
+    const file = readyFile;
+    if (dialog?.kind !== 'transferSend' || dialog.phase !== 'ready' || file === null) {
+      return;
+    }
+    downloadFile(file);
+    void finishSend('downloaded');
+  }
+
+  /** 送るダイアログが transferSend でなくなった(main.ts の setState から呼ぶ)。作ったファイルを捨てる。 */
+  function discardSendFile(): void {
+    readyFile = null;
+    readyPassword = null;
+  }
+
   return {
     openSend,
     updateSendDraft,
     submitSend,
+    shareSendFile,
+    saveSendFile,
+    discardSendFile,
     openReceive,
     updateReceivePassword,
     submitReceivePassword,

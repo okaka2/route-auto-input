@@ -11,6 +11,8 @@ import {
 const handlers = (): TransferSendDialogHandlers => ({
   onSendDraft: vi.fn(),
   onSubmit: vi.fn(),
+  onSendShare: vi.fn(),
+  onSendSave: vi.fn(),
   onClose: vi.fn(),
 });
 
@@ -26,6 +28,7 @@ function baseDialog(overrides: Partial<TransferSendDialog> = {}): TransferSendDi
     saveAsShared: false,
     phase: 'form',
     error: null,
+    canShare: false,
     shared: false,
     ...overrides,
   };
@@ -178,11 +181,60 @@ describe('renderTransferSendDialog: エラー・working・done', () => {
     expect(message?.textContent).toBe('パスワードは10文字以上にしてください。');
   });
 
-  it('working のときは送る・やめるの両方を押せなくする', () => {
+  it('form の「ファイルを作る」ボタン(押すとファイルを作り始める)', () => {
+    const elements = render(baseDialog());
+    expect(q(elements, 'transfer-send-button')?.textContent).toBe('ファイルを作る');
+  });
+
+  it('working のときは「ファイルを作っています…」を出し、送る・やめるの両方を押せなくする', () => {
     const elements = render(baseDialog({ phase: 'working' }), { hasSharedSecret: false });
+    expect(q(elements, 'transfer-working-text')?.textContent).toBe('ファイルを作っています…');
     expect(q<HTMLButtonElement>(elements, 'transfer-send-button')!.disabled).toBe(true);
     expect(q<HTMLButtonElement>(elements, 'dialog-cancel')!.disabled).toBe(true);
     expect(q<HTMLInputElement>(elements, 'transfer-password')!.disabled).toBe(true);
+  });
+
+  it('ready(共有できる)は「LINEなどで送る」(primary)と「やめる」だけ。注意書きは出したまま', () => {
+    const elements = render(baseDialog({ phase: 'ready', canShare: true }));
+    const warning = elements.find((e) => e.classList.contains('transfer-warning'));
+    expect(warning).not.toBeUndefined();
+    const shareButton = q<HTMLButtonElement>(elements, 'transfer-share-button')!;
+    expect(shareButton.textContent).toBe('LINEなどで送る');
+    expect(shareButton.className).toBe('primary');
+    expect(q(elements, 'dialog-cancel')?.textContent).toBe('やめる');
+    expect(q(elements, 'transfer-save-button')).toBeNull();
+    expect(q(elements, 'transfer-save-hint')).toBeNull();
+  });
+
+  it('ready(共有できない)は「ファイルを保存」(primary)と保存先の案内、「やめる」', () => {
+    const elements = render(baseDialog({ phase: 'ready', canShare: false }));
+    const saveButton = q<HTMLButtonElement>(elements, 'transfer-save-button')!;
+    expect(saveButton.textContent).toBe('ファイルを保存');
+    expect(saveButton.className).toBe('primary');
+    expect(q(elements, 'transfer-save-hint')).not.toBeNull();
+    expect(q(elements, 'dialog-cancel')?.textContent).toBe('やめる');
+    expect(q(elements, 'transfer-share-button')).toBeNull();
+  });
+
+  it('readyの「LINEなどで送る」を押すとonSendShareが呼ばれる', () => {
+    const spies = handlers();
+    const elements = render(baseDialog({ phase: 'ready', canShare: true }), { handlers: spies });
+    q<HTMLButtonElement>(elements, 'transfer-share-button')!.click();
+    expect(spies.onSendShare).toHaveBeenCalledTimes(1);
+  });
+
+  it('readyの「ファイルを保存」を押すとonSendSaveが呼ばれる', () => {
+    const spies = handlers();
+    const elements = render(baseDialog({ phase: 'ready', canShare: false }), { handlers: spies });
+    q<HTMLButtonElement>(elements, 'transfer-save-button')!.click();
+    expect(spies.onSendSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('readyの「やめる」を押すとonCloseが呼ばれる', () => {
+    const spies = handlers();
+    const elements = render(baseDialog({ phase: 'ready', canShare: true }), { handlers: spies });
+    q<HTMLButtonElement>(elements, 'dialog-cancel')!.click();
+    expect(spies.onClose).toHaveBeenCalledTimes(1);
   });
 
   it('done(共有できた)は「送りました。」と閉じるボタンだけ', () => {

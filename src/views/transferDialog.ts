@@ -1,4 +1,6 @@
 import { MIN_PASSWORD_LENGTH } from '../config';
+import { downloadLocationHint } from '../fileIo';
+import { installPlatform } from '../platform';
 import { describeRecipients } from '../recipients';
 import type { ConflictChoice } from '../transfer';
 import type { Patient, TransferReceiveDialog, TransferSendDialog } from '../types';
@@ -14,8 +16,12 @@ export type TransferSendDialogHandlers = {
       >
     >,
   ): void;
-  /** 「送る」を押した。 */
+  /** 「ファイルを作る」を押した。 */
   onSubmit(): void;
+  /** readyの「LINEなどで送る」。押した処理の中から直接呼ぶこと。 */
+  onSendShare(): void;
+  /** readyの「ファイルを保存」。 */
+  onSendSave(): void;
   onClose(): void;
 };
 
@@ -64,8 +70,35 @@ export function renderTransferSendDialog(
     return elements;
   }
 
+  if (dialog.phase === 'ready') {
+    if (!dialog.canShare) {
+      const hint = document.createElement('p');
+      hint.className = 'hint';
+      hint.dataset.testid = 'transfer-save-hint';
+      hint.textContent = downloadLocationHint(installPlatform());
+      elements.push(hint);
+    }
+
+    const readyButtons = document.createElement('div');
+    readyButtons.className = 'sheet-buttons';
+    const readyActionButton = dialog.canShare
+      ? actionButton('LINEなどで送る', 'transfer-share-button', () => handlers.onSendShare(), 'primary')
+      : actionButton('ファイルを保存', 'transfer-save-button', () => handlers.onSendSave(), 'primary');
+    readyButtons.append(actionButton('やめる', 'dialog-cancel', () => handlers.onClose()), readyActionButton);
+    elements.push(readyButtons);
+    return elements;
+  }
+
   if (dialog.error) {
     elements.push(renderMessage({ kind: 'error', text: dialog.error }));
+  }
+
+  if (dialog.phase === 'working') {
+    const workingText = document.createElement('p');
+    workingText.className = 'sheet-text';
+    workingText.dataset.testid = 'transfer-working-text';
+    workingText.textContent = 'ファイルを作っています…';
+    elements.push(workingText);
   }
 
   const options = document.createElement('div');
@@ -146,7 +179,7 @@ export function renderTransferSendDialog(
   buttons.className = 'sheet-buttons';
   const cancelButton = actionButton('やめる', 'dialog-cancel', () => handlers.onClose());
   cancelButton.disabled = working;
-  const submitButton = actionButton('送る', 'transfer-send-button', () => handlers.onSubmit(), 'primary');
+  const submitButton = actionButton('ファイルを作る', 'transfer-send-button', () => handlers.onSubmit(), 'primary');
   submitButton.disabled = working;
   buttons.append(cancelButton, submitButton);
   elements.push(buttons);
