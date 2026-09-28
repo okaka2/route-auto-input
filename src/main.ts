@@ -1,7 +1,9 @@
 import './styles.css';
 import type { AppContext } from './appContext';
 import { MAX_STOPS_PER_ROUTE, MIN_PASSWORD_LENGTH } from './config';
-import { createBackupFlow } from './backupFlow';
+// backupFlow.ts はアプリを開いただけでは使わないので、初めて書き出す/読み込むときに
+// import() で読み込む(本体を軽くする。型だけはここで使う)。
+import type { createBackupFlow } from './backupFlow';
 import { createTransferFlow } from './transferFlow';
 import {
   addPhoto,
@@ -192,11 +194,13 @@ const SPOT_RETURN_ID = '__spot-add';
 const SEND_SELECTED_RETURN_ID = '__send-selected';
 const SEND_SPOTS_RETURN_ID = '__send-spots';
 const RECEIVE_RETURN_ID = '__receive';
+const BACKUP_RETURN_ID = '__backup';
 const RETURN_TARGETS: Record<string, string> = {
   [SPOT_RETURN_ID]: 'spot-add-button',
   [SEND_SELECTED_RETURN_ID]: 'send-selected-button',
   [SEND_SPOTS_RETURN_ID]: 'send-spots-button',
   [RECEIVE_RETURN_ID]: 'import-button',
+  [BACKUP_RETURN_ID]: 'export-button',
 };
 
 // 位置を測っている最中なら、止めるための関数。測っていなければ null。
@@ -372,7 +376,15 @@ function currentNotice(): Notice | null {
       testid: 'backup-notice',
       text,
       actions: [
-        { label: '今すぐバックアップ', testid: 'notice-backup', primary: true, onClick: () => { void backupFlow.handleExport(); } },
+        {
+          label: '今すぐバックアップ',
+          testid: 'notice-backup',
+          primary: true,
+          onClick: () => {
+            dialogReturnId = BACKUP_RETURN_ID;
+            void handleExportClick();
+          },
+        },
         {
           label: 'あとで',
           testid: 'notice-later',
@@ -678,6 +690,11 @@ function setState(next: AppState, options?: { render?: boolean }): void {
   if (previousDialog?.kind === 'transferReceive' && next.dialog?.kind !== 'transferReceive') {
     transferFlow.discardReceive();
   }
+  // バックアップの保存の小窓が閉じる/別のダイアログに変わるなら、書き出したファイル
+  // (backupFlowの中にだけ持っている)をここ一箇所で捨てる。
+  if (previousDialog?.kind === 'backupSave' && next.dialog?.kind !== 'backupSave') {
+    backupFlowInstance?.discardExport();
+  }
   // 設定画面を離れるときは、合言葉の入力中の内容(sharedSecretDraft)と「変える」で
   // 出した入力欄(sharedSecretEditing)を引きずらない。次に設定画面を開いたときに
   // 前回の入力が残っていたり、未設定なのに入力欄が引っ込んだままになるのを防ぐ。
@@ -815,13 +832,53 @@ const ctx: AppContext = {
   confirm: (question) => window.confirm(question),
 };
 const transferFlow = createTransferFlow(ctx);
-// 読み込むで引き継ぎのファイル(パスワード付き)が選ばれたら、受け取りの流れに回す。
-const backupFlow = createBackupFlow(ctx, {
-  onTransferFile: (text) => {
-    dialogReturnId = RECEIVE_RETURN_ID;
-    void transferFlow.openReceive(text);
-  },
-});
+
+type BackupFlow = ReturnType<typeof createBackupFlow>;
+const BACKUP_FLOW_LOAD_FAILED_MESSAGE = 'バックアップの処理を読み込めませんでした。';
+
+// backupFlow.ts は初めて書き出す/読み込むときに import() で読み込む(本体を軽くする)。
+// 読み込めたものは backupFlowInstance に持ち、以後はそれを直接使う(Task 8の isWorking()も
+// これを同期で読む)。読み込みに失敗したら null のままにして、次のクリックでやり直せるようにする。
+let backupFlowInstance: BackupFlow | null = null;
+let backupFlowLoad: Promise<BackupFlow> | null = null;
+
+function loadBackupFlow(): Promise<BackupFlow> {
+  backupFlowLoad ??= import('./backupFlow')
+    .then(({ createBackupFlow }) => {
+      const flow = createBackupFlow(ctx, {
+        // 読み込むで引き継ぎのファイル(パスワード付き)が選ばれたら、受け取りの流れに回す。
+        onTransferFile: (text) => {
+          dialogReturnId = RECEIVE_RETURN_ID;
+          void transferFlow.openReceive(text);
+        },
+      });
+      backupFlowInstance = flow;
+      return flow;
+    })
+    .catch((error: unknown) => {
+      // 読み込めなかった。次のクリックでやり直せるよう、読み込み中の記録を消す。
+      backupFlowLoad = null;
+      throw error;
+    });
+  return backupFlowLoad;
+}
+
+async function ensureBackupFlow(): Promise<BackupFlow | null> {
+  try {
+    return await loadBackupFlow();
+  } catch {
+    ctx.showMessage({ kind: 'error', text: BACKUP_FLOW_LOAD_FAILED_MESSAGE });
+    return null;
+  }
+}
+
+function handleExportClick(includePhotos?: boolean): Promise<void> {
+  return ensureBackupFlow().then((flow) => flow?.handleExport(includePhotos));
+}
+
+function handleImportClick(file: File, mode: 'replace' | 'merge'): Promise<void> {
+  return ensureBackupFlow().then((flow) => flow?.handleImport(file, mode));
+}
 
 function currentEditingPatient(): Patient | null {
   const screen = state.screen;
@@ -1665,7 +1722,8 @@ function renderScreen(): HTMLElement {
     case 'settings':
       return renderSettings(state, { ...settingsInfo, spots }, {
         onExport: (includePhotos) => {
-          void backupFlow.handleExport(includePhotos);
+          dialogReturnId = BACKUP_RETURN_ID;
+          void handleExportClick(includePhotos);
         },
         onIncludePhotosChange: (value) => {
           // draftだけの変更なので再描画はしない(Minor 7)。setState/renderを経由しなくても、
@@ -1673,7 +1731,7 @@ function renderScreen(): HTMLElement {
           settingsInfo = { ...settingsInfo, includePhotos: value };
         },
         onImport: (file, mode) => {
-          void backupFlow.handleImport(file, mode);
+          void handleImportClick(file, mode);
         },
         onThemeChange: (setting) => {
           saveThemeSetting(setting);
@@ -1833,6 +1891,11 @@ function renderApp(): HTMLElement {
     },
     onReceiveConflict: (choice) => {
       void transferFlow.chooseConflict(choice);
+    },
+    onSaveExport: () => {
+      // 押した処理の中から直接呼ぶ(navigator.shareを同期で呼ぶ必要があるため、awaitを挟まない)。
+      // この小窓は backupFlow.handleExport が読み込んだ後にしか出ないので、読み込み済みのはず。
+      backupFlowInstance?.saveExport();
     },
     onClose: closeAnyDialog,
   }, { photoCounts, spotCount: spots.length, hasSharedSecret: settingsInfo.hasSharedSecret });

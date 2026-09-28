@@ -1,7 +1,8 @@
+import { downloadLocationHint } from '../fileIo';
 import { installSteps } from '../installHint';
 import { installPlatform } from '../platform';
 import type { ConflictChoice } from '../transfer';
-import type { AppState, Dialog, Patient, SpotKind, TransferSendDialog } from '../types';
+import type { AppState, BackupSaveDialog, Dialog, Patient, SpotKind, TransferSendDialog } from '../types';
 import { renderLocationDialog, renderSpotDialog } from './locationDialog';
 import { renderTransferReceiveDialog, renderTransferSendDialog } from './transferDialog';
 
@@ -67,6 +68,8 @@ export type DialogHandlers = {
   onReceiveConfirm(): void;
   /** 受け取りのダイアログ: 同じ人をどうするか選んだ。 */
   onReceiveConflict(choice: ConflictChoice): void;
+  /** バックアップの保存ダイアログ: 「保存する」を押した。押した処理の中から直接呼ぶこと。 */
+  onSaveExport(): void;
   onClose(): void;
 };
 
@@ -117,6 +120,8 @@ export function renderDialog(
     );
   } else if (dialog.kind === 'transferReceive') {
     content = renderTransferReceiveDialog(dialog, handlers);
+  } else if (dialog.kind === 'backupSave') {
+    content = renderBackupSaveDialog(dialog, handlers);
   } else {
     const patient = state.patients.find((item) => item.id === dialog.id);
     if (patient === undefined) {
@@ -353,6 +358,53 @@ function renderConfirmDeleteSelected(count: number, handlers: DialogHandlers): H
     ),
   );
   return [title, buttons];
+}
+
+/**
+ * バックアップの保存ダイアログ。ready(ファイルはできている。「保存する」で共有/ダウンロード)→
+ * done(保存が終わった)の2段階(backupFlow.ts)。
+ */
+function renderBackupSaveDialog(dialog: BackupSaveDialog, handlers: DialogHandlers): HTMLElement[] {
+  const title = document.createElement('h2');
+  title.id = 'dialog-title';
+  title.className = 'sheet-title';
+  title.textContent = 'バックアップのファイルができました';
+
+  if (dialog.phase === 'done') {
+    const done = document.createElement('p');
+    done.className = 'sheet-text';
+    done.dataset.testid = 'backup-done-text';
+    done.textContent =
+      dialog.result === 'shared'
+        ? 'バックアップを保存しました。'
+        : `バックアップのファイルを保存しました。${downloadLocationHint(installPlatform())}`;
+
+    const buttons = document.createElement('div');
+    buttons.className = 'sheet-buttons';
+    const closeButton = actionButton('閉じる', 'dialog-cancel', () => handlers.onClose());
+    closeButton.dataset.autofocus = '';
+    buttons.append(closeButton);
+
+    return [title, done, buttons];
+  }
+
+  const elements: HTMLElement[] = [title];
+  if (!dialog.canShare) {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.dataset.testid = 'backup-save-hint';
+    hint.textContent = downloadLocationHint(installPlatform());
+    elements.push(hint);
+  }
+
+  const buttons = document.createElement('div');
+  buttons.className = 'sheet-buttons';
+  buttons.append(
+    actionButton('やめる', 'dialog-cancel', () => handlers.onClose()),
+    actionButton('保存する', 'backup-save-button', () => handlers.onSaveExport(), 'primary'),
+  );
+  elements.push(buttons);
+  return elements;
 }
 
 function actionButton(

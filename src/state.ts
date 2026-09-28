@@ -62,6 +62,10 @@ function keepDialog(
     // 受け取りは手元の特定の訪問先に紐づかない(取り込みの途中で読み直しても閉じない)。
     return dialog;
   }
+  if (dialog.kind === 'backupSave') {
+    // バックアップの保存も特定の訪問先に紐づかない(読み直しでは閉じない)。
+    return dialog;
+  }
   if (dialog.kind === 'transferSend') {
     // お役立ち地点だけを送る(patientIdsが空)なら、閉じない。訪問先を送るときは、
     // 消えた分をpatientIdsから外し、1人も残らなければ閉じる。

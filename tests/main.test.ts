@@ -3018,7 +3018,7 @@ describe('お役立ち地点の登録', () => {
 });
 
 describe('バックアップ v2(写真・お役立ち地点・事業所)', () => {
-  it('写真つきで書き出すとファイルの中身に photos があり、チェックを外すと null になる', async () => {
+  it('「書き出す」→ 小窓 →「保存する」で、ファイルの中身がDBの内容になり、「最後のバックアップ」が変わる', async () => {
     const db = await import('../src/db');
     const { createPatient } = await import('../src/patient');
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
@@ -3036,7 +3036,7 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
     ]);
 
     const fileIo = await import('../src/fileIo');
-    const downloadSpy = vi.spyOn(fileIo, 'downloadTextFile').mockImplementation(() => {});
+    const downloadSpy = vi.spyOn(fileIo, 'downloadFile').mockImplementation(() => {});
 
     await import('../src/main');
     await waitFor(() => expect(rows()).toHaveLength(1));
@@ -3044,19 +3044,56 @@ describe('バックアップ v2(写真・お役立ち地点・事業所)', () =>
 
     el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="include-photos"]')).not.toBeNull());
+    expect(el('[data-testid="last-backup"]')?.textContent).toContain('まだありません');
 
+    // 書き出す → 小窓(ready)。この時点ではまだファイルを保存していない。
     el<HTMLButtonElement>('[data-testid="export-button"]')!.click();
-    await waitFor(() => expect(el('.message')?.textContent).toContain('書き出しました'));
+    await waitFor(() => expect(el('[data-testid="backup-save-button"]')).not.toBeNull());
+    expect(downloadSpy).not.toHaveBeenCalled();
+
+    // 「保存する」で、DBの内容(写真つき)がファイルになり、「最後のバックアップ」が変わる。
+    el<HTMLButtonElement>('[data-testid="backup-save-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="backup-done-text"]')).not.toBeNull());
     expect(downloadSpy).toHaveBeenCalledTimes(1);
-    const withPhotos = JSON.parse(downloadSpy.mock.calls[0]![1] as string);
+    const withPhotos = JSON.parse(await (downloadSpy.mock.calls[0]![0] as File).text());
+    expect(withPhotos.patients).toHaveLength(1);
+    expect(withPhotos.patients[0].id).toBe(patient.id);
     expect(Array.isArray(withPhotos.photos)).toBe(true);
     expect(withPhotos.photos).toHaveLength(1);
+    expect(el('[data-testid="last-backup"]')?.textContent).toContain('今日');
 
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog"]')).toBeNull());
+
+    // 「写真も含める」を外して書き出すと、photosがnullになる。
     el<HTMLInputElement>('[data-testid="include-photos"]')!.checked = false;
     el<HTMLButtonElement>('[data-testid="export-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="backup-save-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="backup-save-button"]')!.click();
     await waitFor(() => expect(downloadSpy).toHaveBeenCalledTimes(2));
-    const withoutPhotos = JSON.parse(downloadSpy.mock.calls[1]![1] as string);
+    const withoutPhotos = JSON.parse(await (downloadSpy.mock.calls[1]![0] as File).text());
     expect(withoutPhotos.photos).toBeNull();
+  });
+
+  it('一覧のお知らせの「今すぐバックアップ」でも小窓が開く', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    for (let i = 1; i <= 5; i += 1) {
+      await savePatient(createPatient(`場所${i}`, `東京都${i}`));
+    }
+    const fileIo = await import('../src/fileIo');
+    vi.spyOn(fileIo, 'downloadFile').mockImplementation(() => {});
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(5));
+    dismissInstallNotice();
+    await waitFor(() => expect(el('[data-testid="backup-notice"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="notice-backup"]')!.click();
+    await waitFor(() => expect(el('[data-testid="backup-save-button"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog"]')).toBeNull());
   });
 
   it('「写真も含める」のチェックを外した状態は、テーマ変更などの再描画をまたいでも保たれる(Minor 7)', async () => {

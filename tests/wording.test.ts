@@ -13,6 +13,7 @@ import {
 } from '../src/state';
 import type {
   AppState,
+  BackupSaveDialog,
   LocationDialog,
   Patient,
   Spot,
@@ -87,6 +88,7 @@ const dialogHandlers = {
   onReceiveSubmit: noop,
   onReceiveConfirm: noop,
   onReceiveConflict: noop,
+  onSaveExport: noop,
   onClose: noop,
 };
 
@@ -601,6 +603,33 @@ describe('画面の文言(禁止語が出ない)', () => {
         renderDialog({ ...createInitialState(patients), dialog }, dialogHandlers)!.outerHTML,
       );
     }
+  });
+
+  it('バックアップの保存ダイアログ: ready(共有できる/できない)・done(共有した/ダウンロードした)', () => {
+    const base = (overrides: Partial<BackupSaveDialog> = {}): BackupSaveDialog => ({
+      kind: 'backupSave',
+      phase: 'ready',
+      fileName: 'route-auto-input-2026-09-28.json',
+      canShare: true,
+      result: null,
+      ...overrides,
+    });
+    const cases: [string, BackupSaveDialog][] = [
+      ['ready・共有できる', base()],
+      ['ready・共有できない', base({ canShare: false })],
+      ['done・共有した', base({ phase: 'done', result: 'shared' })],
+      ['done・ダウンロードした', base({ phase: 'done', result: 'downloaded' })],
+    ];
+    for (const [label, dialog] of cases) {
+      expectClean(
+        `バックアップの保存ダイアログ(${label})`,
+        renderDialog({ ...createInitialState([]), dialog }, dialogHandlers)!.outerHTML,
+      );
+    }
+  });
+
+  it('バックアップの処理を読み込めなかったときの文言', () => {
+    expectClean('バックアップの処理の読み込み失敗', 'バックアップの処理を読み込めませんでした。');
   });
 
   it('バックアップの「今のデータに追加する」の文言', () => {

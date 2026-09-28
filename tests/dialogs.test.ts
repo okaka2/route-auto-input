@@ -39,6 +39,7 @@ const handlers = (): DialogHandlers => ({
   onReceiveSubmit: vi.fn(),
   onReceiveConfirm: vi.fn(),
   onReceiveConflict: vi.fn(),
+  onSaveExport: vi.fn(),
   onClose: vi.fn(),
 });
 

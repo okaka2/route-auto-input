@@ -10,10 +10,13 @@ import {
   type LocalSnapshot,
 } from './backup';
 import { applyImport, getMeta, listAllPhotos, listPatients, listSpots, setMeta } from './db';
-import { downloadTextFile, readTextFile } from './fileIo';
+import { canShareFile, downloadFile, readTextFile, shareFile } from './fileIo';
 import { blobToDataUrl, dataUrlToBlob } from './photoCodec';
 import { isEncryptedFileText } from './transferFormat';
 import type { Photo } from './types';
+
+const READ_FAILED_MESSAGE = 'データを読めなかったので書き出しませんでした。';
+const NOTHING_TO_EXPORT_MESSAGE = '書き出す訪問先がありません。';
 
 /** インポートの確認に出す「(写真M枚・お役立ち地点K件)」。0件の部分は書かず、両方0なら空文字。 */
 function backupExtrasLabel(photoCount: number, spotCount: number): string {
@@ -37,11 +40,34 @@ export function createBackupFlow(
   hooks: { onTransferFile?(text: string): void } = {},
 ): {
   handleExport(includePhotos?: boolean): Promise<void>;
+  saveExport(): void;
+  discardExport(): void;
   handleImport(file: File, mode: 'replace' | 'merge'): Promise<void>;
+  isWorking(): boolean;
 } {
+  // 書き出したファイル。小窓(backupSave)を出している間だけ持ち、state には入れない。
+  // 「保存する」を押したときにこれを使う。小窓が閉じる/別のものに変わったら discardExport で捨てる。
+  let pendingFile: File | null = null;
+
+  // handleImport が実際にDBへ書き込んでいる最中かどうか(Task 8の isWorking が見る)。
+  let writingImport = false;
+
+  /**
+   * DBから、書き出す中身をすべて読む。画面のstate(ctx.getState().patients など)は
+   * 読み込み中や別画面で古くなっていることがあるため使わず、必ずDBから読み直す。
+   */
   async function handleExport(includePhotos = true): Promise<void> {
+    let patients: Awaited<ReturnType<typeof listPatients>>;
+    let spots: Awaited<ReturnType<typeof listSpots>>;
+    let office: Awaited<ReturnType<typeof getMeta<'office'>>>;
+    let routeEnds: Awaited<ReturnType<typeof getMeta<'routeEnds'>>>;
+    let photos: { id: string; patientId: string; dataUrl: string; createdAt: string }[] | null;
     try {
-      const photos = includePhotos
+      patients = await listPatients();
+      spots = await listSpots();
+      office = await getMeta('office');
+      routeEnds = await getMeta('routeEnds');
+      photos = includePhotos
         ? await Promise.all(
             (await listAllPhotos()).map(async (photo) => ({
               id: photo.id,
@@ -51,31 +77,79 @@ export function createBackupFlow(
             })),
           )
         : null;
-      const date = new Date().toISOString().slice(0, 10);
-      const routeContext = ctx.getRouteContext();
-      downloadTextFile(
-        `route-auto-input-${date}.json`,
-        serializeBackup({
-          patients: ctx.getState().patients,
-          photos,
-          spots: [...ctx.getSpots()],
-          meta: { office: routeContext.office ?? undefined, routeEnds: routeContext.ends },
-        }),
-      );
     } catch {
-      ctx.showMessage({ kind: 'error', text: 'バックアップを書き出せませんでした。' });
+      ctx.showMessage({ kind: 'error', text: READ_FAILED_MESSAGE });
       return;
     }
-    // 最後にバックアップした日時の記録は付随的なもの。ここが失敗しても、
-    // ファイルの書き出し自体は成功しているので、成功として扱う(lastBackupAtは更新しない)。
+
+    if (patients.length === 0) {
+      ctx.showMessage({ kind: 'error', text: NOTHING_TO_EXPORT_MESSAGE });
+      return;
+    }
+
+    const date = new Date().toISOString().slice(0, 10);
+    const fileName = `route-auto-input-${date}.json`;
+    const text = serializeBackup({ patients, photos, spots, meta: { office, routeEnds } });
+    const file = new File([text], fileName, { type: 'application/json' });
+    pendingFile = file;
+    ctx.setState({
+      ...ctx.getState(),
+      dialog: { kind: 'backupSave', phase: 'ready', fileName, canShare: canShareFile(file), result: null },
+    });
+  }
+
+  /** 最後にバックアップした日時の記録。失敗しても、保存自体は成功しているので done は変えない。 */
+  async function recordBackup(): Promise<void> {
     try {
       const lastBackupAt = new Date().toISOString();
       await setMeta('lastBackupAt', lastBackupAt);
       ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), lastBackupAt });
     } catch {
-      // 記録できなかっただけ。書き出し自体は成功しているので、下のメッセージは変えない。
+      // 記録できなかっただけ。保存自体は成功しているので、下の表示は変えない。
     }
-    ctx.showMessage({ kind: 'info', text: 'バックアップを書き出しました。' });
+  }
+
+  /** 小窓が backupSave の 'ready' から離れた(閉じた/別物になった)。共有・ダウンロードの結果は反映しない。 */
+  function finishIfStillReady(result: 'shared' | 'downloaded'): void {
+    const current = ctx.getState().dialog;
+    if (current?.kind !== 'backupSave') {
+      return;
+    }
+    ctx.setState({ ...ctx.getState(), dialog: { ...current, phase: 'done', result } });
+  }
+
+  /**
+   * 「保存する」。押した処理(クリックのイベントハンドラ)の中から直接呼ぶこと
+   * (shareFileが、最初のawaitより前にnavigator.shareを呼ぶ必要があるため)。
+   */
+  function saveExport(): void {
+    const dialog = ctx.getState().dialog;
+    const file = pendingFile;
+    if (dialog?.kind !== 'backupSave' || dialog.phase !== 'ready' || file === null) {
+      return;
+    }
+    if (dialog.canShare) {
+      void (async () => {
+        const result = await shareFile(file);
+        if (result === 'cancelled') {
+          // 小窓は 'ready' のまま。記録もしない。
+          return;
+        }
+        if (result === 'failed') {
+          downloadFile(file);
+        }
+        await recordBackup();
+        finishIfStillReady(result === 'shared' ? 'shared' : 'downloaded');
+      })();
+      return;
+    }
+    downloadFile(file);
+    void recordBackup().then(() => finishIfStillReady('downloaded'));
+  }
+
+  /** 小窓が backupSave でなくなった(main.ts の setState から呼ぶ)。持っていたファイルを捨てる。 */
+  function discardExport(): void {
+    pendingFile = null;
   }
 
   async function handleImport(file: File, mode: 'replace' | 'merge'): Promise<void> {
@@ -121,6 +195,7 @@ export function createBackupFlow(
         }
 
         writeStarted = true;
+        writingImport = true;
         // 訪問先・写真・地点・meta を1つのトランザクションで書く(applyImportが名簿に
         // 無くなった写真も同じ中で消す)。書き込みが成功してから、まとめて画面の状態に反映する。
         await applyImport(planBackupReplace(content, decodedPhotos));
@@ -160,6 +235,7 @@ export function createBackupFlow(
       }
 
       writeStarted = true;
+      writingImport = true;
       // 訪問先(新しい人だけ)・写真・地点・meta を1つのトランザクションで書く。
       await applyImport(plan.write);
       if (plan.write.meta.office !== undefined) {
@@ -190,8 +266,14 @@ export function createBackupFlow(
         const message = error instanceof Error ? error.message : 'データを取り込めませんでした。';
         ctx.showMessage({ kind: 'error', text: message });
       }
+    } finally {
+      writingImport = false;
     }
   }
 
-  return { handleExport, handleImport };
+  function isWorking(): boolean {
+    return writingImport;
+  }
+
+  return { handleExport, saveExport, discardExport, handleImport, isWorking };
 }

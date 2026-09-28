@@ -108,6 +108,19 @@ export type TransferReceiveDialog = {
   result: string | null; // done の文
 };
 
+/**
+ * バックアップの保存ダイアログ。書き出したファイルができた(ready)ところから、
+ * 「保存する」で共有/ダウンロードして終わる(done)までの2段階(backupFlow.ts)。
+ */
+export type BackupSaveDialog = {
+  kind: 'backupSave';
+  phase: 'ready' | 'done';
+  fileName: string;
+  canShare: boolean;
+  /** phase: 'done' のときだけ意味を持つ。共有できた('shared')かダウンロードした('downloaded')か。 */
+  result: 'shared' | 'downloaded' | null;
+};
+
 /** 開いているダイアログ。1件向けは対象の訪問先のidを、複数選択の一括削除は件数を持たない(state.selectedIdsを見る)。 */
 export type Dialog =
   | { kind: 'rowMenu'; id: string }
@@ -125,7 +138,8 @@ export type Dialog =
   | SpotDialog
   | { kind: 'photos'; patientId: string; urls: string[]; index: number }
   | TransferSendDialog
-  | TransferReceiveDialog;
+  | TransferReceiveDialog
+  | BackupSaveDialog;
 
 export type AppState = {
   screen: Screen;
