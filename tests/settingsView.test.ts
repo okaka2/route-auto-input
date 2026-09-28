@@ -293,7 +293,7 @@ describe('renderSettings: 事業所の合言葉', () => {
 
   it('説明に10文字以上・つなげ言葉の例を書く(禁止語は使わない)', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
-    expect(element.textContent).toContain('10文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)。');
+    expect(element.textContent).toContain('10文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)');
   });
 
   it('入力欄の初期値はinfo.sharedSecretDraftで、入力するたびonSharedSecretDraftChange(Minor 7と同じやり方)', () => {
@@ -339,17 +339,18 @@ describe('renderSettings: 事業所の合言葉', () => {
     expect(short.classList.contains('error')).toBe(true);
   });
 
-  it('設定済みで「変える」を押した後(sharedSecretEditing)は、入力欄と「保存」「やめる」を出す', () => {
+  it('設定済みで「変える」を押した後(sharedSecretEditing)は、入力欄と「保存」「やめる」を出す(短くても短い旨は出さない)', () => {
     const spies = handlers();
     const element = renderSettings(
       createInitialState([]),
-      { ...info(), hasSharedSecret: true, sharedSecretEditing: true },
+      { ...info(), hasSharedSecret: true, sharedSecretEditing: true, sharedSecretShort: true },
       spies,
     );
     expect(q(element, 'shared-secret-input')).not.toBeNull();
     expect(q(element, 'shared-secret-save')).not.toBeNull();
     expect(element.querySelector('[data-testid="shared-secret-status"]')).toBeNull();
     expect(element.querySelector('[data-testid="shared-secret-change"]')).toBeNull();
+    expect(element.querySelector('[data-testid="shared-secret-short"]')).toBeNull();
     q<HTMLButtonElement>(element, 'shared-secret-cancel').click();
     expect(spies.onSharedSecretCancel).toHaveBeenCalled();
   });

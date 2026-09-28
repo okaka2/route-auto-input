@@ -122,7 +122,7 @@ export function renderTransferSendDialog(
     const passwordHint = document.createElement('p');
     passwordHint.className = 'hint';
     passwordHint.dataset.testid = 'transfer-password-hint';
-    passwordHint.textContent = `${MIN_PASSWORD_LENGTH}文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)。`;
+    passwordHint.textContent = `${MIN_PASSWORD_LENGTH}文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)`;
     elements.push(passwordHint);
     // すでに合言葉がある(が、このダイアログではオフにして別のパスワードを入力している)ときは、
     // 「保存する」ではなく「変える」という文言にする(何が起きるかを正しく伝えるため)。

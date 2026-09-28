@@ -125,7 +125,7 @@ describe('renderTransferSendDialog: 出し分け', () => {
   it('パスワード欄を出すときは、10文字以上・つなげ言葉の例を案内する', () => {
     const elements = render(baseDialog(), { hasSharedSecret: false });
     expect(q(elements, 'transfer-password-hint')?.textContent).toBe(
-      '10文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)。',
+      '10文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)',
     );
   });
 

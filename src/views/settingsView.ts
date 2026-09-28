@@ -233,7 +233,7 @@ function renderSharedSecret(info: SettingsInfo, handlers: SettingsHandlers): HTM
   note.textContent =
     '引き継ぎのファイルを送るとき・受け取るときに、自動で使うパスワードです。' +
     '事業所の人どうしで同じものにしておくと、毎回入力しなくて済みます。' +
-    `${MIN_PASSWORD_LENGTH}文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)。`;
+    `${MIN_PASSWORD_LENGTH}文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)`;
   card.append(note);
 
   const editing = !info.hasSharedSecret || info.sharedSecretEditing;
