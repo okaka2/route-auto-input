@@ -30,6 +30,7 @@ const info = (): SettingsInfo => ({
   photoBytes: 0,
   includePhotos: true,
   hasSharedSecret: false,
+  sharedSecretShort: false,
   sharedSecretDraft: '',
   sharedSecretEditing: false,
 });
@@ -290,9 +291,9 @@ describe('renderSettings: 事業所の合言葉', () => {
     expect(element.querySelector('[data-testid="shared-secret-clear"]')).toBeNull();
   });
 
-  it('説明に6文字以上と書く(禁止語は使わない)', () => {
+  it('説明に10文字以上・つなげ言葉の例を書く(禁止語は使わない)', () => {
     const element = renderSettings(createInitialState([]), info(), handlers());
-    expect(element.textContent).toContain('6文字以上');
+    expect(element.textContent).toContain('10文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)。');
   });
 
   it('入力欄の初期値はinfo.sharedSecretDraftで、入力するたびonSharedSecretDraftChange(Minor 7と同じやり方)', () => {
@@ -319,10 +320,23 @@ describe('renderSettings: 事業所の合言葉', () => {
     const element = renderSettings(createInitialState([]), { ...info(), hasSharedSecret: true }, spies);
     expect(q(element, 'shared-secret-status').textContent).toBe('設定されています');
     expect(element.querySelector('[data-testid="shared-secret-input"]')).toBeNull();
+    expect(element.querySelector('[data-testid="shared-secret-short"]')).toBeNull();
     q<HTMLButtonElement>(element, 'shared-secret-change').click();
     expect(spies.onSharedSecretChange).toHaveBeenCalled();
     q<HTMLButtonElement>(element, 'shared-secret-clear').click();
     expect(spies.onSharedSecretClear).toHaveBeenCalled();
+  });
+
+  it('設定済みの合言葉が短ければ、「設定されています」の下に赤系で「10文字以上に変えてください」を出す', () => {
+    const element = renderSettings(
+      createInitialState([]),
+      { ...info(), hasSharedSecret: true, sharedSecretShort: true },
+      handlers(),
+    );
+    expect(q(element, 'shared-secret-status').textContent).toBe('設定されています');
+    const short = q(element, 'shared-secret-short');
+    expect(short.textContent).toBe('10文字以上に変えてください');
+    expect(short.classList.contains('error')).toBe(true);
   });
 
   it('設定済みで「変える」を押した後(sharedSecretEditing)は、入力欄と「保存」「やめる」を出す', () => {

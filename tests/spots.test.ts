@@ -329,6 +329,7 @@ describe('設定画面: お役立ち地点', () => {
     photoBytes: 0,
     includePhotos: true,
     hasSharedSecret: false,
+    sharedSecretShort: false,
     sharedSecretDraft: '',
     sharedSecretEditing: false,
   });

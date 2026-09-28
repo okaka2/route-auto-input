@@ -48,6 +48,7 @@ function createFakeContext(
     photoBytes: 0,
     includePhotos: true,
     hasSharedSecret: false,
+    sharedSecretShort: false,
     sharedSecretDraft: '',
     sharedSecretEditing: false,
   };

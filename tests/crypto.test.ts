@@ -108,9 +108,9 @@ describe('encryptText / decryptText / isEncryptedFileText', () => {
     await expect(decryptText(JSON.stringify(parsed), 'secret-123')).rejects.toBeInstanceOf(NotTransferFileError);
   });
 
-  it('回数の上限は 2,000,000 回(既定の10倍)', () => {
+  it('回数の上限は 2,000,000 回(既定を上げても変えない)', () => {
     expect(MAX_ITERATIONS).toBe(2_000_000);
-    expect(MAX_ITERATIONS).toBe(PBKDF2_ITERATIONS * 10);
+    expect(MAX_ITERATIONS).toBeGreaterThan(PBKDF2_ITERATIONS);
   });
 
   it.each([0, -1, 1.5, '1000', MAX_ITERATIONS + 1, 10_000_000])(
@@ -135,11 +135,20 @@ describe('encryptText / decryptText / isEncryptedFileText', () => {
     );
   });
 
-  it('既定の回数は 200,000 回で、ファイルに iter として残る', async () => {
+  it('既定の回数は 600,000 回で、ファイルに iter として残る', async () => {
     const plain = 'y';
     const file = await encryptText(plain, 'secret-123');
     const parsed = JSON.parse(file) as { iter: number };
+    expect(parsed.iter).toBe(600_000);
     expect(parsed.iter).toBe(PBKDF2_ITERATIONS);
+    expect(await decryptText(file, 'secret-123')).toBe(plain);
+  }, 20_000);
+
+  it('回数(iter)が 200,000 回(古い版で作ったファイル)でも開ける', async () => {
+    const plain = 'old-file';
+    const file = await encryptText(plain, 'secret-123', 200_000);
+    const parsed = JSON.parse(file) as { iter: number };
+    expect(parsed.iter).toBe(200_000);
     expect(await decryptText(file, 'secret-123')).toBe(plain);
   }, 20_000);
 

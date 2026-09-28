@@ -21,4 +21,4 @@ export const MAX_PHOTOS_PER_PATIENT = 3;
  * (設定・送るダイアログの文言・検証)が、暗号化のコードを読み込まずに済むようにする
  * (crypto.tsの中身はビルドで別チャンクに分かれる)。
  */
-export const MIN_PASSWORD_LENGTH = 6;
+export const MIN_PASSWORD_LENGTH = 10;

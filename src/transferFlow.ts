@@ -24,6 +24,7 @@ const BUILD_FAILED_MESSAGE = '送るファイルを作れませんでした。';
 const PASSWORD_TOO_SHORT_MESSAGE = `パスワードは${MIN_PASSWORD_LENGTH}文字以上にしてください。`;
 const PASSWORD_MISMATCH_MESSAGE = '確認のパスワードが一致しません。';
 const SHARED_SECRET_MISSING_MESSAGE = '事業所の合言葉が見つかりません。パスワードを入力してください。';
+const SHARED_SECRET_SHORT_MESSAGE = `事業所の合言葉が短いので、${MIN_PASSWORD_LENGTH}文字以上に変えてください。`;
 
 /**
  * 「送る」の入口(一覧の「⋯」・選択バー・設定のお役立ち地点)からダイアログを開き、
@@ -134,18 +135,21 @@ export function createTransferFlow(ctx: AppContext): {
   /** 一覧の「⋯」(1人)・選択バー(選択中の全員)・設定のお役立ち地点(0人)、共通の入口。 */
   async function openSend(patientIds: string[], options: { spotsOnly?: boolean } = {}): Promise<void> {
     const spotsOnly = options.spotsOnly === true || patientIds.length === 0;
-    const hasSharedSecret = ctx.getSettingsInfo().hasSharedSecret;
+    const info = ctx.getSettingsInfo();
+    const hasSharedSecret = info.hasSharedSecret;
+    // 保存済みの合言葉が短ければ、そのまま自動で使わせず、入力を促す(パスワードの強さのため)。
+    const sharedSecretShort = hasSharedSecret && info.sharedSecretShort;
     setDialog({
       kind: 'transferSend',
       patientIds: spotsOnly ? [] : patientIds,
       includePhotos: true,
       includeSpots: spotsOnly,
-      useSharedSecret: hasSharedSecret,
+      useSharedSecret: hasSharedSecret && !sharedSecretShort,
       password: '',
       passwordConfirm: '',
       saveAsShared: false,
       phase: 'form',
-      error: null,
+      error: sharedSecretShort ? SHARED_SECRET_SHORT_MESSAGE : null,
       shared: false,
     });
   }
@@ -180,6 +184,13 @@ export function createTransferFlow(ctx: AppContext): {
         // 入力で送り直せるように促す(hasSharedSecretもfalseにして、設定画面などの表示も揃える)。
         ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), hasSharedSecret: false });
         setDialog({ ...dialog, useSharedSecret: false, error: SHARED_SECRET_MISSING_MESSAGE });
+        return null;
+      }
+      if (shared.length < MIN_PASSWORD_LENGTH) {
+        // ダイアログを開いた後に(他の端末/タブで)短い合言葉に変わった場合など。
+        // openSendと同じく、自動で使わせずチェックを外して入力を促す。
+        ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), sharedSecretShort: true });
+        setDialog({ ...dialog, useSharedSecret: false, error: SHARED_SECRET_SHORT_MESSAGE });
         return null;
       }
       return shared;
@@ -262,7 +273,9 @@ export function createTransferFlow(ctx: AppContext): {
           // 設定画面などが「合言葉が保存されている」を正しく反映できるよう、この場で伝える
           // (settingsInfoを読み直すまで待つと、次に送るダイアログを開いたときに
           // 「事業所の合言葉を使う」がまだ出ない、という食い違いが起きる)。
-          ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), hasSharedSecret: true });
+          // ここで保存するpasswordは、上のresolvePasswordでMIN_PASSWORD_LENGTH以上と
+          // 確かめ済みなので、sharedSecretShortは常にfalseにしてよい。
+          ctx.setSettingsInfo({ ...ctx.getSettingsInfo(), hasSharedSecret: true, sharedSecretShort: false });
         } catch {
           // 保存できなくても、送信自体は成功しているので、下の成功表示は変えない。
         }

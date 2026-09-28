@@ -122,6 +122,18 @@ describe('renderTransferSendDialog: 出し分け', () => {
     expect(q(elements, 'transfer-save-shared')).not.toBeNull();
   });
 
+  it('パスワード欄を出すときは、10文字以上・つなげ言葉の例を案内する', () => {
+    const elements = render(baseDialog(), { hasSharedSecret: false });
+    expect(q(elements, 'transfer-password-hint')?.textContent).toBe(
+      '10文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)。',
+    );
+  });
+
+  it('合言葉を使っていて(オン)パスワード欄が無いときは、案内も出さない', () => {
+    const elements = render(baseDialog({ useSharedSecret: true }), { hasSharedSecret: true });
+    expect(q(elements, 'transfer-password-hint')).toBeNull();
+  });
+
   it('合言葉が保存されていてオンなら、チェックを出しパスワード欄は出さない', () => {
     const elements = render(baseDialog({ useSharedSecret: true }), { hasSharedSecret: true });
     const checkbox = q<HTMLInputElement>(elements, 'transfer-use-shared');
@@ -160,10 +172,10 @@ describe('renderTransferSendDialog: 出し分け', () => {
 
 describe('renderTransferSendDialog: エラー・working・done', () => {
   it('errorがあれば赤系のメッセージで出す', () => {
-    const elements = render(baseDialog({ error: 'パスワードは6文字以上にしてください。' }));
+    const elements = render(baseDialog({ error: 'パスワードは10文字以上にしてください。' }));
     const message = elements.find((e) => e.classList.contains('message'));
     expect(message?.classList.contains('error')).toBe(true);
-    expect(message?.textContent).toBe('パスワードは6文字以上にしてください。');
+    expect(message?.textContent).toBe('パスワードは10文字以上にしてください。');
   });
 
   it('working のときは送る・やめるの両方を押せなくする', () => {

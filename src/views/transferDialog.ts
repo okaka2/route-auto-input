@@ -1,3 +1,4 @@
+import { MIN_PASSWORD_LENGTH } from '../config';
 import { describeRecipients } from '../recipients';
 import type { ConflictChoice } from '../transfer';
 import type { Patient, TransferReceiveDialog, TransferSendDialog } from '../types';
@@ -118,6 +119,11 @@ export function renderTransferSendDialog(
     confirmInput.addEventListener('input', () => handlers.onSendDraft({ passwordConfirm: confirmInput.value }));
 
     elements.push(labelled('パスワード', passwordInput), labelled('確認のパスワード', confirmInput));
+    const passwordHint = document.createElement('p');
+    passwordHint.className = 'hint';
+    passwordHint.dataset.testid = 'transfer-password-hint';
+    passwordHint.textContent = `${MIN_PASSWORD_LENGTH}文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)。`;
+    elements.push(passwordHint);
     // すでに合言葉がある(が、このダイアログではオフにして別のパスワードを入力している)ときは、
     // 「保存する」ではなく「変える」という文言にする(何が起きるかを正しく伝えるため)。
     const saveAsSharedLabel = hasSharedSecret

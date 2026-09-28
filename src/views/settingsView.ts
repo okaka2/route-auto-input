@@ -27,6 +27,8 @@ export type SettingsInfo = {
   includePhotos: boolean;
   /** 事業所の合言葉が設定済みか。合言葉そのものの文字列はここに入れない。 */
   hasSharedSecret: boolean;
+  /** 保存済みの合言葉が MIN_PASSWORD_LENGTH 文字未満か(短いパスワードで設定されたまま残っているとき)。 */
+  sharedSecretShort: boolean;
   /**
    * 合言葉欄の入力中の値。includePhotosと同じやり方で、再描画をまたいでも消えないよう
    * main.ts側の変数で持つ(Task 4)。
@@ -230,7 +232,8 @@ function renderSharedSecret(info: SettingsInfo, handlers: SettingsHandlers): HTM
   const note = document.createElement('p');
   note.textContent =
     '引き継ぎのファイルを送るとき・受け取るときに、自動で使うパスワードです。' +
-    `事業所の人どうしで同じものにしておくと、毎回入力しなくて済みます。${MIN_PASSWORD_LENGTH}文字以上。`;
+    '事業所の人どうしで同じものにしておくと、毎回入力しなくて済みます。' +
+    `${MIN_PASSWORD_LENGTH}文字以上。言葉をつなげると覚えやすくなります(例: さくら訪問2026秋)。`;
   card.append(note);
 
   const editing = !info.hasSharedSecret || info.sharedSecretEditing;
@@ -260,7 +263,15 @@ function renderSharedSecret(info: SettingsInfo, handlers: SettingsHandlers): HTM
       button('shared-secret-change', '変える', '', () => handlers.onSharedSecretChange()),
       button('shared-secret-clear', '消す', 'danger', () => handlers.onSharedSecretClear()),
     );
-    card.append(status, buttons);
+    card.append(status);
+    if (info.sharedSecretShort) {
+      const short = document.createElement('p');
+      short.className = 'message error';
+      short.dataset.testid = 'shared-secret-short';
+      short.textContent = `${MIN_PASSWORD_LENGTH}文字以上に変えてください`;
+      card.append(short);
+    }
+    card.append(buttons);
   }
   return card;
 }

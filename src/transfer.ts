@@ -5,7 +5,7 @@
 import { toBackupPhoto, toPatient, toSpot, type BackupPhoto } from './backup';
 import { MAX_PHOTOS_PER_PATIENT } from './config';
 import { normalizeAddress, normalizeName } from './normalize';
-import type { Patient, Photo, Spot } from './types';
+import type { Parking, Patient, Photo, Spot } from './types';
 
 export type TransferPayload = {
   kind: 'houmon-transfer-payload';
@@ -142,18 +142,53 @@ export type ImportPlan = {
   spots: Spot[];
 };
 
-/** 手元の人の項目を、送られてきた側で置き換える(送られてきた側に無い任意項目は外す)。 */
+/** 文字列の任意項目(電話・メモ)が、送り手側で「未設定」扱いか(undefinedまたは空文字)。 */
+function isBlank(value: string | undefined): boolean {
+  return value === undefined || value === '';
+}
+
+/**
+ * 駐車の上書き先を決める。送り手に駐車が無ければ手元をそのまま残す。
+ * 送り手が「路上(要許可証)」で期限を書いていないのに、手元も「路上(要許可証)」で期限を
+ * 持っているときだけは、種類は送り手のまま・期限だけ手元のものを残す(送り手が消し忘れただけで、
+ * 期限を消すつもりだったとは限らないため)。それ以外は送り手の内容にそのまま置き換える。
+ */
+function resolveParking(existing: Parking | undefined, incoming: Parking | undefined): Parking | undefined {
+  if (incoming === undefined) {
+    return existing;
+  }
+  if (
+    incoming.type === 'street_permit' &&
+    incoming.permitExpires === undefined &&
+    existing?.type === 'street_permit' &&
+    existing.permitExpires !== undefined
+  ) {
+    return { ...incoming, permitExpires: existing.permitExpires };
+  }
+  return incoming;
+}
+
+/**
+ * 手元の人の項目を、送られてきた側で置き換える。名前・住所は常に送り手の値。
+ * 電話・位置・駐車・メモは、送り手が未設定(電話・メモは空文字も未設定扱い)なら手元の値を残す
+ * (送り手側でその項目を消したのか、単に入力していないだけなのかを区別できないため、
+ * 消す指示とはみなさない)。駐車の期限の扱いは resolveParking を参照。
+ */
 function overwritePatient(existing: Patient, incoming: Patient, now: string): Patient {
+  const phone = isBlank(incoming.phone) ? existing.phone : incoming.phone;
+  const location = incoming.location ?? existing.location;
+  const parking = resolveParking(existing.parking, incoming.parking);
+  const note = isBlank(incoming.note) ? existing.note : incoming.note;
   return {
     id: existing.id,
     createdAt: existing.createdAt,
     name: incoming.name,
     address: incoming.address,
     updatedAt: now,
-    ...(incoming.phone !== undefined ? { phone: incoming.phone } : {}),
-    ...(incoming.location !== undefined ? { location: incoming.location } : {}),
-    ...(incoming.parking !== undefined ? { parking: incoming.parking } : {}),
-    ...(incoming.note !== undefined ? { note: incoming.note } : {}),
+    ...(phone !== undefined ? { phone } : {}),
+    ...(location !== undefined ? { location } : {}),
+    ...(parking !== undefined ? { parking } : {}),
+    ...(note !== undefined ? { note } : {}),
   };
 }
 

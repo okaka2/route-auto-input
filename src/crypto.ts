@@ -11,13 +11,14 @@ import { isEncryptedFileText, TRANSFER_FORMAT } from './transferFormat';
 // 今までどおりここからも使えるよう、そのまま出し直す。
 export { isEncryptedFileText, TRANSFER_FORMAT };
 
-export const PBKDF2_ITERATIONS = 200_000;
+export const PBKDF2_ITERATIONS = 600_000;
 // パスワードの最短の長さ(MIN_PASSWORD_LENGTH)は config.ts にある(このファイルが
 // 別チャンクに分かれるようにするため。config.ts のコメントを参照)。
 
 /**
  * 異常なファイル(回数がとても大きい)で、古いスマホが長く固まらないように、回数の上限を決めておく。
- * 既定(PBKDF2_ITERATIONS)の10倍。暗号化と復号の両方で、この上限を使う。
+ * 既定(PBKDF2_ITERATIONS)を上げたあとも、この値自体は変えていない
+ * (古い版(200,000回)で作ったファイルもこの上限の中に収まる)。暗号化と復号の両方で、この上限を使う。
  */
 export const MAX_ITERATIONS = 2_000_000;
 const SALT_BYTES = 16;

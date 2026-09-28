@@ -19,8 +19,8 @@ vi.mock('../src/imageResize', () => ({
 
 const SESSION_KEY = 'route-auto-input:session';
 
-async function waitFor(assertion: () => void): Promise<void> {
-  await vi.waitFor(assertion, { timeout: 2000, interval: 5 });
+async function waitFor(assertion: () => void, timeout = 2000): Promise<void> {
+  await vi.waitFor(assertion, { timeout, interval: 5 });
 }
 
 /**
@@ -1543,17 +1543,17 @@ describe('事業所の合言葉', () => {
     el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="shared-secret-input"]')).not.toBeNull());
     const input = el<HTMLInputElement>('[data-testid="shared-secret-input"]')!;
-    input.value = 'ひみつのあいことば';
+    input.value = 'ひみつのあいことばだよ';
     input.dispatchEvent(new Event('input'));
     el<HTMLButtonElement>('[data-testid="shared-secret-save"]')!.click();
     await waitFor(() => expect(el('.message')?.textContent).toContain('事業所の合言葉を保存しました'));
     const db = await import('../src/db');
-    expect(await db.getMeta('sharedSecret')).toBe('ひみつのあいことば');
+    expect(await db.getMeta('sharedSecret')).toBe('ひみつのあいことばだよ');
     expect(el('[data-testid="shared-secret-status"]')?.textContent).toBe('設定されています');
-    expect(document.body.innerHTML).not.toContain('ひみつのあいことば');
+    expect(document.body.innerHTML).not.toContain('ひみつのあいことばだよ');
   });
 
-  it('6文字未満なら保存せず「6文字以上にしてください。」を出す', async () => {
+  it('10文字未満なら保存せず「10文字以上にしてください。」を出す', async () => {
     await import('../src/main');
     await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
@@ -1562,12 +1562,12 @@ describe('事業所の合言葉', () => {
     input.value = 'abcd';
     input.dispatchEvent(new Event('input'));
     el<HTMLButtonElement>('[data-testid="shared-secret-save"]')!.click();
-    await waitFor(() => expect(el('.message')?.textContent).toContain('6文字以上にしてください'));
+    await waitFor(() => expect(el('.message')?.textContent).toContain('10文字以上にしてください'));
     const db = await import('../src/db');
     expect(await db.getMeta('sharedSecret')).toBeUndefined();
   });
 
-  it('長さの数え方は送るダイアログと同じ(前後の空白も数える): 空白で始まる6文字は保存、5文字は保存しない', async () => {
+  it('長さの数え方は送るダイアログと同じ(前後の空白も数える): 空白で始まる10文字は保存、9文字は保存しない', async () => {
     await import('../src/main');
     await waitFor(() => expect(el('[data-testid="settings-button"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
@@ -1575,18 +1575,18 @@ describe('事業所の合言葉', () => {
     const db = await import('../src/db');
 
     const short = el<HTMLInputElement>('[data-testid="shared-secret-input"]')!;
-    short.value = 'abcde';
+    short.value = 'abcdefghi';
     short.dispatchEvent(new Event('input'));
     el<HTMLButtonElement>('[data-testid="shared-secret-save"]')!.click();
-    await waitFor(() => expect(el('.message')?.textContent).toContain('6文字以上にしてください'));
+    await waitFor(() => expect(el('.message')?.textContent).toContain('10文字以上にしてください'));
     expect(await db.getMeta('sharedSecret')).toBeUndefined();
 
     const input = el<HTMLInputElement>('[data-testid="shared-secret-input"]')!;
-    input.value = ' abcde';
+    input.value = ' abcdefghi';
     input.dispatchEvent(new Event('input'));
     el<HTMLButtonElement>('[data-testid="shared-secret-save"]')!.click();
     await waitFor(() => expect(el('.message')?.textContent).toContain('事業所の合言葉を保存しました'));
-    expect(await db.getMeta('sharedSecret')).toBe(' abcde');
+    expect(await db.getMeta('sharedSecret')).toBe(' abcdefghi');
   });
 
   it('「変える」で入力欄を出して保存し直せる。「やめる」は保存せず引っ込める', async () => {
@@ -1687,7 +1687,7 @@ describe('送る', () => {
     el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
 
-    fillPassword('abcdef');
+    fillPassword('sakura-2026');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
 
@@ -1699,7 +1699,7 @@ describe('送る', () => {
 
     const { decryptText } = await import('../src/crypto');
     const { parsePayload } = await import('../src/transfer');
-    const payload = parsePayload(await decryptText(text, 'abcdef'));
+    const payload = parsePayload(await decryptText(text, 'sakura-2026'));
     expect(payload.patients).toHaveLength(1);
     expect(payload.patients[0]!.name).toBe('山田 太郎');
     expect(payload.patients[0]!.note).toBe('駐車場は裏手にあります');
@@ -1709,7 +1709,7 @@ describe('送る', () => {
     await waitFor(() => expect(el('[data-testid="transfer-done-text"]')?.textContent).toBe('送りました。'));
   }, 10_000);
 
-  it('パスワードが6文字未満なら、送らずエラーを出す', async () => {
+  it('パスワードが10文字未満なら、送らずエラーを出す', async () => {
     const db = await import('../src/db');
     const { createPatient } = await import('../src/patient');
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
@@ -1727,7 +1727,7 @@ describe('送る', () => {
 
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
 
-    expect(el('.message')?.textContent).toContain('6文字以上にしてください');
+    expect(el('.message')?.textContent).toContain('10文字以上にしてください');
     expect(share).not.toHaveBeenCalled();
   });
 
@@ -1743,9 +1743,9 @@ describe('送る', () => {
     el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
     el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
-    el<HTMLInputElement>('[data-testid="transfer-password"]')!.value = 'abcdef';
+    el<HTMLInputElement>('[data-testid="transfer-password"]')!.value = 'sakura-2026';
     el('[data-testid="transfer-password"]')!.dispatchEvent(new Event('input'));
-    el<HTMLInputElement>('[data-testid="transfer-password-confirm"]')!.value = 'abcdeg';
+    el<HTMLInputElement>('[data-testid="transfer-password-confirm"]')!.value = 'sakura-2027';
     el('[data-testid="transfer-password-confirm"]')!.dispatchEvent(new Event('input'));
 
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
@@ -1767,7 +1767,7 @@ describe('送る', () => {
     el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
     el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
-    fillPassword('abcdef');
+    fillPassword('sakura-2026');
     vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
@@ -1828,7 +1828,7 @@ describe('送る', () => {
     el<HTMLButtonElement>('[data-testid="send-spots-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
     expect(el('#dialog-title')?.textContent).toBe('お役立ち地点を送る');
-    fillPassword('abcdef');
+    fillPassword('sakura-2026');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
@@ -1837,7 +1837,7 @@ describe('送る', () => {
     const file = share.mock.calls[0]![0].files[0] as File;
     const { decryptText } = await import('../src/crypto');
     const { parsePayload } = await import('../src/transfer');
-    const payload = parsePayload(await decryptText(await file.text(), 'abcdef'));
+    const payload = parsePayload(await decryptText(await file.text(), 'sakura-2026'));
     expect(payload.patients).toHaveLength(0);
     expect(payload.spots).toHaveLength(1);
     expect(payload.spots[0]!.note).toBe('きれいなトイレ');
@@ -1862,7 +1862,7 @@ describe('送る', () => {
     el<HTMLButtonElement>('[data-testid="send-selected-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
     expect(el('#dialog-title')?.textContent).toBe('山田 太郎様ほか1人を送る');
-    fillPassword('abcdef');
+    fillPassword('sakura-2026');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
@@ -1871,7 +1871,7 @@ describe('送る', () => {
     const file = share.mock.calls[0]![0].files[0] as File;
     const { decryptText } = await import('../src/crypto');
     const { parsePayload } = await import('../src/transfer');
-    const payload = parsePayload(await decryptText(await file.text(), 'abcdef'));
+    const payload = parsePayload(await decryptText(await file.text(), 'sakura-2026'));
     expect(payload.patients).toHaveLength(2);
   }, 10_000);
 
@@ -1889,13 +1889,13 @@ describe('送る', () => {
     el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
     el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
-    fillPassword('abcdef');
+    fillPassword('sakura-2026');
     el<HTMLInputElement>('[data-testid="transfer-save-shared"]')!.click();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
 
     await waitFor(() => expect(el('[data-testid="transfer-done-text"]')).not.toBeNull());
-    expect(await db.getMeta('sharedSecret')).toBe('abcdef');
+    expect(await db.getMeta('sharedSecret')).toBe('sakura-2026');
     el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
 
     el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
@@ -1923,7 +1923,7 @@ describe('送る', () => {
     el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
     el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
-    fillPassword('abcdef');
+    fillPassword('sakura-2026');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
 
@@ -3544,12 +3544,15 @@ describe('受け取る(引き継ぎのファイルを読み込む)', () => {
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
     for (const testid of ['transfer-password', 'transfer-password-confirm']) {
       const input = el<HTMLInputElement>(`[data-testid="${testid}"]`)!;
-      input.value = 'abcdef';
+      input.value = 'sakura-2026';
       input.dispatchEvent(new Event('input'));
     }
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
-    await waitFor(() => expect(el('[data-testid="transfer-done-text"]')).not.toBeNull());
+    // 既定の回数(PBKDF2_ITERATIONS)での暗号化・復号を、このテストの中で3回(送信の暗号化、
+    // パスワード違いでの復号の失敗、正しいパスワードでの復号)行うため、1回あたりの待ち時間を延ばす
+    // (待ち時間を固定するのではなく、vi.waitForの上限だけを延ばす)。
+    await waitFor(() => expect(el('[data-testid="transfer-done-text"]')).not.toBeNull(), 10_000);
     const sentText = await (share.mock.calls[0]![0].files[0] as File).text();
     el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
     listPhotosSpy.mockRestore();
@@ -3563,19 +3566,22 @@ describe('受け取る(引き継ぎのファイルを読み込む)', () => {
 
     typeReceivePassword('wrong-password');
     el<HTMLButtonElement>('[data-testid="receive-password-submit"]')!.click();
-    await waitFor(() =>
-      expect(el('[data-testid="dialog"]')?.textContent).toContain(
-        'パスワードが違うか、ファイルが壊れています。何度でもやり直せます。',
-      ),
+    await waitFor(
+      () =>
+        expect(el('[data-testid="dialog"]')?.textContent).toContain(
+          'パスワードが違うか、ファイルが壊れています。何度でもやり直せます。',
+        ),
+      10_000,
     );
     expect(el<HTMLInputElement>('[data-testid="receive-password"]')!.value).toBe('');
 
-    typeReceivePassword('abcdef');
+    typeReceivePassword('sakura-2026');
     el<HTMLInputElement>('[data-testid="receive-password"]')!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
     );
-    await waitFor(() =>
-      expect(el('[data-testid="receive-summary"]')?.textContent).toBe('山田 太郎様を名簿に追加しますか?'),
+    await waitFor(
+      () => expect(el('[data-testid="receive-summary"]')?.textContent).toBe('山田 太郎様を名簿に追加しますか?'),
+      10_000,
     );
     expect(document.activeElement).toBe(el('[data-testid="receive-confirm"]'));
 

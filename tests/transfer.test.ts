@@ -242,7 +242,7 @@ describe('planImport', () => {
     spots,
   });
 
-  it('overwrite: 手元のidとcreatedAtを残し、他は送られてきたものにする(欠けている項目は外れる)', () => {
+  it('overwrite: 手元のidとcreatedAtを残し、名前・住所・(送り手にある項目)は送られてきたものにする(送り手に無い項目は手元を残す)', () => {
     seq = 0;
     const existingPatient: Patient = {
       ...yamada(),
@@ -262,9 +262,146 @@ describe('planImport', () => {
         address: existingPatient.address,
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: now.toISOString(),
+        // 電話は送り手に無い(undefined)ので、手元の値を残す。
+        phone: '03-0000-0000',
+        // メモは送り手にあるので、送り手の値で置き換える。
         note: '新しいメモ',
       },
     ]);
+  });
+
+  it('overwrite: 送り手に電話・位置・駐車・メモが無ければ、手元の値をすべて残す', () => {
+    seq = 0;
+    const existingPatient: Patient = {
+      ...yamada(),
+      id: 'existing-1',
+      phone: '03-0000-0000',
+      location: { lat: 35, lng: 139, accuracy: 10, recordedAt: '2026-01-01T00:00:00.000Z', source: 'gps' },
+      parking: { type: 'onsite' },
+      note: '手元のメモ',
+    };
+    const incoming: Patient = {
+      id: 'incoming-1',
+      name: '山田 太郎',
+      address: existingPatient.address,
+      createdAt: '2000-01-01T00:00:00.000Z',
+      updatedAt: '2000-01-01T00:00:00.000Z',
+    };
+    const payload = makePayload([incoming]);
+    const choices: ReadonlyMap<string, ConflictChoice> = new Map([[incoming.id, 'overwrite']]);
+    const plan = planImport(payload, null, [existingPatient], new Set(), choices, newId, now);
+    expect(plan.put[0]!.phone).toBe('03-0000-0000');
+    expect(plan.put[0]!.location).toEqual(existingPatient.location);
+    expect(plan.put[0]!.parking).toEqual({ type: 'onsite' });
+    expect(plan.put[0]!.note).toBe('手元のメモ');
+  });
+
+  it('overwrite: 送り手に電話・位置・駐車・メモがあれば、送り手の値で置き換える(空文字も未設定扱い)', () => {
+    seq = 0;
+    const existingPatient: Patient = {
+      ...yamada(),
+      id: 'existing-1',
+      phone: '03-0000-0000',
+      note: '手元のメモ',
+    };
+    const incoming: Patient = {
+      id: 'incoming-1',
+      name: '山田 太郎',
+      address: existingPatient.address,
+      createdAt: '2000-01-01T00:00:00.000Z',
+      updatedAt: '2000-01-01T00:00:00.000Z',
+      phone: '', // 空文字も未設定扱いなので、手元の電話が残る
+      location: { lat: 1, lng: 2, accuracy: null, recordedAt: '2026-02-01T00:00:00.000Z', source: 'paste' },
+      parking: { type: 'coin' },
+      note: '送り手のメモ',
+    };
+    const payload = makePayload([incoming]);
+    const choices: ReadonlyMap<string, ConflictChoice> = new Map([[incoming.id, 'overwrite']]);
+    const plan = planImport(payload, null, [existingPatient], new Set(), choices, newId, now);
+    expect(plan.put[0]!.phone).toBe('03-0000-0000');
+    expect(plan.put[0]!.location).toEqual(incoming.location);
+    expect(plan.put[0]!.parking).toEqual({ type: 'coin' });
+    expect(plan.put[0]!.note).toBe('送り手のメモ');
+  });
+
+  it('overwrite: 送り手が路上(要許可証)で期限を書いておらず、手元も路上(要許可証)で期限を持っていれば、手元の期限を残す', () => {
+    seq = 0;
+    const existingPatient: Patient = {
+      ...yamada(),
+      id: 'existing-1',
+      parking: { type: 'street_permit', permitExpires: '2026-12-31' },
+    };
+    const incoming: Patient = {
+      id: 'incoming-1',
+      name: '山田 太郎',
+      address: existingPatient.address,
+      createdAt: '2000-01-01T00:00:00.000Z',
+      updatedAt: '2000-01-01T00:00:00.000Z',
+      parking: { type: 'street_permit' },
+    };
+    const payload = makePayload([incoming]);
+    const choices: ReadonlyMap<string, ConflictChoice> = new Map([[incoming.id, 'overwrite']]);
+    const plan = planImport(payload, null, [existingPatient], new Set(), choices, newId, now);
+    expect(plan.put[0]!.parking).toEqual({ type: 'street_permit', permitExpires: '2026-12-31' });
+  });
+
+  it('overwrite: 種類が路上(要許可証)以外なら、期限が無くても送り手の駐車でそのまま置き換える', () => {
+    seq = 0;
+    const existingPatient: Patient = {
+      ...yamada(),
+      id: 'existing-1',
+      parking: { type: 'street_permit', permitExpires: '2026-12-31' },
+    };
+    const incoming: Patient = {
+      id: 'incoming-1',
+      name: '山田 太郎',
+      address: existingPatient.address,
+      createdAt: '2000-01-01T00:00:00.000Z',
+      updatedAt: '2000-01-01T00:00:00.000Z',
+      parking: { type: 'coin' },
+    };
+    const payload = makePayload([incoming]);
+    const choices: ReadonlyMap<string, ConflictChoice> = new Map([[incoming.id, 'overwrite']]);
+    const plan = planImport(payload, null, [existingPatient], new Set(), choices, newId, now);
+    expect(plan.put[0]!.parking).toEqual({ type: 'coin' });
+  });
+
+  it('overwrite: 送り手の路上(要許可証)に期限があれば、手元の期限を残さず送り手の期限にする', () => {
+    seq = 0;
+    const existingPatient: Patient = {
+      ...yamada(),
+      id: 'existing-1',
+      parking: { type: 'street_permit', permitExpires: '2026-12-31' },
+    };
+    const incoming: Patient = {
+      id: 'incoming-1',
+      name: '山田 太郎',
+      address: existingPatient.address,
+      createdAt: '2000-01-01T00:00:00.000Z',
+      updatedAt: '2000-01-01T00:00:00.000Z',
+      parking: { type: 'street_permit', permitExpires: '2027-01-15' },
+    };
+    const payload = makePayload([incoming]);
+    const choices: ReadonlyMap<string, ConflictChoice> = new Map([[incoming.id, 'overwrite']]);
+    const plan = planImport(payload, null, [existingPatient], new Set(), choices, newId, now);
+    expect(plan.put[0]!.parking).toEqual({ type: 'street_permit', permitExpires: '2027-01-15' });
+  });
+
+  it('overwrite: 名前・住所は、手元と違っても常に送り手の値にする', () => {
+    seq = 0;
+    const existingPatient: Patient = { ...yamada(), id: 'existing-1' };
+    const incoming: Patient = {
+      id: 'incoming-1',
+      name: '山田 太郎(新)',
+      address: '東京都千代田区9-9',
+      createdAt: '2000-01-01T00:00:00.000Z',
+      updatedAt: '2000-01-01T00:00:00.000Z',
+    };
+    const payload = makePayload([incoming]);
+    const choices: ReadonlyMap<string, ConflictChoice> = new Map([[incoming.id, 'overwrite']]);
+    const plan = planImport(payload, null, [existingPatient], new Set(), choices, newId, now);
+    expect(plan.put[0]!.name).toBe('山田 太郎(新)');
+    expect(plan.put[0]!.address).toBe('東京都千代田区9-9');
   });
 
   it('addNew: 別に追加すると新しいidで、createdAt/updatedAtがnowになる', () => {

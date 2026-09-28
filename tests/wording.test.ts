@@ -327,6 +327,7 @@ describe('画面の文言(禁止語が出ない)', () => {
           photoBytes: 0,
           includePhotos: true,
           hasSharedSecret: false,
+          sharedSecretShort: false,
           sharedSecretDraft: '',
           sharedSecretEditing: false,
         },
@@ -346,13 +347,14 @@ describe('画面の文言(禁止語が出ない)', () => {
           photoBytes: 0,
           includePhotos: true,
           hasSharedSecret: false,
+          sharedSecretShort: false,
           sharedSecretDraft: '',
           sharedSecretEditing: false,
         },
         settingsHandlers,
       ).outerHTML,
     );
-    // 事業所の合言葉: 未設定・設定済み(表示のみ)・設定済み(「変える」で編集中)の3状態。
+    // 事業所の合言葉: 未設定・設定済み(表示のみ)・設定済み(短い)・設定済み(「変える」で編集中)の4状態。
     expectClean(
       '設定(合言葉: 設定済み)',
       renderSettings(
@@ -366,6 +368,27 @@ describe('画面の文言(禁止語が出ない)', () => {
           photoBytes: 0,
           includePhotos: true,
           hasSharedSecret: true,
+          sharedSecretShort: false,
+          sharedSecretDraft: '',
+          sharedSecretEditing: false,
+        },
+        settingsHandlers,
+      ).outerHTML,
+    );
+    expectClean(
+      '設定(合言葉: 短い)',
+      renderSettings(
+        createInitialState([]),
+        {
+          lastBackupAt: null,
+          persisted: null,
+          theme: 'auto',
+          office: null,
+          spots: [],
+          photoBytes: 0,
+          includePhotos: true,
+          hasSharedSecret: true,
+          sharedSecretShort: true,
           sharedSecretDraft: '',
           sharedSecretEditing: false,
         },
@@ -385,6 +408,7 @@ describe('画面の文言(禁止語が出ない)', () => {
           photoBytes: 0,
           includePhotos: true,
           hasSharedSecret: true,
+          sharedSecretShort: false,
           sharedSecretDraft: 'ひみつ',
           sharedSecretEditing: true,
         },
@@ -555,7 +579,8 @@ describe('画面の文言(禁止語が出ない)', () => {
       ['送信中', base({ phase: 'working' }), {}],
       ['完了(共有できた)', base({ phase: 'done', shared: true }), {}],
       ['完了(保存した)', base({ phase: 'done', shared: false }), {}],
-      ['エラーあり', base({ error: 'パスワードは6文字以上にしてください。' }), {}],
+      ['エラーあり', base({ error: 'パスワードは10文字以上にしてください。' }), {}],
+      ['合言葉が短い', base({ error: '事業所の合言葉が短いので、10文字以上に変えてください。' }), { hasSharedSecret: true }],
     ];
     for (const [label, dialog, extra] of cases) {
       expectClean(`送るダイアログ(${label})`, renderDialog(withDialog(dialog), dialogHandlers, extra)!.outerHTML);
