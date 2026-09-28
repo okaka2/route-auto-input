@@ -198,9 +198,13 @@ export function createBackupFlow(
       }
 
       if (mode === 'replace') {
-        // 確認の写真枚数は、入れ替え後に実際に残る(=ファイルの訪問先ぶんの)写真だけを数える。
+        // planを先に立て、確認の写真枚数はそこから読む(1人MAX_PHOTOS_PER_PATIENT枚までに
+        // 絞ったあとの、実際に書き込む枚数と必ず一致させるため)。ただし表示する枚数は、
+        // そのうち入れ替え後に実際に残る(=ファイルの訪問先ぶんの)写真だけを数える
+        // (訪問先がファイルに無い孤立した写真は、書き込みはされても数えない)。
+        const plan = planBackupReplace(content, decodedPhotos);
         const fileIds = new Set(content.patients.map((patient) => patient.id));
-        const photoCount = decodedPhotos?.filter((photo) => fileIds.has(photo.patientId)).length ?? 0;
+        const photoCount = plan.photos.filter((photo) => fileIds.has(photo.patientId)).length;
         const extras = backupExtrasLabel(photoCount, content.spots.length);
         const currentPatients = ctx.getState().patients;
         const question = `今のデータ${currentPatients.length}件を消して、${content.patients.length}件${extras}を取り込みます。よろしいですか?`;
@@ -212,7 +216,7 @@ export function createBackupFlow(
         writingImport = true;
         // 訪問先・写真・地点・meta を1つのトランザクションで書く(applyImportが名簿に
         // 無くなった写真も同じ中で消す)。書き込みが成功してから、まとめて画面の状態に反映する。
-        await applyImport(planBackupReplace(content, decodedPhotos));
+        await applyImport(plan);
         if (content.meta.office !== undefined) {
           const office = content.meta.office;
           ctx.setRouteContext({ ...ctx.getRouteContext(), office });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   decryptText,
   encryptText,
@@ -169,5 +169,38 @@ describe('transferFormat(crypto.ts を読み込まずに見分けるための小
     expect(format.isEncryptedFileText(await encryptText('x', 'abcdef', 1000))).toBe(true);
     expect(format.isEncryptedFileText('{"kind":"route-auto-input-backup"}')).toBe(false);
     expect(format.isEncryptedFileText('not json')).toBe(false);
+  });
+
+  it('見分けに先頭の数百文字しか見ない(大きなバックアップでもJSON.parseを一切呼ばない)', async () => {
+    const { serializeBackup } = await import('../src/backup');
+    const { createPatient } = await import('../src/patient');
+    const parseSpy = vi.spyOn(JSON, 'parse');
+
+    // 実際の引き継ぎファイル(encryptTextの出力そのもの、暗号化の回数は軽くしてある)は検出する。
+    const transferFile = await encryptText('x'.repeat(200), 'secret-123', 1000);
+    parseSpy.mockClear();
+    expect(isEncryptedFileText(transferFile)).toBe(true);
+    expect(parseSpy).not.toHaveBeenCalled();
+
+    // 整形して書き出した(pretty-printed)引き継ぎファイルの形でも検出する。
+    const prettyTransferFile = JSON.stringify(JSON.parse(transferFile), null, 2);
+    parseSpy.mockClear();
+    expect(isEncryptedFileText(prettyTransferFile)).toBe(true);
+    expect(parseSpy).not.toHaveBeenCalled();
+
+    // 普通の(大きい)バックアップは、先頭が"version"で始まるので弾く。JSON.parseは呼ばない。
+    const bigPatients = Array.from({ length: 5000 }, (_, i) => createPatient(`患者${i}`, `住所${i}`));
+    const bigBackup = serializeBackup({ patients: bigPatients, photos: null, spots: [], meta: {} });
+    expect(bigBackup.length).toBeGreaterThan(200);
+    parseSpy.mockClear();
+    expect(isEncryptedFileText(bigBackup)).toBe(false);
+    expect(parseSpy).not.toHaveBeenCalled();
+
+    // 適当な文字列も、JSON.parseを呼ばずに弾く。
+    parseSpy.mockClear();
+    expect(isEncryptedFileText('ただの文字列で、JSONでもない')).toBe(false);
+    expect(parseSpy).not.toHaveBeenCalled();
+
+    parseSpy.mockRestore();
   });
 });

@@ -85,17 +85,36 @@ export function parseBackup(text: string): BackupContent {
 }
 
 /**
+ * 写真を、ファイルに出てくる順のまま1人 MAX_PHOTOS_PER_PATIENT 枚までに絞る
+ * (入れ替え・追加のどちらでも使う共通のルール)。
+ */
+function capPhotosPerPatient(photos: Photo[]): Photo[] {
+  const result: Photo[] = [];
+  const countByPatient = new Map<string, number>();
+  for (const photo of photos) {
+    const count = countByPatient.get(photo.patientId) ?? 0;
+    if (count >= MAX_PHOTOS_PER_PATIENT) {
+      continue;
+    }
+    result.push(photo);
+    countByPatient.set(photo.patientId, count + 1);
+  }
+  return result;
+}
+
+/**
  * バックアップを「入れ替える」ときの、applyImport への計画。写真がnull(書き出す側で
  * 外した、または旧version 1のバックアップ)なら、既存の写真には一切触れない(消さない)。
  * 写真があれば、ファイルの訪問先ぶんの手元の写真をいったん全部消してから入れる
  * (同じidだけ上書きすると、ファイルの写真のidが既存と違うとき上限を超えて残ってしまうため)。
+ * 写真は、ファイルの順で1人 MAX_PHOTOS_PER_PATIENT 枚まで取り込む(それ以上はcapPhotosPerPatientで捨てる)。
  */
 export function planBackupReplace(content: BackupContent, decodedPhotos: Photo[] | null): DbImportPlan {
   return {
     replaceAll: true,
     patients: content.patients,
     replacePhotosOf: decodedPhotos === null ? [] : content.patients.map((patient) => patient.id),
-    photos: decodedPhotos ?? [],
+    photos: decodedPhotos === null ? [] : capPhotosPerPatient(decodedPhotos),
     spots: content.spots,
     meta: content.meta,
   };
@@ -122,21 +141,10 @@ export function planBackupMerge(content: BackupContent, decodedPhotos: Photo[] |
   const newPatientIds = new Set(newPatients.map((patient) => patient.id));
   const kept = content.patients.length - newPatients.length;
 
-  const photos: Photo[] = [];
-  if (decodedPhotos !== null) {
-    const countByPatient = new Map<string, number>();
-    for (const photo of decodedPhotos) {
-      if (!newPatientIds.has(photo.patientId)) {
-        continue;
-      }
-      const count = countByPatient.get(photo.patientId) ?? 0;
-      if (count >= MAX_PHOTOS_PER_PATIENT) {
-        continue;
-      }
-      photos.push(photo);
-      countByPatient.set(photo.patientId, count + 1);
-    }
-  }
+  const photos: Photo[] =
+    decodedPhotos === null
+      ? []
+      : capPhotosPerPatient(decodedPhotos.filter((photo) => newPatientIds.has(photo.patientId)));
 
   const newSpots = content.spots.filter((spot) => !local.spotIds.has(spot.id));
 

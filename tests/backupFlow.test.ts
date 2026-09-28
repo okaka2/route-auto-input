@@ -261,6 +261,32 @@ describe('createBackupFlow: 読み込み', () => {
     });
     expect(await db.listPatients()).toEqual([fromFile]);
   });
+
+  it('入れ替え(replace)は写真も1人MAX_PHOTOS_PER_PATIENT枚まで(5枚のうち3枚だけ取り込み、確認の文言も3枚と言う)', async () => {
+    const { MAX_PHOTOS_PER_PATIENT } = await import('../src/config');
+    const db = await import('../src/db');
+    const applyImportSpy = vi.spyOn(db, 'applyImport');
+    const fromFile = createPatient('鈴木 花子', '大阪市北区2-2');
+    const photos = Array.from({ length: 5 }, (_, i) => ({
+      id: `p${i + 1}`,
+      patientId: fromFile.id,
+      dataUrl: 'data:image/jpeg;base64,AAA=',
+      createdAt: `t${i + 1}`,
+    }));
+    const text = serializeBackup({ patients: [fromFile], photos, spots: [], meta: {} });
+    const file = new File([text], 'backup.json', { type: 'application/json' });
+
+    const ctx = createFakeContext();
+    const flow = createBackupFlow(ctx);
+
+    await flow.handleImport(file, 'replace');
+
+    expect(MAX_PHOTOS_PER_PATIENT).toBe(3);
+    expect(ctx.confirm).toHaveBeenCalledWith(expect.stringContaining('写真3枚'));
+    expect(applyImportSpy).toHaveBeenCalledTimes(1);
+    const written = applyImportSpy.mock.calls[0]![0];
+    expect(written.photos.map((p) => p.id)).toEqual(['p1', 'p2', 'p3']);
+  });
 });
 
 describe('createBackupFlow: 追加(merge)はいない人だけ足す', () => {

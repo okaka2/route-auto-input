@@ -14,15 +14,26 @@ export const TRANSFER_FORMAT = 'houmon-transfer';
  */
 export const RECEIVE_LOAD_FAILED_MESSAGE = '引き継ぎのファイルを開けませんでした。';
 
-/** 文字列が、引き継ぎファイルの形(JSONでformatが一致)かどうかを調べる。 */
+/**
+ * 見分けに使う先頭だけの長さ。encryptText(crypto.ts)が出す引き継ぎファイルは
+ * `{"format":"houmon-transfer",...` で必ず始まる(formatが先頭のキー)ので、
+ * 全体を読まなくても先頭のこれだけ見れば十分。
+ */
+const HEAD_SCAN_LENGTH = 200;
+
+/**
+ * 先頭が `{`(BOM・空白はあってもよい)で始まり、"format" キーの値が
+ * "houmon-transfer" であることを表す形。encryptText がそのまま JSON.stringify した
+ * 出力(キーの間に空白なし)にも、整形して書き出した場合(キーの間に改行・空白あり)にも合う。
+ */
+const TRANSFER_HEAD_PATTERN = /^\uFEFF?\s*\{\s*"format"\s*:\s*"houmon-transfer"/;
+
+/**
+ * 文字列が、引き継ぎファイルの形(JSONでformatが一致)かどうかを調べる。
+ * バックアップ(通常は数十MB以上になりうる)を毎回 JSON.parse せずに見分けられるよう、
+ * 先頭の数百文字だけを正規表現で見る(JSON.parseは一切呼ばない)。
+ * 実際に中身を検証して復号するのは crypto.ts の decryptText(parseEncryptedFile)の役目。
+ */
 export function isEncryptedFileText(text: string): boolean {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return false;
-  }
-  return (
-    typeof parsed === 'object' && parsed !== null && (parsed as { format?: unknown }).format === TRANSFER_FORMAT
-  );
+  return TRANSFER_HEAD_PATTERN.test(text.slice(0, HEAD_SCAN_LENGTH));
 }

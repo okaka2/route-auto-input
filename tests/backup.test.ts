@@ -7,6 +7,7 @@ import {
   mergeNothingText,
   parseBackup,
   planBackupMerge,
+  planBackupReplace,
   serializeBackup,
   type BackupContent,
   type BackupPhoto,
@@ -317,6 +318,38 @@ const mergePhoto = (patientId: string, id: string, createdAt: string): Photo => 
   patientId,
   blob: new Blob(['x'], { type: 'image/jpeg' }),
   createdAt,
+});
+
+describe('planBackupReplace', () => {
+  it('写真は入れ替えでも、ファイルの順で1人MAX_PHOTOS_PER_PATIENT枚まで(5枚あっても4枚目以降は入らない)', () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const decodedPhotos: Photo[] = [
+      mergePhoto(patient.id, 'p1', 't1'),
+      mergePhoto(patient.id, 'p2', 't2'),
+      mergePhoto(patient.id, 'p3', 't3'),
+      mergePhoto(patient.id, 'p4', 't4'),
+      mergePhoto(patient.id, 'p5', 't5'),
+    ];
+    const plan = planBackupReplace({ patients: [patient], photos: null, spots: [], meta: {} }, decodedPhotos);
+    expect(MAX_PHOTOS_PER_PATIENT).toBe(3);
+    expect(plan.photos.map((p) => p.id)).toEqual(['p1', 'p2', 'p3']);
+    expect(plan.replaceAll).toBe(true);
+    expect(plan.replacePhotosOf).toEqual([patient.id]);
+  });
+
+  it('写真の枚数が上限以下ならそのまま全部入る', () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const decodedPhotos: Photo[] = [mergePhoto(patient.id, 'p1', 't1'), mergePhoto(patient.id, 'p2', 't2')];
+    const plan = planBackupReplace({ patients: [patient], photos: null, spots: [], meta: {} }, decodedPhotos);
+    expect(plan.photos.map((p) => p.id)).toEqual(['p1', 'p2']);
+  });
+
+  it('decodedPhotosがnullなら、写真には触れない(replacePhotosOfも空)', () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const plan = planBackupReplace({ patients: [patient], photos: null, spots: [], meta: {} }, null);
+    expect(plan.photos).toEqual([]);
+    expect(plan.replacePhotosOf).toEqual([]);
+  });
 });
 
 describe('planBackupMerge', () => {
