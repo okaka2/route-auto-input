@@ -194,3 +194,34 @@ describe('訪問順の画面の出発・帰着(狭い画面で横にはみ出さ
     expect(mediaBlock).toMatch(/\.ends-panel \.ends-row\s*\{[^}]*grid-template-columns:\s*1fr\s*;/s);
   });
 });
+
+describe('縦に長い小窓(.sheet)は画面に収まってスクロールできる', () => {
+  it('.sheet の max-height は 100vh の行の後に 100dvh の行があり、overflow-y: auto と overscroll-behavior: contain を持つ', () => {
+    const start = css.indexOf('.sheet {');
+    expect(start, '.sheet が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    const vhIndex = block.search(/max-height:\s*calc\(100vh - 2rem - env\(safe-area-inset-top\) - env\(safe-area-inset-bottom\)\)/);
+    const dvhIndex = block.search(/max-height:\s*calc\(100dvh - 2rem - env\(safe-area-inset-top\) - env\(safe-area-inset-bottom\)\)/);
+    expect(vhIndex, '100vh の行がない').toBeGreaterThanOrEqual(0);
+    expect(dvhIndex, '100dvh の行がない').toBeGreaterThanOrEqual(0);
+    expect(dvhIndex).toBeGreaterThan(vhIndex);
+    expect(block).toMatch(/overflow-y:\s*auto/);
+    expect(block).toMatch(/overscroll-behavior:\s*contain/);
+  });
+});
+
+describe('地図の画面の行(名前とボタンの折り返し)', () => {
+  it('.route-stops li は flex-wrap: wrap', () => {
+    const start = css.indexOf('.route-stops li {');
+    expect(start, '.route-stops li が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).toMatch(/flex-wrap:\s*wrap/);
+  });
+
+  it('.route-stop-main は min-width: min(8em, 100%) で、名前が潰れず2段目に回り込める', () => {
+    const start = css.indexOf('.route-stop-main {');
+    expect(start, '.route-stop-main が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).toMatch(/min-width:\s*min\(8em,\s*100%\)/);
+  });
+});

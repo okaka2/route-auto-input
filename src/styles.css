@@ -597,6 +597,10 @@ button.select-all {
 .sheet {
   width: 100%;
   max-width: 28rem;
+  max-height: calc(100vh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height: calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--gap);
   border-radius: var(--radius-sheet);
   background: var(--surface);
@@ -826,14 +830,23 @@ button.select-all {
   align-items: center;
   gap: 0.5rem;
   min-height: var(--tap-min);
+  flex-wrap: wrap;
 }
 
 .route-stop-main {
   display: flex;
-  flex: 1;
+  flex: 1 1 8em;
   flex-direction: column;
   gap: 0.125rem;
-  min-width: 0;
+  min-width: min(8em, 100%);
+}
+
+.route-stop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
 }
 
 .route-stop-name {

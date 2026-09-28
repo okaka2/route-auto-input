@@ -475,3 +475,26 @@ describe('renderRouteMap: 出発・帰着', () => {
     expect(element.querySelector('[data-testid="map-summary"]')?.textContent).toContain('最大9地点');
   });
 });
+
+describe('renderRouteMap: 行のボタンは名前の下に折り返せる', () => {
+  it('各行の子は .route-stop-main と .route-stop-actions の2つで、☎・写真・位置・済は後者に入る', () => {
+    const patient = createPatient('山田 太郎', '東京都1-1', new Date(), '03-1234-5678');
+    const state = { ...createInitialState([patient]), selectedIds: [patient.id] };
+    const element = render(
+      state,
+      new Map(),
+      handlers(),
+      googleMapsProvider,
+      defaultContext,
+      new Map(),
+      new Map([[patient.id, 2]]),
+    );
+    const row = element.querySelector('[data-testid="route-stops"] li')!;
+    expect([...row.children].map((child) => child.className)).toEqual(['route-stop-main', 'route-stop-actions']);
+    const actions = row.querySelector('.route-stop-actions')!;
+    expect(actions.querySelector('[data-testid="phone-link"]')).not.toBeNull();
+    expect(actions.querySelector('[data-testid="photo-count"]')).not.toBeNull();
+    expect(actions.querySelector('[data-testid="location-pin"]')).not.toBeNull();
+    expect(actions.querySelector('[data-testid="visited-toggle"]')).not.toBeNull();
+  });
+});

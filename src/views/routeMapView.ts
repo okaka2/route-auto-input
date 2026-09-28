@@ -317,6 +317,8 @@ function renderStops(
       main.append(info);
     }
     item.append(main);
+    const actions = document.createElement('div');
+    actions.className = 'route-stop-actions';
     if (patient.phone) {
       const phone = document.createElement('a');
       phone.className = 'phone-link';
@@ -324,7 +326,7 @@ function renderStops(
       phone.href = formatPhoneHref(patient.phone);
       phone.setAttribute('aria-label', `${patient.name}に電話`);
       phone.textContent = '☎';
-      item.append(phone);
+      actions.append(phone);
     }
     const photoCount = photoCounts.get(patient.id) ?? 0;
     if (photoCount > 0) {
@@ -336,7 +338,7 @@ function renderStops(
       photos.textContent = `写真 ${photoCount}`;
       photos.setAttribute('aria-label', `${patient.name}の写真(${photoCount}枚)`);
       photos.addEventListener('click', () => handlers.onOpenPhotos(patient.id));
-      item.append(photos);
+      actions.append(photos);
     }
     if (!patient.location) {
       const pin = document.createElement('button');
@@ -347,7 +349,7 @@ function renderStops(
       pin.setAttribute('aria-label', `${patient.name}の位置を登録`);
       pin.textContent = '位置';
       pin.addEventListener('click', () => handlers.onOpenLocation(patient.id));
-      item.append(pin);
+      actions.append(pin);
     }
     const at = visited.get(patient.id);
     const toggle = document.createElement('button');
@@ -359,7 +361,8 @@ function renderStops(
     toggle.setAttribute('aria-label', `${patient.name}を訪問済みにする`);
     toggle.textContent = at ? `済 ${formatTime(at)}` : '済';
     toggle.addEventListener('click', () => handlers.onToggleVisited(patient.id));
-    item.append(toggle);
+    actions.append(toggle);
+    item.append(actions);
     list.append(item);
   }
   return list;
