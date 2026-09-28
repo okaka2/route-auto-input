@@ -37,7 +37,8 @@ export function installPlatform(): InstallPlatform {
   if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
   if (/Android/i.test(ua)) return 'android';
   // iPadOSのSafariは、UAだけ見るとMacと区別が付かない(「デスクトップ用サイトを表示」が
-  // 既定のため)。タッチ対応(maxTouchPoints > 0)があればiPadとみなし、iOSと同じ案内を出す。
-  if (/Macintosh/i.test(ua) && window.navigator.maxTouchPoints > 0) return 'ios';
+  // 既定のため)。iPadはmaxTouchPointsが5、トラックパッド付きの本物のMacは1を報告することが
+  // あるため、2以上のときだけiPadとみなし、iOSと同じ案内を出す。
+  if (/Macintosh/i.test(ua) && window.navigator.maxTouchPoints > 1) return 'ios';
   return 'pc';
 }

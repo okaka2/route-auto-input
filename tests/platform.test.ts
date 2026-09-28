@@ -87,6 +87,12 @@ describe('installPlatform', () => {
     stubMaxTouchPoints(0);
     expect(installPlatform()).toBe('pc');
   });
+
+  it('MacintoshのUAでmaxTouchPointsが1(トラックパッド付きの本物のMac)ならpc扱い', () => {
+    stubUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15');
+    stubMaxTouchPoints(1);
+    expect(installPlatform()).toBe('pc');
+  });
 });
 
 describe('shouldOpenMapInNewTab', () => {
