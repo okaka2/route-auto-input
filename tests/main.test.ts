@@ -212,6 +212,8 @@ beforeEach(async () => {
   objectUrlCounter = 0;
   URL.createObjectURL = vi.fn(() => `blob:mock-${objectUrlCounter++}`);
   URL.revokeObjectURL = vi.fn();
+  window.scrollTo = vi.fn();
+  history.replaceState(null, '');
 });
 
 afterEach(async () => {
@@ -4174,5 +4176,152 @@ describe('受け取る(引き継ぎのファイルを読み込む)', () => {
     await waitFor(() => expect(el('.message')?.textContent).toContain('追加しました'));
 
     expect(await db.getMeta('office')).toEqual({ name: '既存事業所', address: '東京都千代田区9-9' });
+  });
+});
+
+describe('端末の戻るボタンと、画面を移ったら一番上から', () => {
+  // 自分の history.go が(jsdomでは次のタスクで)popstate を起こし、後のテストへ漏れないよう止めておく。
+  beforeEach(() => {
+    vi.spyOn(history, 'go').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const back = (nav: number): void => {
+    window.dispatchEvent(new PopStateEvent('popstate', { state: { nav } }));
+  };
+
+  async function startWithOne(): Promise<Patient> {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await savePatient(patient);
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    return patient;
+  }
+
+  async function goToOrder(patient: Patient): Promise<void> {
+    el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+  }
+
+  it('一覧で「⋯」を開いて戻ると、小窓が閉じて一覧のまま', async () => {
+    const patient = await startWithOne();
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    expect(el('[data-testid="dialog"]')).not.toBeNull();
+
+    back(0);
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(el('[data-testid="new-button"]')).not.toBeNull();
+  });
+
+  it('訪問順で戻ると一覧へ、地図で戻ると訪問順へ', async () => {
+    const patient = await startWithOne();
+    await goToOrder(patient);
+
+    back(0);
+    expect(el('[data-testid="new-button"]')).not.toBeNull();
+
+    el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+    const historyRecorded = await armHistoryRecordWait();
+    el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+    await historyRecorded();
+    expect(el('h1')?.textContent).toBe('地図を開く');
+
+    back(1);
+    expect(el('h1')?.textContent).toBe('訪問順を決める');
+  });
+
+  it('登録で入力中に戻ると「入力中の内容を捨てますか?」。いいえならとどまり記録を積み直し、はいなら一覧へ', async () => {
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="new-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+    el<HTMLInputElement>('[data-testid="name-input"]')!.value = '途中の入力';
+    const pushSpy = vi.spyOn(history, 'pushState');
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    back(0);
+
+    expect(confirmSpy).toHaveBeenCalledWith('入力中の内容を捨てますか?');
+    expect(el<HTMLInputElement>('[data-testid="name-input"]')?.value).toBe('途中の入力');
+    expect(pushSpy).toHaveBeenCalledTimes(1);
+    expect(pushSpy).toHaveBeenCalledWith({ nav: 1 }, '');
+
+    confirmSpy.mockReturnValue(true);
+    back(0);
+
+    expect(el('[data-testid="name-input"]')).toBeNull();
+    expect(el('[data-testid="new-button"]')).not.toBeNull();
+  });
+
+  it('送るのファイルを作っている間(working)は、戻っても小窓を閉じず記録を積み直す', async () => {
+    const db = await import('../src/db');
+    const patient = await startWithOne();
+    let releasePhotos: (photos: Awaited<ReturnType<typeof db.listPhotos>>) => void = () => {};
+    vi.spyOn(db, 'listPhotos').mockReturnValue(
+      new Promise((resolve) => {
+        releasePhotos = resolve;
+      }),
+    );
+    vi.stubGlobal('navigator', { ...window.navigator, share: vi.fn(), canShare: () => true });
+
+    el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+    el<HTMLButtonElement>('[data-testid="dialog-send"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
+    for (const testid of ['transfer-password', 'transfer-password-confirm']) {
+      const input = el<HTMLInputElement>(`[data-testid="${testid}"]`)!;
+      input.value = 'sakura-2026';
+      input.dispatchEvent(new Event('input'));
+    }
+    el<HTMLButtonElement>('[data-testid="transfer-send-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="transfer-working-text"]')).not.toBeNull());
+    const pushSpy = vi.spyOn(history, 'pushState');
+
+    back(0);
+
+    expect(el('[data-testid="transfer-working-text"]')).not.toBeNull();
+    expect(pushSpy).toHaveBeenCalledWith({ nav: 1 }, '');
+
+    releasePhotos([]);
+    await waitFor(() => expect(el('[data-testid="transfer-share-button"]')).not.toBeNull());
+  }, 10_000);
+
+  it('訪問順の「戻る」ボタンでは history.go(-1) を1回だけ呼び、続く { nav: 0 } の popstate では何も起きない', async () => {
+    const patient = await startWithOne();
+    await goToOrder(patient);
+    const goSpy = vi.mocked(history.go);
+    goSpy.mockClear();
+    const pushSpy = vi.spyOn(history, 'pushState');
+
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click();
+    expect(goSpy).toHaveBeenCalledTimes(1);
+    expect(goSpy).toHaveBeenCalledWith(-1);
+    expect(el('[data-testid="new-button"]')).not.toBeNull();
+
+    back(0);
+
+    expect(goSpy).toHaveBeenCalledTimes(1);
+    expect(pushSpy).not.toHaveBeenCalled();
+    expect(el('[data-testid="new-button"]')).not.toBeNull();
+  });
+
+  it('一覧から設定へ移ると一番上から出し、一覧で行を選んでも動かさない', async () => {
+    const patient = await startWithOne();
+    const scrollTo = vi.mocked(window.scrollTo);
+    scrollTo.mockClear();
+
+    el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${patient.id}"]`)!.click();
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    const settingsLoaded = await armSettingsLoadWait();
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenCalledWith(0, 0);
+    await settingsLoaded();
   });
 });

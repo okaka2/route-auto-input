@@ -40,6 +40,7 @@ import { createPatient, updatePatientFields, withLocation, withVisitInfo } from 
 import { installPlatform, isStandaloneDisplay } from './platform';
 import { isStoragePersisted, requestPersistentStorage } from './protection';
 import { daysBetween, shouldRemindBackup } from './backupReminder';
+import { arrivedDepth, navDepth } from './backNav';
 import { buildRoutePlans, DEFAULT_ROUTE_ENDS, type RouteContext, type RouteEnds } from './routePlan';
 import { clearSession, loadSession, saveSession } from './session';
 import { buildShareText, copyText, shareText } from './share';
@@ -87,7 +88,7 @@ import { permitsExpiringSoon } from './visitInfo';
 import { validatePatientInput, validateSelection } from './validation';
 import { renderDialog } from './views/dialogs';
 import { renderHistory } from './views/historyView';
-import { renderPatientForm } from './views/patientFormView';
+import { readPatientFormValues, renderPatientForm } from './views/patientFormView';
 import { renderPatientList } from './views/patientListView';
 import { renderRouteOrder } from './views/routeOrderView';
 import { renderRouteMap } from './views/routeMapView';
@@ -139,6 +140,7 @@ setDbBlockingHandler(() => reloadGate.request());
 // window に前回のハンドラーを覚えておき、新しく付ける前に外す。
 type WindowWithEscapeHandler = typeof window & {
   __routeAutoInputEscapeHandler?: (event: KeyboardEvent) => void;
+  __routeAutoInputPopStateHandler?: (event: PopStateEvent) => void;
 };
 const globalWindow = window as WindowWithEscapeHandler;
 if (globalWindow.__routeAutoInputEscapeHandler) {
@@ -152,6 +154,13 @@ function handleEscapeKeydown(event: KeyboardEvent): void {
 }
 globalWindow.__routeAutoInputEscapeHandler = handleEscapeKeydown;
 document.addEventListener('keydown', handleEscapeKeydown);
+// 端末の戻るボタン(Android の戻る・iOS の端からのスワイプ。handlePopState)。Escキーと同じ理由で、
+// 前回のハンドラーを外してから付ける。
+if (globalWindow.__routeAutoInputPopStateHandler) {
+  window.removeEventListener('popstate', globalWindow.__routeAutoInputPopStateHandler);
+}
+globalWindow.__routeAutoInputPopStateHandler = handlePopState;
+window.addEventListener('popstate', handlePopState);
 
 // Android の Chrome が「インストールできる」と知らせてきたイベント。ボタン1つで追加するために取っておく。
 // テストで main.ts を読み込み直すたびに window へリスナーが積み重ならないよう、
@@ -203,6 +212,15 @@ let selectionUndo: SelectionUndo | null = null;
 // 保存に失敗した直後の入力値。入力内容を画面に残すため(spec §8)、
 // openedRoutesと同様にAppStateの外で保持する。
 let formDraft: PatientFormDraft | null = null;
+const EMPTY_FORM_DRAFT: PatientFormDraft = { name: '', address: '', phone: '', parkingType: '', permitExpires: '', note: '' };
+
+// 端末の戻るボタンのための、今いる戻る記録(history の { nav: n })の深さ(Task 13。backNav.ts参照)。
+// handlingPopは、popstateを処理している最中(同期の処理の中だけ)。その間はsetStateの中で
+// 1段ごとに記録を積んだり戻したりせず、最後にまとめて1回だけ合わせる。
+let backDepth = 0;
+let handlingPop = false;
+// 前に描いた画面の名前。画面が変わったときだけ一番上から出す(render参照)。
+let lastRenderedScreen: Screen['name'] | null = null;
 
 // 訪問先ごとの写真の枚数。起動時と、写真の追加・削除・訪問先の削除のあとに読み直す。
 let photoCounts = new Map<string, number>();
@@ -906,6 +924,10 @@ function setState(next: AppState, options?: { render?: boolean }): void {
       renderDeferred = false;
     }
   }
+  // 戻る記録を今の画面・小窓に合わせる(Task 13)。読み直しの確かめより前に済ませておく。
+  if (!handlingPop) {
+    syncBackStack();
+  }
   // 新しい版への読み直しを待たせているなら、ここで安全になったか確かめる
   // (render: falseの変更でも、書き込み中フラグなどが変わることがあるので毎回呼ぶ)(Task 8)。
   reloadGate.check();
@@ -920,6 +942,53 @@ function setState(next: AppState, options?: { render?: boolean }): void {
     return;
   }
   render();
+}
+
+/**
+ * 戻る記録の深さを、今の画面・小窓の深さに合わせる。深くなったら差の数だけ積み、浅くなったら
+ * (アプリの中の「戻る」「キャンセル」「閉じる」・Esc・背景で閉じたとき)その分だけ戻る(二重に戻らない)。
+ */
+function syncBackStack(): void {
+  const target = navDepth(state.screen.name, state.dialog !== null);
+  for (let depth = backDepth + 1; depth <= target; depth++) {
+    history.pushState({ nav: depth }, '');
+  }
+  if (target < backDepth) {
+    history.go(target - backDepth);
+  }
+  backDepth = target;
+}
+
+/**
+ * 端末の戻るボタン。着いた深さになるまで、アプリの中の「戻る」と同じことを1段ずつ行う:
+ * 小窓を閉じる(送る/受け取るのworking中は閉じない)→登録・編集はキャンセルと同じ
+ * (入力中なら確認し、いいえならとどまる)→訪問順・設定・履歴は一覧へ、地図は訪問順へ。
+ * 進めなかったら、最後のsyncBackStackで記録を積み直す。自分のhistory.goで着いたときは何もしない。
+ */
+function handlePopState(event: PopStateEvent): void {
+  backDepth = arrivedDepth(event.state);
+  if (navDepth(state.screen.name, state.dialog !== null) <= backDepth) {
+    return;
+  }
+  handlingPop = true;
+  try {
+    while (navDepth(state.screen.name, state.dialog !== null) > backDepth) {
+      const before = state;
+      if (state.dialog !== null) {
+        closeAnyDialog();
+      } else if (state.screen.name === 'form') {
+        handleFormCancel(readPatientFormValues(root!) ?? formDraft ?? EMPTY_FORM_DRAFT);
+      } else {
+        setState(withScreen(state, { name: state.screen.name === 'map' ? 'order' : 'list' }));
+      }
+      if (state === before) {
+        break;
+      }
+    }
+  } finally {
+    handlingPop = false;
+  }
+  syncBackStack();
 }
 
 /** formPhotosを入れ替える。今持っているobject URLは、入れ替える前に必ず片付ける。 */
@@ -1090,7 +1159,7 @@ async function commitSave(input: FormInput, continueAfter: boolean): Promise<voi
     requestProtectionOnce();
     if (continueAfter && existing === null) {
       continueCount += 1;
-      formDraft = { name: '', address: '', phone: '', parkingType: '', permitExpires: '', note: '' };
+      formDraft = EMPTY_FORM_DRAFT;
       setState({
         ...withScreen(state, { name: 'form', patientId: null }),
         message: { kind: 'info', text: `${patient.name}様を登録しました(続けて${continueCount}人目)` },
@@ -2107,6 +2176,11 @@ function render(): void {
   const hadDialog = root!.querySelector('[data-testid="dialog"]') !== null;
 
   root!.replaceChildren(renderApp());
+  // 画面を移ったときだけ一番上から出す(同じ画面の描き直しでは動かさない)。
+  if (lastRenderedScreen !== state.screen.name) {
+    lastRenderedScreen = state.screen.name;
+    window.scrollTo(0, 0);
+  }
   // ダイアログを開いている間は、背後をスクロールさせない。
   document.body.classList.toggle('dialog-open', state.dialog !== null);
   syncSession();
@@ -2200,6 +2274,13 @@ async function cleanUpOrphanPhotos(): Promise<void> {
 
 /** ロック画面を通過してから、いつもどおりアプリ本体を描画・読み込みする。 */
 function startApp(): void {
+  // 戻る記録: 読み込み直しなら今いる記録の深さから続け、初めてなら一覧の記録にしてから
+  // 今の画面の分を積む(地図から始まれば2つ)。
+  backDepth = arrivedDepth(history.state);
+  if (!history.state) {
+    history.replaceState({ nav: 0 }, '');
+  }
+  syncBackStack();
   render();
   const startup = Promise.allSettled([
     reloadPatients().then(() => cleanUpOrphanPhotos()),

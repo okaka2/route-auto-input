@@ -92,14 +92,8 @@ export function renderPatientForm(
   const header = document.createElement('header');
   header.className = 'form-header';
 
-  const currentValues = (): PatientFormDraft => ({
-    name: nameInput.value,
-    address: addressInput.value,
-    phone: phoneInput.value,
-    parkingType: parkingSelect.value as ParkingType | '',
-    permitExpires: permitExpiresInput.value,
-    note: noteInput.value,
-  });
+  // 入力欄はすべて container の中にあるので、読み出しは readPatientFormValues と同じにする。
+  const currentValues = (): PatientFormDraft => readPatientFormValues(container)!;
 
   const cancel = document.createElement('button');
   cancel.type = 'button';
@@ -149,6 +143,27 @@ export function renderPatientForm(
   }
 
   return container;
+}
+
+/**
+ * 描いてある登録・編集フォームの今の入力値を読む(端末の戻るボタンで、キャンセルと同じ確認を
+ * するため)。登録・編集の画面が無ければ null。
+ */
+export function readPatientFormValues(root: ParentNode): PatientFormDraft | null {
+  const value = (testid: string): string | undefined =>
+    root.querySelector<HTMLInputElement>(`[data-testid="${testid}"]`)?.value;
+  const name = value('name-input');
+  if (name === undefined) {
+    return null;
+  }
+  return {
+    name,
+    address: value('address-input') ?? '',
+    phone: value('phone-input') ?? '',
+    parkingType: (value('parking-select') ?? '') as ParkingType | '',
+    permitExpires: value('permit-expires-input') ?? '',
+    note: value('note-input') ?? '',
+  };
 }
 
 /** 「訪問のための情報」: 駐車の種類・(路上のときだけ)許可証の期限・メモ・写真。 */
