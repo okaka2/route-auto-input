@@ -3,9 +3,8 @@ import { renderSelectionBar, type SelectionBarHandlers } from '../src/views/sele
 
 const handlers = (): SelectionBarHandlers => ({
   onNext: vi.fn(),
-  onDeleteSelected: vi.fn(),
   onShowSelected: vi.fn(),
-  onSend: vi.fn(),
+  onOpenMenu: vi.fn(),
 });
 
 describe('renderSelectionBar', () => {
@@ -38,30 +37,27 @@ describe('renderSelectionBar', () => {
     expect(element.textContent).toContain('10件選択中');
   });
 
-  it('「削除」のボタンを出し、押すと onDeleteSelected が呼ばれる', () => {
-    const spies = handlers();
-    const element = renderSelectionBar(2, spies)!;
-    const button = element.querySelector<HTMLButtonElement>('[data-testid="delete-selected-button"]')!;
-    expect(button.textContent).toBe('削除');
-    button.click();
-    expect(spies.onDeleteSelected).toHaveBeenCalledTimes(1);
-  });
-
   it('「N件選択中」を押すと onShowSelected が呼ばれる', () => {
     const onShowSelected = vi.fn();
-    const bar = renderSelectionBar(2, { onNext: vi.fn(), onDeleteSelected: vi.fn(), onShowSelected, onSend: vi.fn() })!;
+    const bar = renderSelectionBar(2, { onNext: vi.fn(), onShowSelected, onOpenMenu: vi.fn() })!;
     bar.querySelector<HTMLButtonElement>('[data-testid="selection-count"]')!.click();
     expect(onShowSelected).toHaveBeenCalled();
   });
 
-  it('削除と訪問順を決めるの間に「送る」のボタンを出し、押すと onSend が呼ばれる', () => {
+  it('「⋯」のボタンを出し、押すと onOpenMenu が呼ばれる(送る・削除はこの小窓に入る)', () => {
     const spies = handlers();
     const element = renderSelectionBar(2, spies)!;
-    const testids = [...element.querySelectorAll<HTMLButtonElement>('button')].map((b) => b.dataset.testid);
-    expect(testids).toEqual(['selection-count', 'delete-selected-button', 'send-selected-button', 'next-button']);
-    const button = element.querySelector<HTMLButtonElement>('[data-testid="send-selected-button"]')!;
-    expect(button.textContent).toBe('送る');
+    const button = element.querySelector<HTMLButtonElement>('[data-testid="selection-menu-button"]')!;
+    expect(button.textContent).toBe('⋯');
+    expect(button.getAttribute('aria-label')).toBe('選択中の訪問先の操作');
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
     button.click();
-    expect(spies.onSend).toHaveBeenCalledTimes(1);
+    expect(spies.onOpenMenu).toHaveBeenCalledTimes(1);
+  });
+
+  it('選択件数・「⋯」・「訪問順を決める →」の1段だけを、この順に出す', () => {
+    const element = renderSelectionBar(2, handlers())!;
+    const testids = [...element.querySelectorAll<HTMLButtonElement>('button')].map((b) => b.dataset.testid);
+    expect(testids).toEqual(['selection-count', 'selection-menu-button', 'next-button']);
   });
 });

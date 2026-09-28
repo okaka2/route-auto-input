@@ -47,6 +47,9 @@ function keepDialog(
   if (dialog.kind === 'confirmDeleteSelected') {
     return selectedIds.length > 0 ? dialog : null;
   }
+  if (dialog.kind === 'selectionMenu') {
+    return selectedIds.length > 0 ? dialog : null;
+  }
   if (dialog.kind === 'similar') {
     const matchIds = dialog.matchIds.filter((id) => existingIds.has(id));
     return matchIds.length > 0 ? { ...dialog, matchIds } : null;
@@ -208,6 +211,11 @@ export function openStopMenu(state: AppState, id: string): AppState {
 
 export function openDeleteSelectedConfirm(state: AppState): AppState {
   return { ...state, dialog: { kind: 'confirmDeleteSelected' } };
+}
+
+/** 選択バーの「⋯」。送る・削除を選べる小窓を開く。 */
+export function openSelectionMenu(state: AppState): AppState {
+  return { ...state, dialog: { kind: 'selectionMenu' } };
 }
 
 /** ダイアログを閉じる。開いていなければ、同じ状態をそのまま返す。 */

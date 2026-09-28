@@ -152,23 +152,36 @@ function blockAt(source: string, openBraceIndex: number): string {
 }
 
 describe('選択バー', () => {
-  it('通常の幅では1行に収まる(.selection-actionsはflex-basis: 100%にしない)', () => {
-    const start = css.indexOf('.selection-actions {');
-    expect(start, '.selection-actions が styles.css にない').toBeGreaterThanOrEqual(0);
-    const block = blockAt(css, css.indexOf('{', start));
-    expect(block).not.toContain('100%');
+  it('選択件数・「⋯」・「訪問順を決める→」は、狭い画面でも常に1行に収まる(flex-wrap: nowrap)', () => {
+    expect(css).toMatch(/\.selection-bar\s*\{[^}]*flex-wrap:\s*nowrap/s);
   });
 
-  it('狭い画面(30rem以下)では、選択件数の下にボタンの行が回り込み、選択バーの高さもその分広げる', () => {
+  it('--selbar-h(4rem)の定義は1つだけで、狭い画面向けの上書きは無い', () => {
+    const matches = css.match(/--selbar-h:\s*[^;]+;/g) ?? [];
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatch(/4rem/);
     const mediaStart = css.indexOf('@media (max-width: 30rem)');
     expect(mediaStart, '@media (max-width: 30rem) が styles.css にない').toBeGreaterThanOrEqual(0);
     const mediaBlock = blockAt(css, css.indexOf('{', mediaStart));
-    expect(mediaBlock).toMatch(/--selbar-h:\s*7\.5rem/);
-    expect(mediaBlock).toMatch(/\.selection-actions\s*\{[^}]*flex:\s*1 1 100%/s);
+    expect(mediaBlock).not.toMatch(/--selbar-h/);
+    expect(mediaBlock).not.toMatch(/\.selection-actions/);
+  });
+});
+
+describe('一覧の上部(検索欄だけを固定する)', () => {
+  it('.list-search-row は sticky で上部(top: 0)に固定する', () => {
+    const start = css.indexOf('.list-search-row {');
+    expect(start, '.list-search-row が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).toMatch(/position:\s*sticky/);
+    expect(block).toMatch(/top:\s*0/);
   });
 
-  it('狭い画面でも通常の幅でも、選択件数の下にボタンの行が回り込めるようにしておく(flex-wrap: wrap)', () => {
-    expect(css).toMatch(/\.selection-bar\s*\{[^}]*flex-wrap:\s*wrap/s);
+  it('.list-head は sticky にしない(検索欄だけを上部に残す)', () => {
+    const start = css.indexOf('\n.list-head {');
+    expect(start, '.list-head が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).not.toMatch(/position:\s*sticky/);
   });
 });
 

@@ -1201,10 +1201,11 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
   });
 
   describe('選択した複数件の一括削除', () => {
-    it('選択バーの「削除」を押しても、すぐには削除せず、件数つきの確認ダイアログが出る', async () => {
+    it('選択バーの「⋯」→「削除」を押しても、すぐには削除せず、件数つきの確認ダイアログが出る', async () => {
       await startWithPlaces(2);
       el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
 
+      el<HTMLButtonElement>('[data-testid="selection-menu-button"]')!.click();
       el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
 
       expect(el('#dialog-title')?.textContent).toBe('選択した2件を削除しますか?');
@@ -1214,6 +1215,7 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
     it('確認で「キャンセル」すると、削除されない', async () => {
       await startWithPlaces(2);
       el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+      el<HTMLButtonElement>('[data-testid="selection-menu-button"]')!.click();
       el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
 
       el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
@@ -1226,6 +1228,7 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
       await startWithPlaces(3);
       el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
 
+      el<HTMLButtonElement>('[data-testid="selection-menu-button"]')!.click();
       el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
       el<HTMLButtonElement>('[data-testid="dialog-confirm-delete-selected"]')!.click();
 
@@ -1238,6 +1241,7 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
       const ids = await startWithPlaces(3);
       checkbox(ids[0]!).click();
 
+      el<HTMLButtonElement>('[data-testid="selection-menu-button"]')!.click();
       el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
       el<HTMLButtonElement>('[data-testid="dialog-confirm-delete-selected"]')!.click();
 
@@ -1248,6 +1252,7 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
     it('削除ボタンを連打しても、まとめて削除されるのは1回だけ', async () => {
       await startWithPlaces(2);
       el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+      el<HTMLButtonElement>('[data-testid="selection-menu-button"]')!.click();
       el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
 
       const confirmButton = el<HTMLButtonElement>('[data-testid="dialog-confirm-delete-selected"]')!;
@@ -1930,7 +1935,7 @@ describe('送る', () => {
     expect(payload.spots[0]!.note).toBe('きれいなトイレ');
   }, 10_000);
 
-  it('選択バーの「送る」で、選択中の全員を送れる', async () => {
+  it('選択バーの「⋯」→「送る」で、選択中の全員を送れる', async () => {
     const db = await import('../src/db');
     const { createPatient } = await import('../src/patient');
     const a = createPatient('山田 太郎', '東京都千代田区1-1');
@@ -1945,6 +1950,8 @@ describe('送る', () => {
     el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${a.id}"]`)!.click();
     el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${b.id}"]`)!.click();
 
+    await waitFor(() => expect(el('[data-testid="selection-menu-button"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="selection-menu-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="send-selected-button"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="send-selected-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="transfer-password"]')).not.toBeNull());
@@ -2034,7 +2041,7 @@ describe('送る', () => {
     expect(el('[data-testid="dialog"]')).toBeNull();
   }, 10_000);
 
-  it('選択バーの「送る」から開いた送るダイアログを閉じると、フォーカスが「送る」ボタンへ戻る', async () => {
+  it('選択バーの「⋯」の小窓から開いた送るダイアログを閉じると、フォーカスが「⋯」へ戻る', async () => {
     const db = await import('../src/db');
     const { createPatient } = await import('../src/patient');
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
@@ -2043,14 +2050,55 @@ describe('送る', () => {
     await import('../src/main');
     await waitFor(() => expect(rows()).toHaveLength(1));
     el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${patient.id}"]`)!.click();
-    await waitFor(() => expect(el('[data-testid="send-selected-button"]')).not.toBeNull());
+    await waitFor(() => expect(el('[data-testid="selection-menu-button"]')).not.toBeNull());
 
+    el<HTMLButtonElement>('[data-testid="selection-menu-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="send-selected-button"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="send-selected-button"]')!.click();
     await waitFor(() => expect(el('[data-testid="dialog"]')).not.toBeNull());
     el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
 
     expect(el('[data-testid="dialog"]')).toBeNull();
-    expect(document.activeElement).toBe(el('[data-testid="send-selected-button"]'));
+    expect(document.activeElement).toBe(el('[data-testid="selection-menu-button"]'));
+  });
+
+  it('選択バーの「⋯」の小窓を「キャンセル」で閉じると、フォーカスが「⋯」へ戻る', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${patient.id}"]`)!.click();
+    await waitFor(() => expect(el('[data-testid="selection-menu-button"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="selection-menu-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(el('[data-testid="selection-menu-button"]'));
+  });
+
+  it('選択バーの「⋯」→「削除」の確認を「キャンセル」で閉じると、フォーカスが「⋯」へ戻る', async () => {
+    const db = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${patient.id}"]`)!.click();
+    await waitFor(() => expect(el('[data-testid="selection-menu-button"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="selection-menu-button"]')!.click();
+    el<HTMLButtonElement>('[data-testid="delete-selected-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
+
+    expect(el('[data-testid="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(el('[data-testid="selection-menu-button"]'));
   });
 
   it('設定の「お役立ち地点を送る」から開いた送るダイアログを閉じると、フォーカスが「お役立ち地点を送る」ボタンへ戻る', async () => {

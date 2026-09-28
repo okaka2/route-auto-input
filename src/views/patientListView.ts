@@ -43,15 +43,16 @@ export function renderPatientList(
   const container = document.createElement('div');
   container.className = 'screen';
 
-  // 見出しと検索欄は、一覧をスクロールしても上部に残す(sticky)。
+  // 見出し・登録ボタン(・先週の近道)は、スクロールすれば上部から流れていく。
+  // 一覧をスクロールしても上部に残す(sticky)のは、検索の行だけ(.screen の直接の子にする必要がある。
+  // .list-head の中に置くと、sticky が効く範囲が .list-head の高さまでに限られてしまうため)。
   const head = document.createElement('div');
   head.className = 'list-head';
   head.append(renderTitleRow(handlers), renderNewRow(handlers));
   if (lastWeek) {
     head.append(renderShortcutRow(lastWeek, handlers));
   }
-  head.append(renderSearchRow(state, handlers), renderListControls(state, handlers));
-  container.append(head);
+  container.append(head, renderSearchRow(state, handlers), renderListControls(state, handlers));
 
   if (notice) {
     container.append(renderNotice(notice));

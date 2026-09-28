@@ -15,6 +15,10 @@ export type DialogHandlers = {
   onConfirmDelete(id: string): void;
   /** 複数選択の一括削除の確認で「削除」を押した。対象はstate.selectedIds。 */
   onConfirmDeleteSelected(): void;
+  /** 選択バーの「⋯」の小窓: 「送る」。選択中の全員を送るダイアログを開く。 */
+  onSendSelected(): void;
+  /** 選択バーの「⋯」の小窓: 「削除」。まだ削除しない(確認のダイアログへ進む)。 */
+  onRequestDeleteSelected(): void;
   /** 訪問順の「⋯」: 先頭へ。 */
   onMoveToTop(id: string): void;
   /** 訪問順の「⋯」: 最後へ。 */
@@ -83,6 +87,7 @@ export type DialogHandlers = {
  *
  * - 「⋯」メニュー: 編集 / 複製して登録 / 削除(赤) / キャンセル
  * - 削除の確認: 「この訪問先を削除しますか?」 [キャンセル] [削除(赤)]
+ * - 選択バーの「⋯」の小窓: 送る / 削除(赤) / キャンセル
  * - 複数選択の一括削除の確認: 「選択した◯件を削除しますか?」 [キャンセル] [削除(赤)]
  *
  * フォーカスの移動(開いたら最初のボタン、閉じたら「⋯」へ戻す)と、Escキーで閉じる処理は、
@@ -103,6 +108,8 @@ export function renderDialog(
     content = renderInstallSteps(state, handlers);
   } else if (dialog.kind === 'confirmDeleteSelected') {
     content = renderConfirmDeleteSelected(state.selectedIds.length, handlers);
+  } else if (dialog.kind === 'selectionMenu') {
+    content = renderSelectionMenu(state.selectedIds.length, handlers);
   } else if (dialog.kind === 'similar') {
     content = renderSimilar(state, dialog, handlers);
   } else if (dialog.kind === 'photos') {
@@ -344,6 +351,33 @@ function renderPhotos(dialog: Extract<Dialog, { kind: 'photos' }>, handlers: Dia
   buttons.append(actionButton('閉じる', 'dialog-cancel', () => handlers.onClose()));
 
   return [title, view, nav, buttons];
+}
+
+/** 選択バーの「⋯」から開く小窓。行の「⋯」と同じ sheet-actions の形で、送る・削除を選べる。 */
+function renderSelectionMenu(count: number, handlers: DialogHandlers): HTMLElement[] {
+  const title = document.createElement('h2');
+  title.id = 'dialog-title';
+  title.className = 'sheet-title';
+  title.textContent = `${count}件選択中`;
+
+  const list = document.createElement('ul');
+  list.className = 'sheet-actions';
+  const actions: { testid: string; label: string; className?: string; onClick: () => void }[] = [
+    { testid: 'send-selected-button', label: '送る', onClick: () => handlers.onSendSelected() },
+    {
+      testid: 'delete-selected-button',
+      label: '削除',
+      className: 'danger',
+      onClick: () => handlers.onRequestDeleteSelected(),
+    },
+    { testid: 'dialog-cancel', label: 'キャンセル', onClick: () => handlers.onClose() },
+  ];
+  for (const action of actions) {
+    const item = document.createElement('li');
+    item.append(actionButton(action.label, action.testid, action.onClick, action.className));
+    list.append(item);
+  }
+  return [title, list];
 }
 
 function renderConfirmDeleteSelected(count: number, handlers: DialogHandlers): HTMLElement[] {

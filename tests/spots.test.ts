@@ -107,6 +107,8 @@ function dialogHandlers(): DialogHandlers {
     onRequestDelete: vi.fn(),
     onConfirmDelete: vi.fn(),
     onConfirmDeleteSelected: vi.fn(),
+    onSendSelected: vi.fn(),
+    onRequestDeleteSelected: vi.fn(),
     onMoveToTop: vi.fn(),
     onMoveToBottom: vi.fn(),
     onSaveAnyway: vi.fn(),

@@ -65,6 +65,8 @@ const dialogHandlers = {
   onRequestDelete: noop,
   onConfirmDelete: noop,
   onConfirmDeleteSelected: noop,
+  onSendSelected: noop,
+  onRequestDeleteSelected: noop,
   onMoveToTop: noop,
   onMoveToBottom: noop,
   onSaveAnyway: noop,
@@ -420,7 +422,12 @@ describe('画面の文言(禁止語が出ない)', () => {
     expectClean('タブ', renderTabBar('list', true, { onSelect: noop }).outerHTML);
     expectClean(
       '選択バー',
-      renderSelectionBar(3, { onNext: noop, onDeleteSelected: noop, onShowSelected: noop, onSend: noop })!.outerHTML,
+      renderSelectionBar(3, { onNext: noop, onShowSelected: noop, onOpenMenu: noop })!.outerHTML,
+    );
+    const selectionMenuState = selected(places(3));
+    expectClean(
+      '選択バーの「⋯」の小窓',
+      renderDialog({ ...selectionMenuState, dialog: { kind: 'selectionMenu' } }, dialogHandlers)!.outerHTML,
     );
   });
 

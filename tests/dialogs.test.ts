@@ -6,6 +6,7 @@ import {
   openDeleteConfirm,
   openDeleteSelectedConfirm,
   openRowMenu,
+  openSelectionMenu,
   toggleSelection,
 } from '../src/state';
 import { renderDialog, type DialogHandlers } from '../src/views/dialogs';
@@ -16,6 +17,8 @@ const handlers = (): DialogHandlers => ({
   onRequestDelete: vi.fn(),
   onConfirmDelete: vi.fn(),
   onConfirmDeleteSelected: vi.fn(),
+  onSendSelected: vi.fn(),
+  onRequestDeleteSelected: vi.fn(),
   onMoveToTop: vi.fn(),
   onMoveToBottom: vi.fn(),
   onSaveAnyway: vi.fn(),
@@ -168,6 +171,52 @@ describe('renderDialog: 削除の確認', () => {
     button(open(spies), 'dialog-cancel').click();
     expect(spies.onClose).toHaveBeenCalledTimes(1);
     expect(spies.onConfirmDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderDialog: 選択バーの「⋯」の小窓', () => {
+  const stateWithTwoSelected = () => {
+    const patients = [createPatient('山田 太郎', '東京都'), createPatient('鈴木 花子', '大阪府')];
+    let state = createInitialState(patients);
+    state = toggleSelection(state, patients[0]!.id);
+    state = toggleSelection(state, patients[1]!.id);
+    return openSelectionMenu(state);
+  };
+  const open = (spies = handlers()) => renderDialog(stateWithTwoSelected(), spies)!;
+
+  it('見出しに「N件選択中」を出す', () => {
+    expect(open().querySelector('#dialog-title')?.textContent).toBe('2件選択中');
+  });
+
+  it('送る・削除・キャンセルの3つを、この順に出す', () => {
+    const element = open();
+    const testids = [...element.querySelectorAll<HTMLButtonElement>('button')].map((b) => b.dataset.testid);
+    expect(testids).toEqual(['send-selected-button', 'delete-selected-button', 'dialog-cancel']);
+  });
+
+  it('「送る」を押すと onSendSelected が呼ばれる', () => {
+    const spies = handlers();
+    const element = open(spies);
+    expect(button(element, 'send-selected-button').textContent).toBe('送る');
+    button(element, 'send-selected-button').click();
+    expect(spies.onSendSelected).toHaveBeenCalledTimes(1);
+  });
+
+  it('「削除」は赤字で、押すと onRequestDeleteSelected が呼ばれる', () => {
+    const spies = handlers();
+    const element = open(spies);
+    const deleteButton = button(element, 'delete-selected-button');
+    expect(deleteButton.textContent).toBe('削除');
+    expect(deleteButton.className).toBe('danger');
+    deleteButton.click();
+    expect(spies.onRequestDeleteSelected).toHaveBeenCalledTimes(1);
+  });
+
+  it('「キャンセル」を押すと onClose が呼ばれる', () => {
+    const spies = handlers();
+    const element = open(spies);
+    button(element, 'dialog-cancel').click();
+    expect(spies.onClose).toHaveBeenCalledTimes(1);
   });
 });
 

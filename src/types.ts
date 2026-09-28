@@ -128,6 +128,7 @@ export type Dialog =
   | { kind: 'rowMenu'; id: string }
   | { kind: 'confirmDelete'; id: string }
   | { kind: 'confirmDeleteSelected' }
+  | { kind: 'selectionMenu' }
   | { kind: 'installSteps' }
   | { kind: 'stopMenu'; id: string }
   | {

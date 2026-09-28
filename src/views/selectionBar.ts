@@ -1,16 +1,15 @@
 export type SelectionBarHandlers = {
   onNext(): void;
-  /** 選択した件数をまとめて削除する。実際の削除は、確認ダイアログでの確定を経てから。 */
-  onDeleteSelected(): void;
   /** 「N件選択中」を押したとき。一覧を「選択中」の表示に切り替える。 */
   onShowSelected(): void;
-  /** 選択中の全員を送るダイアログを開く。 */
-  onSend(): void;
+  /** 「⋯」。送る・削除の小窓を開く。 */
+  onOpenMenu(): void;
 };
 
 /**
  * 訪問先を1件以上選んでいるときに、下部に固定して出す選択バー。
- * 件数と「訪問順を決める →」、まとめて削除する「削除」。1件も選んでいなければ null(何も出さない)。
+ * 件数・「⋯」(送る・削除はここから開く小窓に入る)・「訪問順を決める →」の1段。
+ * 1件も選んでいなければ null(何も出さない)。
  */
 export function renderSelectionBar(
   count: number,
@@ -33,19 +32,14 @@ export function renderSelectionBar(
   label.textContent = `${count}件選択中`;
   label.addEventListener('click', () => handlers.onShowSelected());
 
-  const deleteButton = document.createElement('button');
-  deleteButton.type = 'button';
-  deleteButton.className = 'danger';
-  deleteButton.dataset.testid = 'delete-selected-button';
-  deleteButton.textContent = '削除';
-  deleteButton.addEventListener('click', () => handlers.onDeleteSelected());
-
-  const sendButton = document.createElement('button');
-  sendButton.type = 'button';
-  sendButton.className = 'send-button';
-  sendButton.dataset.testid = 'send-selected-button';
-  sendButton.textContent = '送る';
-  sendButton.addEventListener('click', () => handlers.onSend());
+  const menuButton = document.createElement('button');
+  menuButton.type = 'button';
+  menuButton.className = 'more';
+  menuButton.dataset.testid = 'selection-menu-button';
+  menuButton.setAttribute('aria-label', '選択中の訪問先の操作');
+  menuButton.setAttribute('aria-haspopup', 'dialog');
+  menuButton.textContent = '⋯';
+  menuButton.addEventListener('click', () => handlers.onOpenMenu());
 
   const next = document.createElement('button');
   next.type = 'button';
@@ -56,7 +50,7 @@ export function renderSelectionBar(
 
   const actions = document.createElement('div');
   actions.className = 'selection-actions';
-  actions.append(deleteButton, sendButton, next);
+  actions.append(menuButton, next);
 
   bar.append(label, actions);
   return bar;

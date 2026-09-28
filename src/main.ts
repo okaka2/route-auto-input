@@ -56,6 +56,7 @@ import {
   openDeleteConfirm,
   openDeleteSelectedConfirm,
   openRowMenu,
+  openSelectionMenu,
   openStopMenu,
   selectAllVisible,
   selectedPatients,
@@ -212,17 +213,21 @@ let deletingSelected = false;
 let savingSpot = false;
 
 // 「⋯」から開いたダイアログを、編集・複製・削除以外で閉じたとき、フォーカスを戻す行のid。
-// 特定の行に紐づかない入口(お役立ち地点の登録・選択バー/設定からの「送る」)から開いたときは、
+// 特定の行に紐づかない入口(お役立ち地点の登録・選択バーの「⋯」/設定からの「送る」)から開いたときは、
 // 下のRETURN_TARGETSにあるキーを入れておくと、閉じたときにそのtestidのボタンへフォーカスを戻す。
 let dialogReturnId: string | null = null;
 const SPOT_RETURN_ID = '__spot-add';
+const SELECTION_MENU_RETURN_ID = '__selection-menu';
 const SEND_SELECTED_RETURN_ID = '__send-selected';
 const SEND_SPOTS_RETURN_ID = '__send-spots';
 const RECEIVE_RETURN_ID = '__receive';
 const BACKUP_RETURN_ID = '__backup';
 const RETURN_TARGETS: Record<string, string> = {
   [SPOT_RETURN_ID]: 'spot-add-button',
-  [SEND_SELECTED_RETURN_ID]: 'send-selected-button',
+  // 選択バーの「⋯」の小窓から開いた送るダイアログ・削除の確認も、閉じれば「⋯」へ戻る
+  // (「送る」「削除」自体は、小窓が閉じたときには既に無いため)。
+  [SELECTION_MENU_RETURN_ID]: 'selection-menu-button',
+  [SEND_SELECTED_RETURN_ID]: 'selection-menu-button',
   [SEND_SPOTS_RETURN_ID]: 'send-spots-button',
   [RECEIVE_RETURN_ID]: 'import-button',
   [BACKUP_RETURN_ID]: 'export-button',
@@ -1118,7 +1123,7 @@ function handleToggleSelectAll(): void {
   setState(allSelected ? clearSelection(state) : selectAllVisible(state));
 }
 
-/** 選択バーの「削除」。まだ削除しない(確認のダイアログへ進む)。 */
+/** 選択バーの「⋯」の小窓の「削除」。まだ削除しない(確認のダイアログへ進む)。 */
 function handleRequestDeleteSelected(): void {
   setState(openDeleteSelectedConfirm(state));
 }
@@ -1900,11 +1905,10 @@ function renderApp(): HTMLElement {
       step === 'list'
         ? renderSelectionBar(state.selectedIds.length, {
             onNext: handleNext,
-            onDeleteSelected: handleRequestDeleteSelected,
             onShowSelected: () => setState(setListFilter(state, 'selected')),
-            onSend: () => {
-              dialogReturnId = SEND_SELECTED_RETURN_ID;
-              void transferFlow.openSend(state.selectedIds);
+            onOpenMenu: () => {
+              dialogReturnId = SELECTION_MENU_RETURN_ID;
+              setState(openSelectionMenu(state));
             },
           })
         : null;
@@ -1930,6 +1934,11 @@ function renderApp(): HTMLElement {
     onConfirmDeleteSelected: () => {
       void handleConfirmDeleteSelected();
     },
+    onSendSelected: () => {
+      dialogReturnId = SEND_SELECTED_RETURN_ID;
+      void transferFlow.openSend(state.selectedIds);
+    },
+    onRequestDeleteSelected: handleRequestDeleteSelected,
     onMoveToTop: (id) => {
       openedRoutes.clear();
       setState(moveSelectedToEdge(state, id, 'top'));

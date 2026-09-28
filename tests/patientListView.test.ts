@@ -429,11 +429,14 @@ describe('一覧の上部の並び', () => {
   it('上部は 見出し → 登録ボタン → 検索+全選択 → 並び替え+すべて/選択中 の順', () => {
     const element = renderPatientList(createInitialState(makePatients(1)), noopHandlers());
     const head = element.querySelector('.list-head')!;
-    const rows = [...head.children].map((c) => c.className);
-    expect(rows).toEqual(['list-title-row', 'list-new-row', 'list-search-row', 'list-controls']);
+    const headRows = [...head.children].map((c) => c.className);
+    expect(headRows).toEqual(['list-title-row', 'list-new-row']);
     expect(head.querySelector('[data-testid="new-button"]')).not.toBeNull();
-    expect(head.querySelector('.list-search-row [data-testid="select-all-button"]')).not.toBeNull();
-    expect(head.querySelector('.list-controls [data-testid="filter-all"]')).not.toBeNull();
+    // 検索の行・並び替えの行は、sticky が効くよう .list-head の外(.screen の直接の子)に置く。
+    const topRows = [...element.children].map((c) => c.className).slice(0, 3);
+    expect(topRows).toEqual(['list-head', 'list-search-row', 'list-controls']);
+    expect(element.querySelector('.list-search-row [data-testid="select-all-button"]')).not.toBeNull();
+    expect(element.querySelector('.list-controls [data-testid="filter-all"]')).not.toBeNull();
   });
 });
 

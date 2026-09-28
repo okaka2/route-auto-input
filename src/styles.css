@@ -386,7 +386,7 @@ a.disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--gap);
   min-height: var(--selbar-h);
   padding: 0.5rem calc(var(--gap) + env(safe-area-inset-right)) 0.5rem
@@ -404,8 +404,8 @@ a.disabled {
   white-space: nowrap;
 }
 
-/* 削除・送る・訪問順を決める、の3つのボタン。通常の幅では「N件選択中」と同じ行に収まる
- * 大きさのまま(flex: 0 0 auto)。狭い画面向けの折り返しは、下の @media を参照。 */
+/* 「⋯」(送る・削除の小窓を開く)・訪問順を決める、の2つのボタン。常に「N件選択中」と同じ1行に収まる
+ * 大きさのまま(flex: 0 0 auto)。 */
 .selection-actions {
   display: flex;
   align-items: center;
@@ -419,32 +419,11 @@ a.disabled {
 }
 
 /*
- * 狭い画面(375px幅など、30rem=480px以下)では、削除・送る・訪問順を決めるの3つが
- * 「N件選択中」と横並びだと収まらないことがあるため、.selection-actionsをflex-basis: 100%
- * にして常にこのグループだけで1行の幅いっぱいを使い(.selection-barのflex-wrap: wrapで
- * 「N件選択中」の下の行に回る)、3つのボタンはflex: 1で均等に幅を分け合う。
- * 2行ぶんの高さになる分、--selbar-h(.app-shell.with-selectionのpadding-bottomが使う)も
- * 広げて、固定バーが一覧の最後の行に重ならないようにする
- * (件数の行 2.75rem + 行間 0.5rem + ボタンの行 2.75rem + 上下の余白 0.5rem×2 = 7.5rem)。
+ * 訪問順の画面の「出発」「帰着」は、狭い画面では縦に1つずつ並べる(横に2つだと、長い選択肢の
+ * 文字で画面が横にはみ出す)。この @media は下の .ends-row の定義より前にあるので、
+ * .ends-panel を付けて詳しさを上げ、後ろの定義に負けないようにする。
  */
 @media (max-width: 30rem) {
-  :root {
-    --selbar-h: 7.5rem;
-  }
-
-  .selection-actions {
-    flex: 1 1 100%;
-  }
-
-  .selection-actions button {
-    flex: 1;
-  }
-
-  /*
-   * 訪問順の画面の「出発」「帰着」は、狭い画面では縦に1つずつ並べる(横に2つだと、長い選択肢の
-   * 文字で画面が横にはみ出す)。この @media は下の .ends-row の定義より前にあるので、
-   * .ends-panel を付けて詳しさを上げ、後ろの定義に負けないようにする。
-   */
   .ends-panel .ends-row {
     grid-template-columns: 1fr;
   }
@@ -507,7 +486,11 @@ a.disabled {
   display: flex;
   gap: 0.5rem;
   align-items: center;
-  margin-top: 0.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  padding: 0.5rem 0;
 }
 
 .list-search-row .search {
@@ -1061,9 +1044,6 @@ input::placeholder {
 }
 
 .list-head {
-  position: sticky;
-  top: 0;
-  z-index: 10;
   padding: 0.5rem 0;
   background: var(--bg);
 }
