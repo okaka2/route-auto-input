@@ -1,10 +1,10 @@
 import './styles.css';
 import type { AppContext } from './appContext';
 import { MAX_STOPS_PER_ROUTE, MIN_PASSWORD_LENGTH } from './config';
-// backupFlow.ts はアプリを開いただけでは使わないので、初めて書き出す/読み込むときに
-// import() で読み込む(本体を軽くする。型だけはここで使う)。
+// backupFlow.ts・transferFlow.ts はアプリを開いただけでは使わないので、初めて書き出す/読み込む/
+// 送る/受け取るときに import() で読み込む(本体を軽くする。型だけはここで使う)。
 import type { createBackupFlow } from './backupFlow';
-import { createTransferFlow } from './transferFlow';
+import type { createTransferFlow } from './transferFlow';
 import {
   addPhoto,
   clearHistory,
@@ -856,7 +856,7 @@ function setState(next: AppState, options?: { render?: boolean }): void {
   // 受け取りのダイアログが閉じる/別のダイアログに変わるなら、復号した中身(transferFlowの中に
   // だけ持っている)をここ一箇所で捨てる。途中で閉じて読み込み直しても、前の続きから始めない。
   if (previousDialog?.kind === 'transferReceive' && next.dialog?.kind !== 'transferReceive') {
-    transferFlow.discardReceive();
+    transferFlowInstance?.discardReceive();
   }
   // バックアップの保存の小窓が閉じる/別のダイアログに変わるなら、書き出したファイル
   // (backupFlowの中にだけ持っている)をここ一箇所で捨てる。
@@ -866,7 +866,7 @@ function setState(next: AppState, options?: { render?: boolean }): void {
   // 送るダイアログが閉じる/別のダイアログに変わるなら、readyでできたファイル(transferFlowの中に
   // だけ持っている)をここ一箇所で捨てる。
   if (previousDialog?.kind === 'transferSend' && next.dialog?.kind !== 'transferSend') {
-    transferFlow.discardSendFile();
+    transferFlowInstance?.discardSendFile();
   }
   // 設定画面を離れるときは、合言葉の入力中の内容(sharedSecretDraft)と「変える」で
   // 出した入力欄(sharedSecretEditing)を引きずらない。次に設定画面を開いたときに
@@ -1072,16 +1072,25 @@ const ctx: AppContext = {
   loadPhotoBytes,
   confirm: (question) => window.confirm(question),
 };
-const transferFlow = createTransferFlow(ctx);
 
 type BackupFlow = ReturnType<typeof createBackupFlow>;
 const BACKUP_FLOW_LOAD_FAILED_MESSAGE = 'バックアップの処理を読み込めませんでした。';
+
+type TransferFlow = ReturnType<typeof createTransferFlow>;
+const TRANSFER_FLOW_LOAD_FAILED_MESSAGE = '送受信の処理を読み込めませんでした。';
 
 // backupFlow.ts は初めて書き出す/読み込むときに import() で読み込む(本体を軽くする)。
 // 読み込めたものは backupFlowInstance に持ち、以後はそれを直接使う(Task 8の isWorking()も
 // これを同期で読む)。読み込みに失敗したら null のままにして、次のクリックでやり直せるようにする。
 let backupFlowInstance: BackupFlow | null = null;
 let backupFlowLoad: Promise<BackupFlow> | null = null;
+
+// transferFlow.ts も同じやり方で、初めて送る/受け取るときに import() で読み込む。読み込んだ
+// あとは transferFlowInstance を直接使う(「LINEなどで送る」のように押した処理の中から
+// navigator.shareを同期で呼ぶ必要がある箇所は、ready の小窓が出た時点でもう読み込み済みなので、
+// そこだけ transferFlowInstance を直接(オプショナルチェーンで)読む)。
+let transferFlowInstance: TransferFlow | null = null;
+let transferFlowLoad: Promise<TransferFlow> | null = null;
 
 function loadBackupFlow(): Promise<BackupFlow> {
   backupFlowLoad ??= import('./backupFlow')
@@ -1090,7 +1099,7 @@ function loadBackupFlow(): Promise<BackupFlow> {
         // 読み込むで引き継ぎのファイル(パスワード付き)が選ばれたら、受け取りの流れに回す。
         onTransferFile: (text) => {
           dialogReturnId = RECEIVE_RETURN_ID;
-          void transferFlow.openReceive(text);
+          void ensureTransferFlow().then((flow) => flow?.openReceive(text));
         },
       });
       backupFlowInstance = flow;
@@ -1104,11 +1113,35 @@ function loadBackupFlow(): Promise<BackupFlow> {
   return backupFlowLoad;
 }
 
+function loadTransferFlow(): Promise<TransferFlow> {
+  transferFlowLoad ??= import('./transferFlow')
+    .then(({ createTransferFlow }) => {
+      const flow = createTransferFlow(ctx);
+      transferFlowInstance = flow;
+      return flow;
+    })
+    .catch((error: unknown) => {
+      // 読み込めなかった。次のクリックでやり直せるよう、読み込み中の記録を消す。
+      transferFlowLoad = null;
+      throw error;
+    });
+  return transferFlowLoad;
+}
+
 async function ensureBackupFlow(): Promise<BackupFlow | null> {
   try {
     return await loadBackupFlow();
   } catch {
     ctx.showMessage({ kind: 'error', text: BACKUP_FLOW_LOAD_FAILED_MESSAGE });
+    return null;
+  }
+}
+
+async function ensureTransferFlow(): Promise<TransferFlow | null> {
+  try {
+    return await loadTransferFlow();
+  } catch {
+    ctx.showMessage({ kind: 'error', text: TRANSFER_FLOW_LOAD_FAILED_MESSAGE });
     return null;
   }
 }
@@ -2011,7 +2044,7 @@ function renderScreen(): HTMLElement {
         },
         onSendSpots: () => {
           dialogReturnId = SEND_SPOTS_RETURN_ID;
-          void transferFlow.openSend([], { spotsOnly: true });
+          void ensureTransferFlow().then((flow) => flow?.openSend([], { spotsOnly: true }));
         },
         onSharedSecretDraftChange: (value) => {
           // draftだけの変更なので再描画はしない(onIncludePhotosChangeと同じ)。
@@ -2092,7 +2125,8 @@ function renderApp(): HTMLElement {
     },
     onSendSelected: () => {
       dialogReturnId = SEND_SELECTED_RETURN_ID;
-      void transferFlow.openSend(state.selectedIds);
+      const ids = state.selectedIds;
+      void ensureTransferFlow().then((flow) => flow?.openSend(ids));
     },
     onRequestDeleteSelected: handleRequestDeleteSelected,
     onMoveToTop: (id) => {
@@ -2118,7 +2152,7 @@ function renderApp(): HTMLElement {
     },
     onOpenLocation: openLocation,
     onOpenSend: (id) => {
-      void transferFlow.openSend([id]);
+      void ensureTransferFlow().then((flow) => flow?.openSend([id]));
     },
     onStartMeasuring: () => {
       void startMeasure();
@@ -2139,26 +2173,29 @@ function renderApp(): HTMLElement {
       void saveSpot();
     },
     onPhotoIndex: setPhotoIndex,
-    onSendDraft: (patch) => transferFlow.updateSendDraft(patch),
+    // 以下は送る/受け取るの小窓がすでに出ているときだけ呼ばれる。その時点で transferFlow は
+    // 読み込み済み(小窓自体が transferFlow の openSend/openReceive で出るため)なので、
+    // ここでは transferFlowInstance を同期でオプショナルチェーンして使う(backupFlowInstance と同じやり方)。
+    onSendDraft: (patch) => transferFlowInstance?.updateSendDraft(patch),
     onSubmit: () => {
-      void transferFlow.submitSend();
+      void transferFlowInstance?.submitSend();
     },
     onSendShare: () => {
       // 押した処理の中から直接呼ぶ(navigator.shareを同期で呼ぶ必要があるため、awaitを挟まない)。
-      transferFlow.shareSendFile();
+      transferFlowInstance?.shareSendFile();
     },
     onSendSave: () => {
-      transferFlow.saveSendFile();
+      transferFlowInstance?.saveSendFile();
     },
-    onReceivePassword: (password) => transferFlow.updateReceivePassword(password),
+    onReceivePassword: (password) => transferFlowInstance?.updateReceivePassword(password),
     onReceiveSubmit: () => {
-      void transferFlow.submitReceivePassword();
+      void transferFlowInstance?.submitReceivePassword();
     },
     onReceiveConfirm: () => {
-      void transferFlow.confirmReceive();
+      void transferFlowInstance?.confirmReceive();
     },
     onReceiveConflict: (choice) => {
-      void transferFlow.chooseConflict(choice);
+      void transferFlowInstance?.chooseConflict(choice);
     },
     onSaveExport: () => {
       // 押した処理の中から直接呼ぶ(navigator.shareを同期で呼ぶ必要があるため、awaitを挟まない)。
