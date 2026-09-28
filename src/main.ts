@@ -24,6 +24,7 @@ import {
   listSpots,
   putSpot,
   savePatient,
+  setDbBlockingHandler,
   setMeta,
   updateHistory,
   type HistoryEntry,
@@ -43,7 +44,7 @@ import { buildRoutePlans, DEFAULT_ROUTE_ENDS, type RouteContext, type RouteEnds 
 import { clearSession, loadSession, saveSession } from './session';
 import { buildShareText, copyText, shareText } from './share';
 import { SPOT_KINDS } from './spots';
-import { registerServiceWorkerUpdates } from './swUpdate';
+import { createReloadGate, registerServiceWorkerUpdates } from './swUpdate';
 import { applyTheme, initTheme, loadThemeSetting, saveThemeSetting } from './theme';
 import {
   clearSelection,
@@ -101,8 +102,32 @@ if (!root) {
 // ロックの状態に関係なく、表示の設定(明るい/暗い)を先に反映する。
 initTheme();
 
-// ロックの状態に関係なく、新しいバージョンが出ていれば自動で反映する。
-registerServiceWorkerUpdates();
+/**
+ * 今すぐ読み直しても安全か(Task 8)。入力中の画面(フォーム)・小窓を開いている最中
+ * (送る/受け取るの小窓のworkingはdialog !== nullに含まれる)・保存や削除やお役立ち地点の
+ * 登録やバックアップの取り込みが書き込んでいる最中は、安全ではない。
+ */
+function isSafeToReload(): boolean {
+  return (
+    state.screen.name !== 'form' &&
+    state.dialog === null &&
+    !savingPatient &&
+    !deletingSelected &&
+    deletingPatientIds.size === 0 &&
+    !savingSpot &&
+    !(backupFlowInstance?.isWorking() ?? false)
+  );
+}
+
+// 新しい版が有効になった・DBが更新を待っている(blocking)ときに、安全なら(入力中・小窓・
+// 書き込み中でなければ)すぐ、そうでなければ安全になるまで待ってから読み直す(Task 8)。
+// 待っていることは画面には出さない。
+const reloadGate = createReloadGate({ canReload: isSafeToReload, reload: () => window.location.reload() });
+
+// ロックの状態に関係なく、新しいバージョンが出ていれば自動で反映する(ただし安全なときまで待つ)。
+registerServiceWorkerUpdates(() => reloadGate.request());
+// DBの更新がこのタブの古いトランザクションで止まっている(blocking)ときも、同じ待ち合わせで読み直す(Task 2の口)。
+setDbBlockingHandler(() => reloadGate.request());
 
 // Escキーでダイアログを閉じる。document に付けるのは、ダイアログの背景など
 // フォーカスを持てない場所をクリックすると activeElement が document.body へ移り
@@ -772,6 +797,9 @@ function setState(next: AppState, options?: { render?: boolean }): void {
       renderDeferred = false;
     }
   }
+  // 新しい版への読み直しを待たせているなら、ここで安全になったか確かめる
+  // (render: falseの変更でも、書き込み中フラグなどが変わることがあるので毎回呼ぶ)(Task 8)。
+  reloadGate.check();
   if (options?.render === false) {
     return;
   }
@@ -1750,7 +1778,9 @@ function renderScreen(): HTMLElement {
           settingsInfo = { ...settingsInfo, includePhotos: value };
         },
         onImport: (file, mode) => {
-          void handleImportClick(file, mode);
+          // 取り込みの書き込み中はisSafeToReloadがfalseになる(backupFlowInstance.isWorking())。
+          // 終わったら、待たせていた読み直しがあれば行う(Task 8)。
+          void handleImportClick(file, mode).finally(() => reloadGate.check());
         },
         onThemeChange: (setting) => {
           saveThemeSetting(setting);
