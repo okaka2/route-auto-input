@@ -276,13 +276,18 @@ describe('薄く表示する行(.place-row.dimmed)の読みやすさ(屋外で�
     expect(block).toMatch(/background:\s*var\(--bg\)/);
   });
 
-  it.each(Object.entries(themes))(
-    '薄い行の文字(text・muted)は、その背景(--bg)に対しても4.5:1以上(%s)',
-    (_themeName, tokens) => {
-      expect(contrast(tokens['text']!, tokens['bg']!)).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(tokens['muted']!, tokens['bg']!)).toBeGreaterThanOrEqual(4.5);
-    },
-  );
+  // text/bg・muted/bg の組み合わせは、上の「色の変数」の TEXT_PAIRS で
+  // light/dark とも 4.5:1 以上であることをすでに検証済み(このルールが使う背景は
+  // その --bg そのものなので、ここで重ねて検証する必要はない)。
+
+  it('.dimmed かつ .disabled(選択を外した行が、上限で選べなくもなった)場合は、.disabled の opacity で文字まで薄くしない', () => {
+    const start = css.indexOf('.place-row.dimmed.disabled {');
+    expect(start, '.place-row.dimmed.disabled が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).toMatch(/opacity:\s*1\b/);
+    // .place-row.disabled (opacity: 0.6) より後ろになければ、詳しさが同じ場合に負ける。
+    expect(start).toBeGreaterThan(css.indexOf('.place-row.disabled {'));
+  });
 });
 
 describe('曜日フィルターのボタン(狭い画面でも44px以上を保つ)', () => {

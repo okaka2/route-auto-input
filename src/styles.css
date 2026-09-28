@@ -1137,6 +1137,14 @@ input::placeholder {
   opacity: 0.6;
 }
 
+/* 選択を外して薄くした行(.dimmed)が、上限に達して選べなくもなった(.disabled)場合:
+   .disabled の opacity: 0.6 まで乗ると文字のコントラストが不足するため、打ち消す。
+   .dimmed の破線の枠・背景色と、disabled 化したチェックボックス自体で「選べない」
+   ことは伝わるので、文字を薄くする必要はない。 */
+.place-row.dimmed.disabled {
+  opacity: 1;
+}
+
 .place-main {
   display: flex;
   flex: 1;
