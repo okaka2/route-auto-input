@@ -155,12 +155,10 @@ function handleEscapeKeydown(event: KeyboardEvent): void {
 globalWindow.__routeAutoInputEscapeHandler = handleEscapeKeydown;
 document.addEventListener('keydown', handleEscapeKeydown);
 // 端末の戻るボタン(Android の戻る・iOS の端からのスワイプ。handlePopState)。Escキーと同じ理由で、
-// 前回のハンドラーを外してから付ける。
+// 前回のハンドラーを外しておく。付けるのは、ロックの画面を上書きしないよう startApp で。
 if (globalWindow.__routeAutoInputPopStateHandler) {
   window.removeEventListener('popstate', globalWindow.__routeAutoInputPopStateHandler);
 }
-globalWindow.__routeAutoInputPopStateHandler = handlePopState;
-window.addEventListener('popstate', handlePopState);
 
 // Android の Chrome が「インストールできる」と知らせてきたイベント。ボタン1つで追加するために取っておく。
 // テストで main.ts を読み込み直すたびに window へリスナーが積み重ならないよう、
@@ -219,6 +217,10 @@ const EMPTY_FORM_DRAFT: PatientFormDraft = { name: '', address: '', phone: '', p
 // 1段ごとに記録を積んだり戻したりせず、最後にまとめて1回だけ合わせる。
 let backDepth = 0;
 let handlingPop = false;
+// 自分で出した戻る(history.go)の時刻。着く(popstate)までは次の戻るを出さない。着かないまま
+// GO_WAIT_MS たったら(戻る先が無かったなど)、待つのをやめる(IME変換中の安全弁と同じ考え方)。
+let goSentAt: number | null = null;
+const GO_WAIT_MS = 1000;
 // 前に描いた画面の名前。画面が変わったときだけ一番上から出す(render参照)。
 let lastRenderedScreen: Screen['name'] | null = null;
 
@@ -947,13 +949,20 @@ function setState(next: AppState, options?: { render?: boolean }): void {
 /**
  * 戻る記録の深さを、今の画面・小窓の深さに合わせる。深くなったら差の数だけ積み、浅くなったら
  * (アプリの中の「戻る」「キャンセル」「閉じる」・Esc・背景で閉じたとき)その分だけ戻る(二重に戻らない)。
+ * 戻る(history.go)は、着く(popstate)までは次を出さない。着いたらhandlePopStateで合わせ直す
+ * (続けて戻ったときに、途中で着いた深さから余計に戻ってアプリを出ないように)。
  */
 function syncBackStack(): void {
+  if (goSentAt !== null && Date.now() - goSentAt < GO_WAIT_MS) {
+    return;
+  }
+  goSentAt = null;
   const target = navDepth(state.screen.name, state.dialog !== null);
   for (let depth = backDepth + 1; depth <= target; depth++) {
     history.pushState({ nav: depth }, '');
   }
   if (target < backDepth) {
+    goSentAt = Date.now();
     history.go(target - backDepth);
   }
   backDepth = target;
@@ -963,11 +972,14 @@ function syncBackStack(): void {
  * 端末の戻るボタン。着いた深さになるまで、アプリの中の「戻る」と同じことを1段ずつ行う:
  * 小窓を閉じる(送る/受け取るのworking中は閉じない)→登録・編集はキャンセルと同じ
  * (入力中なら確認し、いいえならとどまる)→訪問順・設定・履歴は一覧へ、地図は訪問順へ。
- * 進めなかったら、最後のsyncBackStackで記録を積み直す。自分のhistory.goで着いたときは何もしない。
+ * 最後にsyncBackStackで合わせる(進めなかったら記録を積み直し、ブラウザの「進む」で深く着いたら
+ * すぐ戻す)。自分のhistory.goが着いたときは、合わせ直すだけ。
  */
 function handlePopState(event: PopStateEvent): void {
   backDepth = arrivedDepth(event.state);
-  if (navDepth(state.screen.name, state.dialog !== null) <= backDepth) {
+  if (goSentAt !== null && Date.now() - goSentAt < GO_WAIT_MS) {
+    goSentAt = null;
+    syncBackStack();
     return;
   }
   handlingPop = true;
@@ -2281,6 +2293,8 @@ function startApp(): void {
     history.replaceState({ nav: 0 }, '');
   }
   syncBackStack();
+  globalWindow.__routeAutoInputPopStateHandler = handlePopState;
+  window.addEventListener('popstate', handlePopState);
   render();
   const startup = Promise.allSettled([
     reloadPatients().then(() => cleanUpOrphanPhotos()),

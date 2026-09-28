@@ -214,6 +214,9 @@ beforeEach(async () => {
   URL.revokeObjectURL = vi.fn();
   window.scrollTo = vi.fn();
   history.replaceState(null, '');
+  // main.tsの history.go が(jsdomでは次のタスクで)popstate を起こし、後のテストへ漏れないよう止めておく。
+  // 着いたときの popstate が要るテストは、自分で dispatch する。
+  vi.spyOn(history, 'go').mockImplementation(() => {});
 });
 
 afterEach(async () => {
@@ -4180,10 +4183,6 @@ describe('受け取る(引き継ぎのファイルを読み込む)', () => {
 });
 
 describe('端末の戻るボタンと、画面を移ったら一番上から', () => {
-  // 自分の history.go が(jsdomでは次のタスクで)popstate を起こし、後のテストへ漏れないよう止めておく。
-  beforeEach(() => {
-    vi.spyOn(history, 'go').mockImplementation(() => {});
-  });
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -4316,6 +4315,9 @@ describe('端末の戻るボタンと、画面を移ったら一番上から', (
     scrollTo.mockClear();
 
     el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${patient.id}"]`)!.click();
+    // 外し直しても動かさない。選択を残さないのは、設定の読み込みの最後の描き直しが次のテストの
+    // beforeEach の後になっても、選択(訪問順からの再開)を localStorage へ書き戻さないため。
+    el<HTMLInputElement>(`[data-testid="patient-checkbox"][data-id="${patient.id}"]`)!.click();
     expect(scrollTo).not.toHaveBeenCalled();
 
     const settingsLoaded = await armSettingsLoadWait();
@@ -4323,5 +4325,93 @@ describe('端末の戻るボタンと、画面を移ったら一番上から', (
     expect(scrollTo).toHaveBeenCalledTimes(1);
     expect(scrollTo).toHaveBeenCalledWith(0, 0);
     await settingsLoaded();
+  });
+
+  it('同じ人の知らせで「そのまま登録」しても、戻る操作は1つずつ行い、着くたびに合わせ直して一覧の深さ0で止まる', async () => {
+    await startWithOne();
+    el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+    el<HTMLInputElement>('[data-testid="name-input"]')!.value = '山田 太郎';
+    el<HTMLInputElement>('[data-testid="address-input"]')!.value = '東京都千代田区1-1';
+    el<HTMLButtonElement>('[data-testid="save-button"]')!.click();
+    await waitFor(() => expect(el('[data-testid="dialog-save-anyway"]')).not.toBeNull());
+    const goSpy = vi.mocked(history.go);
+    goSpy.mockClear();
+
+    el<HTMLButtonElement>('[data-testid="dialog-save-anyway"]')!.click();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    await waitFor(() => expect(el('.message')?.textContent).toContain('保存しました'));
+
+    // 小窓を閉じた分の1つだけ。着くまでは、一覧へ移った分・読み直しの分を重ねない。
+    expect(goSpy).toHaveBeenCalledTimes(1);
+    expect(goSpy).toHaveBeenLastCalledWith(-1);
+
+    // 1つ目が着いた(登録の画面の記録)。一覧に合わせるため、ここで初めて次の1つを戻る。
+    back(1);
+    expect(goSpy).toHaveBeenCalledTimes(2);
+    expect(goSpy).toHaveBeenLastCalledWith(-1);
+    expect(el('[data-testid="new-button"]')).not.toBeNull();
+
+    // 2つ目が着いた(一覧の記録)。これ以上は戻らない(アプリを出ない)。
+    back(0);
+    expect(goSpy).toHaveBeenCalledTimes(2);
+    expect(el('[data-testid="new-button"]')).not.toBeNull();
+
+    // 深さ0に合っている: 設定へ移ると { nav: 1 } を1つだけ積む。
+    const pushSpy = vi.spyOn(history, 'pushState');
+    const settingsLoaded = await armSettingsLoadWait();
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    expect(pushSpy).toHaveBeenCalledTimes(1);
+    expect(pushSpy).toHaveBeenCalledWith({ nav: 1 }, '');
+    await settingsLoaded();
+  });
+
+  it('ブラウザの「進む」で一覧より深い記録へ着いたら、すぐに1つ戻して合わせる', async () => {
+    await startWithOne();
+    const goSpy = vi.mocked(history.go);
+    goSpy.mockClear();
+
+    back(1);
+
+    expect(goSpy).toHaveBeenCalledTimes(1);
+    expect(goSpy).toHaveBeenCalledWith(-1);
+    expect(el('[data-testid="new-button"]')).not.toBeNull();
+  });
+
+  it('自分の戻る操作が着かないままでも、1秒たてば待つのをやめて記録を合わせ直す', async () => {
+    const patient = await startWithOne();
+    await goToOrder(patient);
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click(); // history.go(-1)。popstate は来ない。
+    const pushSpy = vi.spyOn(history, 'pushState');
+
+    // 着くのを待っている間は、設定へ移っても積まない。
+    const firstSettingsLoaded = await armSettingsLoadWait();
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    expect(pushSpy).not.toHaveBeenCalled();
+    await firstSettingsLoaded();
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click();
+
+    // 1秒たった後は、待つのをやめていつもどおり合わせる。
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 1001);
+    const settingsLoaded = await armSettingsLoadWait();
+    el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+    expect(pushSpy).toHaveBeenCalledTimes(1);
+    expect(pushSpy).toHaveBeenCalledWith({ nav: 1 }, '');
+    await settingsLoaded();
+  });
+
+  it('ロックの画面の間は、端末の戻るボタンで何もしない', async () => {
+    window.localStorage.clear(); // 解錠を取り消す
+    window.localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ selectedIds: ['x'], opened: [], timestamp: new Date().toISOString() }),
+    );
+    await import('../src/main');
+    expect(el('[data-testid="password-input"]')).not.toBeNull();
+
+    back(0);
+
+    expect(el('[data-testid="password-input"]')).not.toBeNull();
+    expect(el('[data-testid="tabbar"]')).toBeNull();
   });
 });
