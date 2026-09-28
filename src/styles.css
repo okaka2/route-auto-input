@@ -863,6 +863,7 @@ button.select-all {
 
 .visited-toggle {
   min-height: var(--tap-min);
+  min-width: var(--tap-min);
   padding: 0 0.75rem;
   white-space: nowrap;
 }

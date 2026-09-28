@@ -2549,6 +2549,38 @@ describe('位置の登録', () => {
     });
   });
 
+  it('位置の測定の処理(./geo)を読み込めなければ、案内を出して何も投げない(新しい版が出た後、開いたままの古いページでチャンクが404になる場合など)', async () => {
+    vi.doMock('../src/geo', () => {
+      throw new Error('Failed to fetch dynamically imported module');
+    });
+    try {
+      const { savePatient } = await import('../src/db');
+      const { createPatient } = await import('../src/patient');
+      const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+      await savePatient(patient);
+
+      await import('../src/main');
+      await waitFor(() => expect(rows()).toHaveLength(1));
+      dismissInstallNotice();
+
+      el<HTMLButtonElement>(`[data-testid="row-menu"][data-id="${patient.id}"]`)!.click();
+      el<HTMLButtonElement>('[data-testid="dialog-location"]')!.click();
+      await waitFor(() => expect(el('[data-testid="location-measure-button"]')).not.toBeNull());
+
+      el<HTMLButtonElement>('[data-testid="location-measure-button"]')!.click();
+
+      await waitFor(() =>
+        expect(el('body')?.textContent).toContain(
+          '位置の測定を始められませんでした。小窓を閉じて開き直してください。',
+        ),
+      );
+      // 「今いる場所で登録」がもう一度測れるボタンとして残っている(閉じて開き直せる)。
+      expect(el('[data-testid="location-measure-button"]')).not.toBeNull();
+    } finally {
+      vi.doUnmock('../src/geo');
+    }
+  });
+
   it('貼り付けでも登録できる(source: paste)', async () => {
     const { savePatient, listPatients } = await import('../src/db');
     const { createPatient } = await import('../src/patient');

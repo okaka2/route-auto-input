@@ -68,6 +68,13 @@ describe('shareFile', () => {
 
     await expect(shareFile(file())).resolves.toBe('failed');
   });
+
+  it('前の共有がまだ開いている間に呼ばれた(InvalidStateError)ならcancelled(failedにすると、呼び出し側が共有シートを開いたままダウンロードしてしまう)', async () => {
+    const share = vi.fn().mockRejectedValue(new DOMException('まだ共有中', 'InvalidStateError'));
+    vi.stubGlobal('navigator', { ...window.navigator, share });
+
+    await expect(shareFile(file())).resolves.toBe('cancelled');
+  });
 });
 
 describe('downloadFile', () => {

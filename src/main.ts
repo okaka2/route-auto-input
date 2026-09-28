@@ -1392,7 +1392,28 @@ async function startMeasure(): Promise<void> {
   }
   const target: { kind: 'location'; id: string } | { kind: 'spot' } =
     dialog.kind === 'location' ? { kind: 'location', id: dialog.id } : { kind: 'spot' };
-  const { startMeasuring } = await import('./geo');
+  let startMeasuring: (typeof import('./geo'))['startMeasuring'];
+  try {
+    ({ startMeasuring } = await import('./geo'));
+  } catch {
+    // 新しい版が公開された後、開いたままの古いページでは、このチャンクが404になることがある
+    // (Minor: 段階5レビュー)。importの読み込み中にダイアログが閉じた/別の訪問先へ変わったかも
+    // しれないので、確かめてから案内を出す。
+    const current = state.dialog;
+    if (!isSameMeasuringDialog(current, target)) {
+      return;
+    }
+    setState({
+      ...state,
+      dialog: {
+        ...current,
+        phase: 'error',
+        best: null,
+        error: '位置の測定を始められませんでした。小窓を閉じて開き直してください。',
+      },
+    });
+    return;
+  }
   // importの読み込み中にダイアログが閉じた/別の訪問先へ変わったかもしれないので、確かめてから始める。
   const current = state.dialog;
   if (!isSameMeasuringDialog(current, target)) {

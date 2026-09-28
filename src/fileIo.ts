@@ -10,13 +10,16 @@ export function canShareFile(file: File): boolean {
  * 最初のawaitより前に直接呼ぶこと(iOSなどでは、ユーザー操作から間を置かずに
  * navigator.share を呼ばないと使えないため)。取りやめ(AbortError)は 'cancelled'、
  * それ以外の失敗は 'failed'(呼び出し側でダウンロードにフォールバックする)。
+ * 前の共有がまだ開いている間に呼ばれた(InvalidStateError。二重タップなど)場合も
+ * 'cancelled' にする。ここで 'failed' にすると、呼び出し側が共有シートを開いたまま
+ * ダウンロードへフォールバックしてしまう(段階5レビュー Major)。
  */
 export async function shareFile(file: File): Promise<'shared' | 'cancelled' | 'failed'> {
   try {
     await navigator.share({ files: [file] });
     return 'shared';
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
+    if (error instanceof DOMException && (error.name === 'AbortError' || error.name === 'InvalidStateError')) {
       return 'cancelled';
     }
     return 'failed';

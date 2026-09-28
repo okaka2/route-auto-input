@@ -49,6 +49,11 @@ export function createTransferFlow(ctx: AppContext): {
   // 二重押し防止(「ファイルを作る」を連打しても、ファイルを二重に作らない)。
   let sending = false;
 
+  // shareSendFileが始めた共有がまだ進行中かどうか(backupFlow.tsのsaveExportと同じ理由。
+  // 段階5レビュー: 共有シートを開いたまま連打すると、2回目のnavigator.shareが
+  // InvalidStateErrorになり、ダウンロード+doneへの移動が走ってしまっていた)。
+  let sharePending = false;
+
   // readyになったときにできたファイル。小窓(transferSend)を出している間だけ持ち、stateには
   // 入れない(backupFlow.ts の pendingFile と同じやり方)。「LINEなどで送る」「ファイルを保存」で使う。
   let readyFile: File | null = null;
@@ -324,15 +329,24 @@ export function createTransferFlow(ctx: AppContext): {
     if (dialog?.kind !== 'transferSend' || dialog.phase !== 'ready' || file === null) {
       return;
     }
+    if (sharePending) {
+      // 前の共有シートがまだ開いている間の二重タップ。無視する。
+      return;
+    }
+    sharePending = true;
     void (async () => {
-      const result = await shareFile(file);
-      if (result === 'cancelled') {
-        return;
+      try {
+        const result = await shareFile(file);
+        if (result === 'cancelled') {
+          return;
+        }
+        if (result === 'failed') {
+          downloadFile(file);
+        }
+        await finishSend(result === 'shared' ? 'shared' : 'downloaded');
+      } finally {
+        sharePending = false;
       }
-      if (result === 'failed') {
-        downloadFile(file);
-      }
-      await finishSend(result === 'shared' ? 'shared' : 'downloaded');
     })();
   }
 

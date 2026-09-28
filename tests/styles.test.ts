@@ -223,6 +223,15 @@ describe('縦に長い小窓(.sheet)は画面に収まってスクロールで�
   });
 });
 
+describe('訪問順・地図の「済」ボタン', () => {
+  it('.visited-toggle は min-height だけでなく min-width も --tap-min(44px)以上にする(測ったら42px幅だった)', () => {
+    const start = css.indexOf('.visited-toggle {');
+    expect(start, '.visited-toggle が styles.css にない').toBeGreaterThanOrEqual(0);
+    const block = blockAt(css, css.indexOf('{', start));
+    expect(block).toMatch(/min-width:\s*var\(--tap-min\)/);
+  });
+});
+
 describe('地図の画面の行(名前とボタンの折り返し)', () => {
   it('.route-stops li は flex-wrap: wrap', () => {
     const start = css.indexOf('.route-stops li {');

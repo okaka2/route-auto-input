@@ -52,6 +52,11 @@ export function createBackupFlow(
   // handleImport が実際にDBへ書き込んでいる最中かどうか(Task 8の isWorking が見る)。
   let writingImport = false;
 
+  // このsaveExportが始めた共有がまだ進行中かどうか(段階5レビュー: 共有シートを開いたまま
+  // 連打すると、2回目のnavigator.shareがInvalidStateErrorになり、ダウンロード+記録が
+  // 走ってしまっていた。進行中は2回目のタップを無視する)。
+  let sharePending = false;
+
   /**
    * DBから、書き出す中身をすべて読む。画面のstate(ctx.getState().patients など)は
    * 読み込み中や別画面で古くなっていることがあるため使わず、必ずDBから読み直す。
@@ -129,17 +134,26 @@ export function createBackupFlow(
       return;
     }
     if (dialog.canShare) {
+      if (sharePending) {
+        // 前の共有シートがまだ開いている間の二重タップ。無視する。
+        return;
+      }
+      sharePending = true;
       void (async () => {
-        const result = await shareFile(file);
-        if (result === 'cancelled') {
-          // 小窓は 'ready' のまま。記録もしない。
-          return;
+        try {
+          const result = await shareFile(file);
+          if (result === 'cancelled') {
+            // 小窓は 'ready' のまま。記録もしない。
+            return;
+          }
+          if (result === 'failed') {
+            downloadFile(file);
+          }
+          await recordBackup();
+          finishIfStillReady(result === 'shared' ? 'shared' : 'downloaded');
+        } finally {
+          sharePending = false;
         }
-        if (result === 'failed') {
-          downloadFile(file);
-        }
-        await recordBackup();
-        finishIfStillReady(result === 'shared' ? 'shared' : 'downloaded');
       })();
       return;
     }

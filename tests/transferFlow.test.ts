@@ -541,6 +541,25 @@ describe('createTransferFlow: shareSendFile/saveSendFile(readyの2段階目)', (
     expect(share).toHaveBeenCalledTimes(1);
   }, 10_000);
 
+  it('共有シートが開いている間に連打しても、navigator.shareは1回だけ・ダウンロードはしない(段階5レビュー: 2回目がInvalidStateErrorになりダウンロード+doneへ進んでしまっていた)', async () => {
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const { ctx, getDialog } = createFakeContext({ patients: [patient] });
+    const share = vi.fn(() => new Promise<void>(() => {})); // 1回目の共有をぶら下げたままにする
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+    const downloadSpy = vi.spyOn(fileIo, 'downloadFile').mockImplementation(() => {});
+    const flow = createTransferFlow(ctx);
+    await flow.openSend([patient.id]);
+    flow.updateSendDraft({ password: 'abcdefghij', passwordConfirm: 'abcdefghij' });
+    await flow.submitSend();
+    expect(getDialog()?.phase).toBe('ready');
+
+    flow.shareSendFile();
+    flow.shareSendFile();
+
+    expect(share).toHaveBeenCalledTimes(1);
+    expect(downloadSpy).not.toHaveBeenCalled();
+  }, 10_000);
+
   it('共有メニューを閉じて取りやめたら、readyのまま(もう一度押せる)', async () => {
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
     const { ctx, getDialog } = createFakeContext({ patients: [patient] });

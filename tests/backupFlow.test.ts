@@ -173,6 +173,24 @@ describe('createBackupFlow: 書き出し(handleExport → 小窓 → saveExport)
     expect(await db.getMeta('lastBackupAt')).toBe(ctx.getSettingsInfo().lastBackupAt);
   });
 
+  it('共有シートが開いている間に連打しても、navigator.shareは1回だけ・ダウンロードはしない(段階5レビュー: 2回目がInvalidStateErrorになりダウンロード+記録してしまっていた)', async () => {
+    const db = await import('../src/db');
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    await db.savePatient(patient);
+    const share = vi.fn(() => new Promise<void>(() => {})); // 1回目の共有をぶら下げたままにする
+    vi.stubGlobal('navigator', { ...window.navigator, share, canShare: () => true });
+    const downloadSpy = vi.spyOn(fileIo, 'downloadFile').mockImplementation(() => {});
+    const ctx = createFakeContext();
+    const flow = createBackupFlow(ctx);
+
+    await flow.handleExport();
+    flow.saveExport();
+    flow.saveExport();
+
+    expect(share).toHaveBeenCalledTimes(1);
+    expect(downloadSpy).not.toHaveBeenCalled();
+  });
+
   it('共有できない端末ではダウンロードして記録する(小窓はdone・downloaded)', async () => {
     const db = await import('../src/db');
     const patient = createPatient('山田 太郎', '東京都千代田区1-1');
