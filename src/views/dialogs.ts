@@ -100,7 +100,7 @@ export function renderDialog(
 
   let content: HTMLElement[];
   if (dialog.kind === 'installSteps') {
-    content = renderInstallSteps(handlers);
+    content = renderInstallSteps(state, handlers);
   } else if (dialog.kind === 'confirmDeleteSelected') {
     content = renderConfirmDeleteSelected(state.selectedIds.length, handlers);
   } else if (dialog.kind === 'similar') {
@@ -243,14 +243,16 @@ function renderConfirmDelete(patient: Patient, handlers: DialogHandlers): HTMLEl
   return [title, target, buttons];
 }
 
-function renderInstallSteps(handlers: DialogHandlers): HTMLElement[] {
+function renderInstallSteps(state: AppState, handlers: DialogHandlers): HTMLElement[] {
   const title = document.createElement('h2');
   title.id = 'dialog-title';
   title.className = 'sheet-title';
   title.textContent = 'ホーム画面に追加する';
   const list = document.createElement('ol');
   list.className = 'sheet-steps';
-  for (const step of installSteps(installPlatform())) {
+  // iOSかつ訪問先が既にあるときだけ、バックアップの書き出し・読み込みの案内を前後に足す
+  // (installSteps側でiOS以外は無視する)。0件なら書き出す物が無いので出さない。
+  for (const step of installSteps(installPlatform(), { withBackup: state.patients.length > 0 })) {
     const item = document.createElement('li');
     item.textContent = step;
     list.append(item);

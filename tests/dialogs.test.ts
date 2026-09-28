@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPatient } from '../src/patient';
 import {
   closeDialog,
@@ -529,5 +529,36 @@ describe('renderDialog: 背景', () => {
     element.querySelector<HTMLElement>('#dialog-title')!.click();
     element.querySelector<HTMLElement>('[data-testid="dialog"]')!.click();
     expect(spies.onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderDialog: ホーム画面に追加する手順', () => {
+  const IPHONE_UA =
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+  const originalUA = window.navigator.userAgent;
+
+  function stubUserAgent(value: string): void {
+    Object.defineProperty(window.navigator, 'userAgent', { value, configurable: true });
+  }
+
+  afterEach(() => {
+    stubUserAgent(originalUA);
+  });
+
+  const open = () => renderDialog({ ...base(), dialog: { kind: 'installSteps' as const } }, handlers())!;
+
+  it('iPhoneで訪問先が1件以上あれば、バックアップの書き出し・読み込みの案内も出す(5手順)', () => {
+    stubUserAgent(IPHONE_UA);
+    const items = open().querySelectorAll('li');
+    expect(items).toHaveLength(5);
+    expect(items[0]?.textContent).toContain('バックアップを書き出す');
+    expect(items[4]?.textContent).toContain('読み込む');
+  });
+
+  it('iPhoneでも訪問先が0件なら、普段どおりの3手順のまま', () => {
+    stubUserAgent(IPHONE_UA);
+    const emptyState = { ...createInitialState([]), dialog: { kind: 'installSteps' as const } };
+    const items = renderDialog(emptyState, handlers())!.querySelectorAll('li');
+    expect(items).toHaveLength(3);
   });
 });

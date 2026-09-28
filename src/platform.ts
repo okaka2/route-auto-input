@@ -36,5 +36,8 @@ export function installPlatform(): InstallPlatform {
   const ua = window.navigator.userAgent;
   if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
   if (/Android/i.test(ua)) return 'android';
+  // iPadOSのSafariは、UAだけ見るとMacと区別が付かない(「デスクトップ用サイトを表示」が
+  // 既定のため)。タッチ対応(maxTouchPoints > 0)があればiPadとみなし、iOSと同じ案内を出す。
+  if (/Macintosh/i.test(ua) && window.navigator.maxTouchPoints > 0) return 'ios';
   return 'pc';
 }

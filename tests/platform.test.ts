@@ -20,10 +20,15 @@ function stubNavigatorStandalone(value: boolean | undefined): void {
   Object.defineProperty(window.navigator, 'standalone', { value, configurable: true });
 }
 
+function stubMaxTouchPoints(value: number): void {
+  Object.defineProperty(window.navigator, 'maxTouchPoints', { value, configurable: true });
+}
+
 afterEach(() => {
   stubUserAgent(DESKTOP_UA);
   stubMatchMedia(false);
   stubNavigatorStandalone(undefined);
+  stubMaxTouchPoints(0);
 });
 
 describe('isStandaloneDisplay', () => {
@@ -69,6 +74,18 @@ describe('installPlatform', () => {
   ])('%s → %s', (ua, expected) => {
     stubUserAgent(ua);
     expect(installPlatform()).toBe(expected);
+  });
+
+  it('iPadOS(MacintoshのUAだがタッチ対応)はios扱いにする', () => {
+    stubUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15');
+    stubMaxTouchPoints(5);
+    expect(installPlatform()).toBe('ios');
+  });
+
+  it('MacintoshのUAでもタッチ非対応(0)なら普通のMacとしてpc扱い', () => {
+    stubUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15');
+    stubMaxTouchPoints(0);
+    expect(installPlatform()).toBe('pc');
   });
 });
 

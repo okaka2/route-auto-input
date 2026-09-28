@@ -435,6 +435,20 @@ describe('画面の文言(禁止語が出ない)', () => {
     );
   });
 
+  it('Safariのデータをホーム画面のアプリへ読み込む案内', () => {
+    expectClean(
+      'Safariのデータをホーム画面のアプリへ読み込む案内',
+      renderNotice({
+        testid: 'moved-data-notice',
+        text: 'Safari で使っていた場合は、書き出したバックアップのファイルを読み込むと、今までの訪問先が入ります。',
+        actions: [
+          { label: '読み込む画面へ', testid: 'notice-moved-import', primary: true, onClick: noop },
+          { label: '閉じる', testid: 'notice-moved-dismiss', onClick: noop },
+        ],
+      }).outerHTML,
+    );
+  });
+
   it('履歴: 記録なし・1件閉じている・1件開いている(名簿にない人あり)', () => {
     const historyHandlers = {
       onOpenEntry: noop,

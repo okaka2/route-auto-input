@@ -1270,6 +1270,86 @@ describe('ホーム画面への追加の案内', () => {
   });
 });
 
+describe('ホーム画面に追加した後、Safariのデータを読み込む案内(#Task9)', () => {
+  const IPHONE_UA =
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+  const originalUA = window.navigator.userAgent;
+  const scrollIntoViewSpy = vi.fn();
+  // jsdomにはElement.prototype.scrollIntoViewが無いので、テスト用に足す。
+  Element.prototype.scrollIntoView = scrollIntoViewSpy;
+
+  function stubUserAgent(value: string): void {
+    Object.defineProperty(window.navigator, 'userAgent', { value, configurable: true });
+  }
+  function stubStandalone(value: boolean | undefined): void {
+    Object.defineProperty(window.navigator, 'standalone', { value, configurable: true });
+  }
+
+  beforeEach(() => {
+    scrollIntoViewSpy.mockClear();
+  });
+
+  afterEach(() => {
+    stubUserAgent(originalUA);
+    stubStandalone(undefined);
+  });
+
+  it('iPhoneのホーム画面アプリを0件で開くと案内が出て、「読み込む画面へ」で設定が開きスクロールする', async () => {
+    stubUserAgent(IPHONE_UA);
+    stubStandalone(true);
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="moved-data-notice"]')).not.toBeNull());
+    expect(el('[data-testid="moved-data-notice"]')?.textContent).toContain('バックアップのファイルを読み込むと');
+
+    el<HTMLButtonElement>('[data-testid="notice-moved-import"]')!.click();
+
+    await waitFor(() => expect(el('[data-testid="backup-section"]')).not.toBeNull());
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: 'start' });
+  });
+
+  it('「閉じる」を押すと消え、以後は出ない', async () => {
+    stubUserAgent(IPHONE_UA);
+    stubStandalone(true);
+    await import('../src/main');
+    await waitFor(() => expect(el('[data-testid="moved-data-notice"]')).not.toBeNull());
+
+    el<HTMLButtonElement>('[data-testid="notice-moved-dismiss"]')!.click();
+    expect(el('[data-testid="moved-data-notice"]')).toBeNull();
+
+    // 別の操作で再描画されても、閉じた後は出てこない。
+    el<HTMLButtonElement>('[data-testid="new-button"]')!.click();
+    expect(el('[data-testid="moved-data-notice"]')).toBeNull();
+  });
+
+  it('1件以上あれば出さない', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    await savePatient(createPatient('場所1', '東京都1-1'));
+
+    stubUserAgent(IPHONE_UA);
+    stubStandalone(true);
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(el('[data-testid="moved-data-notice"]')).toBeNull();
+  });
+
+  it('Safari(タブ)で1件以上なら、ホーム画面追加の手順の小窓にバックアップの案内が入る', async () => {
+    const { savePatient } = await import('../src/db');
+    const { createPatient } = await import('../src/patient');
+    await savePatient(createPatient('場所1', '東京都1-1'));
+
+    stubUserAgent(IPHONE_UA);
+    stubStandalone(false);
+    await import('../src/main');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    await waitFor(() => expect(el('[data-testid="notice-install-steps"]')).not.toBeNull());
+    el<HTMLButtonElement>('[data-testid="notice-install-steps"]')!.click();
+
+    await waitFor(() => expect(el('[data-testid="dialog"]')).not.toBeNull());
+    expect(el('[data-testid="dialog"]')?.textContent).toContain('バックアップを書き出す');
+  });
+});
+
 describe('バックアップのお知らせ', () => {
   it('5件登録すると、お知らせが出て「あとで」で消える', async () => {
     await import('../src/main');

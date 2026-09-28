@@ -158,6 +158,9 @@ function labelled(text: string, input: HTMLInputElement): HTMLLabelElement {
 
 function renderBackup(info: SettingsInfo, handlers: SettingsHandlers, now: Date): HTMLElement {
   const card = section('バックアップ');
+  // ホーム画面のアプリを開いたときの案内(「読み込む画面へ」)から、この節までスクロールする
+  // 目印(main.ts)。
+  card.dataset.testid = 'backup-section';
   const last = document.createElement('p');
   last.className = 'hint';
   last.dataset.testid = 'last-backup';

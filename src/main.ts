@@ -31,13 +31,13 @@ import {
 } from './db';
 import { isShortMapsUrl, parseLocationText, pointOf } from './geoPoint';
 import { dateKey, formatHistoryDate, formatVisits, keepFromDate, lastWeekSameWeekday, restoreSelection } from './history';
-import { shouldShowInstallHint } from './installHint';
+import { shouldShowInstallHint, shouldShowMovedDataHint } from './installHint';
 import { DEFAULT_MAP_PROVIDER } from './mapProviders';
 import { openUrl } from './openRoute';
 import { checkPassword, isUnlocked, renderPasswordGate, unlock } from './passwordGate';
 import { findSimilar } from './normalize';
 import { createPatient, updatePatientFields, withLocation, withVisitInfo } from './patient';
-import { isStandaloneDisplay } from './platform';
+import { installPlatform, isStandaloneDisplay } from './platform';
 import { isStoragePersisted, requestPersistentStorage } from './protection';
 import { daysBetween, shouldRemindBackup } from './backupReminder';
 import { buildRoutePlans, DEFAULT_ROUTE_ENDS, type RouteContext, type RouteEnds } from './routePlan';
@@ -290,11 +290,18 @@ let historyEntries: HistoryEntry[] = [];
 // loadSettingsInfo() が一度でも終わったか。終わる前はlastBackupAtがnullのままなので、
 // バックアップのお知らせ(「まだバックアップがありません」)を誤って出さないためのガード。
 let settingsLoaded = false;
+// reloadPatients() が一度でも終わったか(成功・失敗とも)。終わる前は訪問先が0件のままなので、
+// Safariとホーム画面アプリでデータが分かれている案内(moved-data-notice)を誤って
+// 一瞬出さないためのガード。
+let patientsLoaded = false;
 
 // バックアップのお知らせで「あとで」を押した日時を覚えておくキー。
 const BACKUP_LATER_KEY = 'route-auto-input:backup-later';
 // ホーム画面への追加の案内で「閉じる」を押した日時を覚えておくキー。
 const INSTALL_DISMISS_KEY = 'route-auto-input:install-dismissed';
+// Safari→ホーム画面アプリのデータ移行案内で「閉じる」を押した日時を覚えておくキー
+// (7日で復活する他の案内と違い、一度閉じたら以後ずっと出さない)。
+const MOVED_DATA_DISMISS_KEY = 'route-auto-input:moved-data-dismissed';
 // 許可証の期限のお知らせで「閉じる」を押した日時を覚えておくキー。
 const PERMIT_DISMISS_KEY = 'route-auto-input:permit-dismissed';
 const PERMIT_DISMISS_DAYS = 7;
@@ -326,6 +333,42 @@ function isRecentlyDismissed(dismissedAt: string | null, now: Date): boolean {
 
 /** 一覧の上に出すお知らせ。Task 4 でホーム画面の案内を先頭に足す。 */
 function currentNotice(): Notice | null {
+  // iPhone/iPadは、Safariとホーム画面に追加したアプリでデータが別々になる。追加後のアプリを
+  // 開いて0件だったら、Safari側のバックアップを読み込む案内を他の案内より先に出す(Task 9)。
+  if (
+    shouldShowMovedDataHint({
+      platform: installPlatform(),
+      standalone: isStandaloneDisplay(),
+      patientsLoaded,
+      patientCount: state.patients.length,
+      dismissed: readLocal(MOVED_DATA_DISMISS_KEY) !== null,
+    })
+  ) {
+    return {
+      testid: 'moved-data-notice',
+      text: 'Safari で使っていた場合は、書き出したバックアップのファイルを読み込むと、今までの訪問先が入ります。',
+      actions: [
+        {
+          label: '読み込む画面へ',
+          testid: 'notice-moved-import',
+          primary: true,
+          onClick: () => {
+            setState(withScreen(state, { name: 'settings' }));
+            void loadSettingsInfo();
+            root!.querySelector('[data-testid="backup-section"]')?.scrollIntoView({ block: 'start' });
+          },
+        },
+        {
+          label: '閉じる',
+          testid: 'notice-moved-dismiss',
+          onClick: () => {
+            writeLocal(MOVED_DATA_DISMISS_KEY, new Date().toISOString());
+            render();
+          },
+        },
+      ],
+    };
+  }
   if (
     shouldShowInstallHint({
       standalone: isStandaloneDisplay(),
@@ -848,11 +891,15 @@ async function reloadPatients(message?: Message): Promise<void> {
     if (next.selectedIds.length !== state.selectedIds.length) {
       openedRoutes.clear();
     }
+    // 読み込みが(成功で)終わったことを、この後のsetState/renderが見えるように先に立てる
+    // (moved-data-notice: 0件が読み込み前の一瞬なのか、読み込んだ結果0件なのかを区別する)。
+    patientsLoaded = true;
     setState({
       ...next,
       ...(message === undefined ? {} : { message }),
     });
   } catch {
+    patientsLoaded = true;
     setState(withMessage(state, { kind: 'error', text: 'データを読み込めませんでした。' }));
   }
 }
