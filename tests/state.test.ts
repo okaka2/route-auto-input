@@ -3,6 +3,7 @@ import { MAX_SELECTION } from '../src/config';
 import { createPatient } from '../src/patient';
 import {
   clearSelection,
+  clearVisibleSelection,
   closeDialog,
   createInitialState,
   hasSelection,
@@ -229,6 +230,36 @@ describe('選択の一括操作', () => {
     state = toggleSelection(state, patients[1]!.id);
     state = clearSelection(state);
     expect(state.selectedIds).toEqual([]);
+  });
+
+  it('clearVisibleSelection: 検索中は、見えている人だけ外れ、ほかの選択は残る', () => {
+    const patients = [
+      createPatient('山田太郎', '東京都1-1'),
+      createPatient('山田花子', '東京都2-1'),
+      createPatient('佐藤次郎', '東京都3-1'),
+    ];
+    let state = createInitialState(patients);
+    state = toggleSelection(state, patients[0]!.id);
+    state = toggleSelection(state, patients[1]!.id);
+    state = toggleSelection(state, patients[2]!.id);
+    state = setSearchQuery(state, '山田');
+
+    state = clearVisibleSelection(state);
+
+    expect(state.selectedIds).toEqual([patients[2]!.id]);
+  });
+
+  it('clearVisibleSelection: 検索していなければ、全部外れて listFilter が「すべて」になる', () => {
+    const patients = makePatients(2);
+    let state = createInitialState(patients);
+    state = toggleSelection(state, patients[0]!.id);
+    state = toggleSelection(state, patients[1]!.id);
+    state = setListFilter(state, 'selected');
+
+    state = clearVisibleSelection(state);
+
+    expect(state.selectedIds).toEqual([]);
+    expect(state.listFilter).toBe('all');
   });
 });
 

@@ -144,6 +144,22 @@ export function clearSelection(state: AppState): AppState {
   return { ...state, selectedIds: [], dimmedIds: [], listFilter: 'all', message: null };
 }
 
+/**
+ * 見えている行(検索で絞り込んでいればその分だけ)だけ選択を外す。
+ * 検索していなければ、今の clearSelection と同じ(全部外し、表示を「すべて」へ)。
+ */
+export function clearVisibleSelection(state: AppState): AppState {
+  if (state.searchQuery.trim() === '') {
+    return clearSelection(state);
+  }
+  const visibleIds = new Set(visiblePatients(state).map((patient) => patient.id));
+  return {
+    ...state,
+    selectedIds: state.selectedIds.filter((id) => !visibleIds.has(id)),
+    message: null,
+  };
+}
+
 export function moveSelected(state: AppState, id: string, direction: -1 | 1): AppState {
   const index = state.selectedIds.indexOf(id);
   const target = index + direction;

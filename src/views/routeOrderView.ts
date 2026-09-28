@@ -4,6 +4,7 @@ import { selectedPatients } from '../state';
 import type { AppState, Patient } from '../types';
 import { findDuplicateAddresses } from '../validation';
 import { renderMessage, renderScreenHeader } from './common';
+import { renderNotice, type Notice } from './notice';
 
 export type RouteOrderHandlers = {
   onMove(id: string, direction: -1 | 1): void;
@@ -32,10 +33,19 @@ const END_OPTIONS: { value: RouteEnd; label: string; needsOffice: boolean }[] = 
  * 訪問順の画面。START から GOAL までを、番号つきの縦の並びで示し、▲▼で並べ替える。
  * 訪問順の自動最適化はしない。ユーザーが決めた順番のまま、地図の画面へ渡す。
  */
-export function renderRouteOrder(state: AppState, context: RouteContext, handlers: RouteOrderHandlers): HTMLElement {
+export function renderRouteOrder(
+  state: AppState,
+  context: RouteContext,
+  handlers: RouteOrderHandlers,
+  notice?: Notice | null,
+): HTMLElement {
   const container = document.createElement('div');
   container.className = 'screen';
   container.append(renderScreenHeader('訪問順を決める', { onBack: handlers.onBack }));
+
+  if (notice) {
+    container.append(renderNotice(notice));
+  }
 
   if (state.message) {
     container.append(renderMessage(state.message));

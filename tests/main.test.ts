@@ -1200,6 +1200,58 @@ describe('訪問先を選ぶ画面と下部のバー', () => {
     });
   });
 
+  describe('全解除の「元に戻す」(Task 12)', () => {
+    it('3人選んで全解除すると知らせが出て、「元に戻す」で3人・同じ順番に戻る', async () => {
+      await startWithPlaces(3);
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click(); // 全選択
+      const selectedOrder = [...document.querySelectorAll('input[data-id]')]
+        .filter((c) => (c as HTMLInputElement).checked)
+        .map((c) => (c as HTMLInputElement).dataset.id);
+
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click(); // 全解除
+
+      expect(el('[data-testid="undo-notice"]')?.textContent).toContain('選択を外しました');
+      expect(el('[data-testid="selection-bar"]')).toBeNull();
+
+      el<HTMLButtonElement>('[data-testid="undo-button"]')!.click();
+
+      expect(el('[data-testid="undo-notice"]')).toBeNull();
+      expect(el('[data-testid="selection-count"]')?.textContent).toBe('3件選択中');
+      const restoredOrder = [...document.querySelectorAll('input[data-id]')]
+        .filter((c) => (c as HTMLInputElement).checked)
+        .map((c) => (c as HTMLInputElement).dataset.id);
+      expect(restoredOrder).toEqual(selectedOrder);
+
+      // 訪問順の並びも戻っている。
+      el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+      await waitFor(() => expect(el('[data-testid="stop-row"]')).not.toBeNull());
+      const names = [...document.querySelectorAll('.stop-name')].map((e) => e.textContent);
+      expect(names).toEqual(['場所3', '場所2', '場所1']);
+    });
+
+    it('外した後に別の人を選ぶと、知らせは消える', async () => {
+      const ids = await startWithPlaces(3);
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+      expect(el('[data-testid="undo-notice"]')).not.toBeNull();
+
+      checkbox(ids[0]!).click();
+
+      expect(el('[data-testid="undo-notice"]')).toBeNull();
+    });
+
+    it('設定に移ると、知らせは消える', async () => {
+      await startWithPlaces(3);
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+      el<HTMLButtonElement>('[data-testid="select-all-button"]')!.click();
+      expect(el('[data-testid="undo-notice"]')).not.toBeNull();
+
+      el<HTMLButtonElement>('[data-testid="settings-button"]')!.click();
+
+      expect(el('[data-testid="undo-notice"]')).toBeNull();
+    });
+  });
+
   describe('選択した複数件の一括削除', () => {
     it('選択バーの「⋯」→「削除」を押しても、すぐには削除せず、件数つきの確認ダイアログが出る', async () => {
       await startWithPlaces(2);
@@ -2189,6 +2241,104 @@ describe('履歴から選ぶ', () => {
     );
     expect(el('[data-testid="history-row"]')).not.toBeNull();
     expect(el('[data-testid="stop-row"]')).toBeNull();
+  });
+
+  describe('選び直しの「元に戻す」(Task 12)', () => {
+    it('選択があるときに履歴から選び直すと「選択を置き換えました」の知らせが出て、「元に戻す」で前の選択・順番・出発帰着・開いたルートの印が戻る', async () => {
+      const { createPatient } = await import('../src/patient');
+      const patientA = createPatient('山田 太郎', '東京都千代田区1-1');
+      const patientB = createPatient('佐藤 花子', '大阪府大阪市2-2');
+      const patientC = createPatient('鈴木 次郎', '東京都新宿区3-3');
+      const db = await import('../src/db');
+      await db.savePatient(patientA);
+      await db.savePatient(patientB);
+      await db.savePatient(patientC);
+      await db.putHistory({
+        date: '2026-09-18',
+        ids: [patientC.id],
+        routeEnds: { start: 'current', end: 'last' },
+        visited: {},
+      });
+      await db.closeDbForTest();
+
+      await import('../src/main');
+      await waitFor(() => expect(rows()).toHaveLength(3));
+      dismissInstallNotice();
+
+      // 山田→佐藤の順に選び、訪問順の画面で地図を開いて、ルートに開いた印をつける。
+      el<HTMLInputElement>(`input[data-id="${patientA.id}"]`)!.click();
+      el<HTMLInputElement>(`input[data-id="${patientB.id}"]`)!.click();
+      el<HTMLButtonElement>('[data-testid="next-button"]')!.click();
+      await waitFor(() => expect(el('[data-testid="open-map-button"]')).not.toBeNull());
+      expect(el<HTMLSelectElement>('[data-testid="route-start-select"]')!.value).toBe('first');
+      el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+      await waitFor(() => expect(el('[data-testid="route-card"]')).not.toBeNull());
+      el<HTMLButtonElement>('[data-testid="open-route"][data-id="0"]')!.click();
+      await waitFor(() => expect(el('[data-testid="route-card"]')?.getAttribute('data-state')).toBe('done'));
+      // 「地図を開く」で今日の記録もできるので、その書き込みが終わるまで待つ
+      // (待たないと、次のbeforeEachのdeleteDBと競合することがある)。
+      await waitFor(async () => expect((await db.listHistory()).length).toBe(2));
+
+      // 一覧へ戻り、履歴から選び直す(鈴木さんだけの記録に置き換わる。今日の記録(山田・佐藤)ではない方を選ぶ)。
+      el<HTMLButtonElement>('[data-testid="tab-list"]')!.click();
+      el<HTMLButtonElement>('[data-testid="history-button"]')!.click();
+      await waitFor(() => expect(document.querySelectorAll('[data-testid="history-row"]')).toHaveLength(2));
+      const targetRow = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="history-row"]')].find((row) =>
+        row.textContent?.includes('1人'),
+      )!;
+      targetRow.click();
+      el<HTMLButtonElement>('[data-testid="history-pick"]')!.click();
+
+      await waitFor(() => expect(el('[data-testid="stop-row"]')).not.toBeNull());
+      expect(document.querySelectorAll('[data-testid="stop-row"]')).toHaveLength(1);
+      expect(el('[data-testid="undo-notice"]')?.textContent).toContain('選択を置き換えました');
+
+      el<HTMLButtonElement>('[data-testid="undo-button"]')!.click();
+
+      // 画面は訪問順のまま、選択・順番が戻る。
+      expect(el('[data-testid="undo-notice"]')).toBeNull();
+      await waitFor(() => expect(document.querySelectorAll('[data-testid="stop-row"]')).toHaveLength(2));
+      const names = [...document.querySelectorAll('.stop-name')].map((e) => e.textContent);
+      expect(names).toEqual(['山田 太郎', '佐藤 花子']);
+      // 出発・帰着も戻る。
+      expect(el<HTMLSelectElement>('[data-testid="route-start-select"]')!.value).toBe('first');
+      expect(el<HTMLSelectElement>('[data-testid="route-end-select"]')!.value).toBe('last');
+      await waitFor(async () => expect(await db.getMeta('routeEnds')).toEqual({ start: 'first', end: 'last' }));
+
+      // 開いたルートの印(「済」ではなく「もう一度開く」表示)も戻る。
+      const historyRecorded = await armHistoryRecordWait();
+      el<HTMLButtonElement>('[data-testid="open-map-button"]')!.click();
+      await waitFor(() => expect(el('[data-testid="route-card"]')?.getAttribute('data-state')).toBe('done'));
+      // 「地図を開く」で今日の記録もできるので、次のテストのbeforeEach(deleteDB)と
+      // 競合しないよう、その書き込みが終わるまで待つ。
+      await historyRecorded();
+    });
+
+    it('選択が無いときに履歴から選ぶと、知らせは出ない', async () => {
+      const { createPatient } = await import('../src/patient');
+      const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+      const db = await import('../src/db');
+      await db.savePatient(patient);
+      await db.putHistory({
+        date: '2026-09-18',
+        ids: [patient.id],
+        routeEnds: { start: 'first', end: 'last' },
+        visited: {},
+      });
+      await db.closeDbForTest();
+
+      await import('../src/main');
+      await waitFor(() => expect(rows()).toHaveLength(1));
+      dismissInstallNotice();
+
+      el<HTMLButtonElement>('[data-testid="history-button"]')!.click();
+      await waitFor(() => expect(el('[data-testid="history-row"]')).not.toBeNull());
+      el<HTMLButtonElement>('[data-testid="history-row"]')!.click();
+      el<HTMLButtonElement>('[data-testid="history-pick"]')!.click();
+
+      await waitFor(() => expect(el('[data-testid="stop-row"]')).not.toBeNull());
+      expect(el('[data-testid="undo-notice"]')).toBeNull();
+    });
   });
 });
 

@@ -279,3 +279,27 @@ describe('出発・帰着の選択', () => {
     expect(element.textContent).toContain('訪問先は1ルート9件まで');
   });
 });
+
+describe('renderRouteOrder: 選択の「元に戻す」の知らせ(Task 12)', () => {
+  it('渡すと、見出しの下に出る', () => {
+    const onClick = vi.fn();
+    const element = renderRouteOrder(stateWithSelection(2), context(), handlers(), {
+      testid: 'undo-notice',
+      text: '選択を置き換えました',
+      actions: [{ label: '元に戻す', testid: 'undo-button', primary: true, onClick }],
+    });
+    const header = element.querySelector('.screen-header');
+    const notice = q(element, 'undo-notice');
+    expect(notice.textContent).toContain('選択を置き換えました');
+    // 見出し(header)のすぐ下(直後の要素)に出る。
+    expect(header?.nextElementSibling).toBe(notice);
+
+    q<HTMLButtonElement>(element, 'undo-button').click();
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('渡さなければ出さない', () => {
+    const element = renderRouteOrder(stateWithSelection(2), context(), handlers());
+    expect(element.querySelector('[data-testid="undo-notice"]')).toBeNull();
+  });
+});

@@ -47,7 +47,7 @@ import { SPOT_KINDS } from './spots';
 import { createReloadGate, registerServiceWorkerUpdates } from './swUpdate';
 import { applyTheme, initTheme, loadThemeSetting, saveThemeSetting } from './theme';
 import {
-  clearSelection,
+  clearVisibleSelection,
   closeDialog,
   createInitialState,
   hasSelection,
@@ -77,6 +77,7 @@ import type {
   Message,
   Patient,
   PatientFormDraft,
+  Screen,
   SortOrder,
   Spot,
   SpotDialog,
@@ -188,6 +189,16 @@ let state: AppState = restoredSession
 const openedRoutes = new Map<number, string>(
   (restoredSession?.opened ?? []).map((route) => [route.index, route.at] as const),
 );
+
+// 「全解除」「先週と同じ」「履歴から選ぶ」の直後だけ持つ、元に戻すための記録(Task 12)。
+// openedRoutesと同様にAppStateの外で持つ。次に選択を変える・画面を移るとsetStateの中で消す。
+type SelectionUndo = {
+  text: '選択を外しました' | '選択を置き換えました';
+  before: { selectedIds: string[]; opened: [number, string][]; routeEnds: RouteEnds };
+  after: readonly string[];
+  screen: Screen['name'];
+};
+let selectionUndo: SelectionUndo | null = null;
 
 // 保存に失敗した直後の入力値。入力内容を画面に残すため(spec §8)、
 // openedRoutesと同様にAppStateの外で保持する。
@@ -473,6 +484,37 @@ function currentNotice(): Notice | null {
   return null;
 }
 
+/**
+ * 「全解除」「先週と同じ」「履歴から選ぶ」の直後に出す、「元に戻す」つきの知らせ(Task 12)。
+ * 一覧では、このお知らせを currentNotice() より先に出す(同時には出さない。同じ1箇所に出す)。
+ */
+function selectionUndoNotice(): Notice | null {
+  if (!selectionUndo) {
+    return null;
+  }
+  return {
+    testid: 'undo-notice',
+    text: selectionUndo.text,
+    actions: [{ label: '元に戻す', testid: 'undo-button', primary: true, onClick: undoSelection }],
+  };
+}
+
+/** 知らせの「元に戻す」。選択・順番・出発帰着・開いたルートの印を、操作の直前へ戻す。画面は移らない。 */
+function undoSelection(): void {
+  if (!selectionUndo) {
+    return;
+  }
+  const { before } = selectionUndo;
+  openedRoutes.clear();
+  for (const [index, at] of before.opened) {
+    openedRoutes.set(index, at);
+  }
+  routeContext = { ...routeContext, ends: before.routeEnds };
+  void setMeta('routeEnds', before.routeEnds).catch(() => undefined);
+  setState({ ...state, selectedIds: before.selectedIds, dimmedIds: [], message: null });
+  selectionUndo = null;
+}
+
 /** ブラウザに「このサイトのデータは消さないで」と一度だけ頼む(Task 3)。 */
 function requestProtectionOnce(): void {
   if (persistRequested) {
@@ -659,10 +701,20 @@ function pickHistory(date: string): void {
     setState(withMessage(state, { kind: 'error', text: '記録の訪問先は、すべて名簿にないため選べませんでした。' }));
     return;
   }
+  // 置き換える前の選択が1件以上あれば、元に戻せるよう先に記録しておく(Task 12)。
+  const hadSelection = state.selectedIds.length > 0;
+  const before = {
+    selectedIds: state.selectedIds,
+    opened: [...openedRoutes] as [number, string][],
+    routeEnds: routeContext.ends,
+  };
   routeContext = { ...routeContext, ends: entry.routeEnds };
   void setMeta('routeEnds', entry.routeEnds).catch(() => undefined);
   openedRoutes.clear();
   const next = withScreen({ ...state, selectedIds: ids }, { name: 'order' });
+  if (hadSelection) {
+    selectionUndo = { text: '選択を置き換えました', before, after: next.selectedIds, screen: next.screen.name };
+  }
   setState(
     withMessage(
       next,
@@ -772,6 +824,10 @@ function setState(next: AppState, options?: { render?: boolean }): void {
   const previousDialog = state.dialog;
   const previousScreen = state.screen;
   state = next;
+  // 選択の「元に戻す」の記録(Task 12)は、次に選択を変える・画面を移るとここで消える。
+  if (selectionUndo && (next.selectedIds !== selectionUndo.after || next.screen.name !== selectionUndo.screen)) {
+    selectionUndo = null;
+  }
   // 受け取りのダイアログが閉じる/別のダイアログに変わるなら、復号した中身(transferFlowの中に
   // だけ持っている)をここ一箇所で捨てる。途中で閉じて読み込み直しても、前の続きから始めない。
   if (previousDialog?.kind === 'transferReceive' && next.dialog?.kind !== 'transferReceive') {
@@ -1116,11 +1172,29 @@ function handleSortChange(order: SortOrder): void {
   setState(setSortOrder(state, order));
 }
 
-/** 一覧の「全選択」/「全解除」。今どちらの表示かは選択の内容から決まるので、ここでも同じ判定をする。 */
+/**
+ * 一覧の「全選択」/「全解除」。今どちらの表示かは選択の内容から決まるので、ここでも同じ判定をする。
+ * 「全解除」は、見えている行だけを外す(clearVisibleSelection、Task 12)。外す前が0件なら
+ * (実際には起きないが、念のため)元に戻す知らせは出さない。
+ */
 function handleToggleSelectAll(): void {
   const visible = visiblePatients(state);
   const allSelected = visible.length > 0 && visible.every((patient) => state.selectedIds.includes(patient.id));
-  setState(allSelected ? clearSelection(state) : selectAllVisible(state));
+  if (!allSelected) {
+    setState(selectAllVisible(state));
+    return;
+  }
+  const hadSelection = state.selectedIds.length > 0;
+  const before = {
+    selectedIds: state.selectedIds,
+    opened: [...openedRoutes] as [number, string][],
+    routeEnds: routeContext.ends,
+  };
+  const next = clearVisibleSelection(state);
+  if (hadSelection) {
+    selectionUndo = { text: '選択を外しました', before, after: next.selectedIds, screen: next.screen.name };
+  }
+  setState(next);
 }
 
 /** 選択バーの「⋯」の小窓の「削除」。まだ削除しない(確認のダイアログへ進む)。 */
@@ -1740,7 +1814,7 @@ function renderScreen(): HTMLElement {
           const s = lastWeekShortcut();
           if (s) pickHistory(s.date);
         },
-      }, currentNotice(), lastWeekShortcut());
+      }, selectionUndoNotice() ?? currentNotice(), lastWeekShortcut());
     case 'form':
       return renderPatientForm(
         currentEditingPatient(),
@@ -1788,7 +1862,7 @@ function renderScreen(): HTMLElement {
         onEndsChange: (ends) => {
           void handleEndsChange(ends);
         },
-      });
+      }, selectionUndoNotice());
     case 'map':
       return renderRouteMap(
         state,

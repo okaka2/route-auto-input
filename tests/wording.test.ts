@@ -456,6 +456,34 @@ describe('画面の文言(禁止語が出ない)', () => {
     );
   });
 
+  it('選択の「元に戻す」の知らせ(全解除・先週と同じ・履歴から選ぶ)', () => {
+    expectClean(
+      '選択の元に戻す(全解除)',
+      renderNotice({
+        testid: 'undo-notice',
+        text: '選択を外しました',
+        actions: [{ label: '元に戻す', testid: 'undo-button', primary: true, onClick: noop }],
+      }).outerHTML,
+    );
+    expectClean(
+      '選択の元に戻す(置き換え)',
+      renderNotice({
+        testid: 'undo-notice',
+        text: '選択を置き換えました',
+        actions: [{ label: '元に戻す', testid: 'undo-button', primary: true, onClick: noop }],
+      }).outerHTML,
+    );
+    const handlers = { onMove: noop, onOpenStopMenu: noop, onAddStops: noop, onOpenMap: noop, onBack: noop, onEndsChange: noop };
+    expectClean(
+      '訪問順(元に戻すの知らせつき)',
+      renderRouteOrder(selected(places(2)), noOfficeContext, handlers, {
+        testid: 'undo-notice',
+        text: '選択を置き換えました',
+        actions: [{ label: '元に戻す', testid: 'undo-button', primary: true, onClick: noop }],
+      }).outerHTML,
+    );
+  });
+
   it('履歴: 記録なし・1件閉じている・1件開いている(名簿にない人あり)', () => {
     const historyHandlers = {
       onOpenEntry: noop,
