@@ -604,6 +604,17 @@ describe('インポートの確認(cancel/confirm)', () => {
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
   }
 
+  it('ファイルを選ばずに「読み込む」を押すと、「ファイルを選んでください。」と知らせる', async () => {
+    await seedOnePatientAndOpenSettings();
+
+    el<HTMLButtonElement>('[data-testid="import-button"]')!.click();
+
+    expect(el('.message')?.textContent).toBe('ファイルを選んでください。');
+
+    el<HTMLButtonElement>('[data-testid="back-button"]')!.click();
+    expect(rows()).toHaveLength(1);
+  });
+
   it('確認でキャンセルすると取り込まれない', async () => {
     await seedOnePatientAndOpenSettings();
     attachBackupFile();

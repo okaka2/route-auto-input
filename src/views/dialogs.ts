@@ -301,7 +301,13 @@ function renderSimilar(
   ];
   for (const entry of entries) {
     const item = document.createElement('li');
-    item.append(actionButton(entry.label, entry.testid, entry.onClick));
+    const button = actionButton(entry.label, entry.testid, entry.onClick);
+    if (entry.testid === 'dialog-cancel') {
+      // 初期フォーカスは「戻って直す」に置く。「そのまま登録」を既定にすると、
+      // Enterキーを続けて押したときに重複登録してしまうため(先頭のボタンほど安全ではない)。
+      button.dataset.autofocus = '';
+    }
+    item.append(button);
     actions.append(item);
   }
   return [title, list, actions];

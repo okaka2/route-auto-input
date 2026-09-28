@@ -2040,6 +2040,10 @@ function renderScreen(): HTMLElement {
           settingsInfo = { ...settingsInfo, includePhotos: value };
         },
         onImport: (file, mode) => {
+          if (!file) {
+            setState(withMessage(state, { kind: 'error', text: 'ファイルを選んでください。' }));
+            return;
+          }
           // 取り込みの書き込み中はisSafeToReloadがfalseになる(backupFlowInstance.isWorking())。
           // 終わったら、待たせていた読み直しがあれば行う(Task 8)。
           void handleImportClick(file, mode).finally(() => reloadGate.check());

@@ -131,16 +131,20 @@ export function renderPatientForm(
     renderVisitInfoSection(parkingSelect, permitField, noteInput, patient, photos, handlers, currentValues),
   );
 
+  // 下部の保存ボタン。見出しの「保存」(テキストのリンク)は押しづらいため、
+  // フォームの下にも押しやすい大きさの保存ボタンを出す(新規登録・編集とも)。
+  // ヘッダーの保存ボタンと同じ handlers.onSave を呼ぶだけで、同じ名前/住所の確認などのロジックは重複させない。
+  const actions = document.createElement('div');
+  actions.className = 'form-actions';
+  const bottomSave = button('form-save-button', '保存', 'primary', () => handlers.onSave(currentValues()));
+  actions.append(bottomSave);
   if (patient === null) {
-    const actions = document.createElement('div');
-    actions.className = 'form-actions';
-    const save = button('form-save-button', '保存', 'primary', () => handlers.onSave(currentValues()));
     const cont = button('save-continue-button', '保存して続けて登録', '', () =>
       handlers.onSaveAndContinue(currentValues()),
     );
-    actions.append(save, cont);
-    container.append(actions);
+    actions.append(cont);
   }
+  container.append(actions);
 
   return container;
 }
@@ -267,7 +271,8 @@ function renderPhotoAdd(handlers: PatientFormHandlers, currentValues: () => Pati
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
-  input.setAttribute('capture', 'environment');
+  // capture属性を付けない: 付けると端末によってはカメラ起動だけになり、
+  // フォトライブラリ/アルバムから選べなくなるため(iOS/Androidとも「写真を撮る」「アルバムから選ぶ」の両方を出す)。
   input.className = 'visually-hidden';
   input.dataset.testid = 'photo-input';
   input.addEventListener('change', () => {

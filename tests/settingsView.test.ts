@@ -129,11 +129,11 @@ describe('renderSettings: 書き出し', () => {
 });
 
 describe('renderSettings: 読み込み', () => {
-  it('ファイル未選択でインポートを押しても、何も起きない', () => {
+  it('ファイル未選択でインポートを押すと、onImport(null, ...)が呼ばれる(案内は呼び出し側で出す)', () => {
     const spies = handlers();
     const element = renderSettings(createInitialState([]), info(), spies);
     q<HTMLButtonElement>(element, 'import-button').click();
-    expect(spies.onImport).not.toHaveBeenCalled();
+    expect(spies.onImport).toHaveBeenCalledWith(null, 'replace');
   });
 
   it('既定では、今のデータを消して入れ替える(replace)モードでインポートする', () => {

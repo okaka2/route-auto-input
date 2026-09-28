@@ -42,7 +42,8 @@ export type SettingsHandlers = {
   onExport(includePhotos: boolean): void;
   /** 「写真も含める」チェックの変更のたび呼ばれる。再描画はしない(Minor 7)。 */
   onIncludePhotosChange(value: boolean): void;
-  onImport(file: File, mode: 'replace' | 'merge'): void;
+  /** ファイルを選ばずに「読み込む」を押したときは file が null(呼び出し側で案内を出す)。 */
+  onImport(file: File | null, mode: 'replace' | 'merge'): void;
   onThemeChange(setting: ThemeSetting): void;
   onBack(): void;
   onSaveOffice(name: string, address: string): void;
@@ -207,10 +208,8 @@ function renderBackup(info: SettingsInfo, handlers: SettingsHandlers, now: Date)
   transferNote.dataset.testid = 'import-transfer-note';
   transferNote.textContent = '引き継ぎのファイル(.txt)もここから読み込めます。そのときは今のデータに追加します。';
   const importButton = button('import-button', '読み込む', 'block', () => {
-    const file = fileInput.files?.[0];
-    if (file) {
-      handlers.onImport(file, mergeRadio.input.checked ? 'merge' : 'replace');
-    }
+    const file = fileInput.files?.[0] ?? null;
+    handlers.onImport(file, mergeRadio.input.checked ? 'merge' : 'replace');
   });
   card.append(last, note, ...(includePhotosLabel ? [includePhotosLabel] : []), exportButton, fileInput, modes, transferNote, importButton);
   return card;

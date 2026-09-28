@@ -125,6 +125,29 @@ describe('renderPatientForm: 保存とキャンセル', () => {
     ).toBeNull();
   });
 
+  it('フォームの下にも保存ボタンがあり(新規)、押すとヘッダーの保存と同じ onSave が呼ばれる', () => {
+    const spies = handlers();
+    const element = renderPatientForm(null, null, null, spies);
+    nameInput(element).value = '鈴木 花子';
+    addressInput(element).value = '大阪市北区2-2';
+    q<HTMLButtonElement>(element, 'form-save-button').click();
+    expect(spies.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ name: '鈴木 花子', address: '大阪市北区2-2' }),
+    );
+  });
+
+  it('フォームの下にも保存ボタンがあり(編集)、押すとヘッダーの保存と同じ onSave が呼ばれる', () => {
+    const spies = handlers();
+    const patient = createPatient('山田 太郎', '東京都千代田区1-1');
+    const element = renderPatientForm(patient, null, null, spies);
+    const bottomSave = q<HTMLButtonElement>(element, 'form-save-button');
+    expect(bottomSave.textContent).toBe('保存');
+    bottomSave.click();
+    expect(spies.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ name: '山田 太郎', address: '東京都千代田区1-1' }),
+    );
+  });
+
   it('キャンセルは、入力中の値を渡す', () => {
     const spies = handlers();
     const element = renderPatientForm(null, null, null, spies);
@@ -351,7 +374,8 @@ describe('renderPatientForm: 写真', () => {
     const input = element.querySelector<HTMLInputElement>('[data-testid="photo-input"]')!;
     expect(input).not.toBeNull();
     expect(input.accept).toBe('image/*');
-    expect(input.getAttribute('capture')).toBe('environment');
+    // capture属性は付けない: 付けるとカメラ起動だけに絞られ、フォトライブラリ/アルバムから選べなくなるため。
+    expect(input.hasAttribute('capture')).toBe(false);
     const file = new File(['x'], 'photo.jpg', { type: 'image/jpeg' });
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
     input.dispatchEvent(new Event('change'));

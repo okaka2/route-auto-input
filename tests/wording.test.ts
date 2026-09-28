@@ -419,6 +419,26 @@ describe('画面の文言(禁止語が出ない)', () => {
         settingsHandlers,
       ).outerHTML,
     );
+    expectClean(
+      '設定(ファイル未選択で読み込みを押したときの案内)',
+      renderSettings(
+        { ...createInitialState([]), message: { kind: 'error', text: 'ファイルを選んでください。' } },
+        {
+          lastBackupAt: null,
+          persisted: null,
+          theme: 'auto',
+          office: null,
+          spots: [],
+          photoBytes: 0,
+          includePhotos: true,
+          hasSharedSecret: false,
+          sharedSecretShort: false,
+          sharedSecretDraft: '',
+          sharedSecretEditing: false,
+        },
+        settingsHandlers,
+      ).outerHTML,
+    );
     expectClean('タブ', renderTabBar('list', true, { onSelect: noop }).outerHTML);
     expectClean(
       '選択バー',

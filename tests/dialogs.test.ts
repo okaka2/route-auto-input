@@ -484,6 +484,23 @@ describe('renderDialog: 同じ人の知らせ', () => {
     element.querySelector<HTMLButtonElement>('[data-testid="dialog-cancel"]')!.click();
     expect(spies.onClose).toHaveBeenCalled();
   });
+
+  it('初期フォーカスは「戻って直す」に置く(「そのまま登録」だとEnterで重複登録してしまうため)', () => {
+    const existing = createPatient('山田 太郎', '東京都1-2-3');
+    const state = {
+      ...createInitialState([existing]),
+      dialog: {
+        kind: 'similar' as const,
+        input: { name: '山田太郎', address: '大阪府', phone: '', parkingType: '' as const, permitExpires: '', note: '' },
+        matchIds: [existing.id],
+        continueAfter: false,
+      },
+    };
+    const element = renderDialog(state, handlers())!;
+    const cancelButton = element.querySelector<HTMLButtonElement>('[data-testid="dialog-cancel"]')!;
+    expect(cancelButton.dataset.autofocus).toBe('');
+    expect(element.querySelector<HTMLButtonElement>('[data-testid="dialog-save-anyway"]')!.dataset.autofocus).toBeUndefined();
+  });
 });
 
 describe('renderDialog: 位置の登録ダイアログ', () => {
